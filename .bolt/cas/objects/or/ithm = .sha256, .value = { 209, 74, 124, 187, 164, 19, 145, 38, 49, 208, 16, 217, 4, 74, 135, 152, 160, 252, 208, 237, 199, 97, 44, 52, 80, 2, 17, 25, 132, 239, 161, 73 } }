@@ -1,0 +1,7 @@
+{
+  "entrypoint": "/docker-entrypoint.sh",
+  "cmd": "nginx -g 'daemon off;'",
+  "env": ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"],
+  "working_dir": "/",
+  "user": "root"
+}

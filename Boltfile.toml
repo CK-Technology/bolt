@@ -1,0 +1,41 @@
+project = "demo"
+
+# Advanced QUIC Networking Configuration
+[quic_fabric]
+enabled = true
+node_id = "bolt-demo-node"
+bind_address = "127.0.0.1"
+bind_port = 4433
+encryption = true
+service_discovery = true
+
+# Internal DNS Configuration
+[dns_config]
+enabled = true
+port = 5353
+domain = "demo.bolt.local"
+
+[services.web]
+image = "nginx:latest"
+ports = ["80:80"]
+# Service will be available at web.demo.bolt.local via Bolt DNS
+# volumes = ["./site:/usr/share/nginx/html"]
+
+[services.api]
+capsule = "nodejs"
+ports = ["3000:3000"] 
+# Service will connect to db via encrypted QUIC
+# env.DATABASE_URL = "quic://db.demo.bolt.local:5432"
+
+[services.db]
+capsule = "postgres"
+ports = ["5432:5432"]
+# Service will be auto-discovered via Bolt DNS
+# encryption handled automatically by QUIC fabric
+
+# [services.db.storage]
+# size = "5Gi"
+
+# [services.db.auth]
+# user = "demo"
+# password = "secret"
