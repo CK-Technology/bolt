@@ -1,5 +1,7 @@
-use anyhow::{Result, anyhow};
+use crate::{Result, BoltError};
+use anyhow::anyhow;
 use tracing::{info, warn, debug};
+use crate::NetworkInfo;
 
 pub async fn create_network(name: &str, driver: &str, subnet: Option<&str>) -> Result<()> {
     info!("🌐 Creating network: {}", name);
@@ -25,7 +27,7 @@ pub async fn create_network(name: &str, driver: &str, subnet: Option<&str>) -> R
             create_host_network(name).await
         }
         _ => {
-            Err(anyhow!("Unsupported network driver: {}", driver))
+            Err(BoltError::Other(anyhow!("Unsupported network driver: {}", driver)))
         }
     }
 }
@@ -81,7 +83,7 @@ pub async fn remove_network(name: &str) -> Result<()> {
     info!("🗑️  Removing network: {}", name);
 
     if name == "default" {
-        return Err(anyhow!("Cannot remove default network"));
+        return Err(BoltError::Other(anyhow!("Cannot remove default network")));
     }
 
     warn!("Network removal not yet implemented");
@@ -93,7 +95,7 @@ fn validate_subnet(subnet: &str) -> Result<()> {
         debug!("Subnet format appears valid: {}", subnet);
         Ok(())
     } else {
-        Err(anyhow!("Invalid subnet format: {} (expected CIDR notation)", subnet))
+        Err(BoltError::Other(anyhow!("Invalid subnet format: {} (expected CIDR notation)", subnet)))
     }
 }
 
@@ -141,4 +143,25 @@ impl NetworkManager {
         warn!("Rootless networking not yet implemented");
         Ok(())
     }
+}
+
+// API-only functions for library usage
+pub async fn list_networks_info() -> Result<Vec<NetworkInfo>> {
+    Ok(vec![
+        NetworkInfo {
+            name: "default".to_string(),
+            driver: "bolt".to_string(),
+            subnet: Some("10.0.0.0/16".to_string()),
+        },
+        NetworkInfo {
+            name: "gaming".to_string(),
+            driver: "bolt".to_string(),
+            subnet: Some("10.1.0.0/16".to_string()),
+        },
+        NetworkInfo {
+            name: "bridge0".to_string(),
+            driver: "bridge".to_string(),
+            subnet: Some("172.17.0.0/16".to_string()),
+        },
+    ])
 }

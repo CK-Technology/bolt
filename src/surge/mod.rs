@@ -1,19 +1,22 @@
-use anyhow::{Result, anyhow};
+use crate::{Result, BoltError};
+use anyhow::anyhow;
 use tracing::{info, warn, debug, error};
-use crate::config::BoltFile;
+use crate::config::{BoltFile, BoltConfig};
+
+pub mod status_api;
 
 pub async fn up(
-    config_path: &str,
+    config: &BoltConfig,
     services: &[String],
     detach: bool,
     force_recreate: bool,
 ) -> Result<()> {
     info!("🚀 Surge orchestration starting up...");
 
-    let boltfile = BoltFile::load(config_path)
+    let boltfile = config.load_boltfile()
         .map_err(|e| {
             error!("Failed to load Boltfile: {}", e);
-            anyhow!("Cannot load Boltfile at {}: {}", config_path, e)
+            BoltError::Other(anyhow!("Cannot load Boltfile at {:?}: {}", config.boltfile_path, e))
         })?;
 
     info!("📦 Project: {}", boltfile.project);
@@ -57,14 +60,15 @@ pub async fn up(
     Ok(())
 }
 
+
 pub async fn down(
-    config_path: &str,
+    config: &BoltConfig,
     services: &[String],
     remove_volumes: bool,
 ) -> Result<()> {
     info!("🛑 Surge orchestration shutting down...");
 
-    let boltfile = BoltFile::load(config_path)?;
+    let boltfile = config.load_boltfile()?;
     info!("📦 Project: {}", boltfile.project);
 
     let target_services = if services.is_empty() {
@@ -84,10 +88,11 @@ pub async fn down(
     Ok(())
 }
 
-pub async fn status(config_path: &str) -> Result<()> {
+
+pub async fn status(config: &BoltConfig) -> Result<()> {
     info!("📊 Checking surge status...");
 
-    let boltfile = BoltFile::load(config_path)?;
+    let boltfile = config.load_boltfile()?;
 
     println!("Project: {}", boltfile.project);
     println!();
@@ -105,13 +110,14 @@ pub async fn status(config_path: &str) -> Result<()> {
     Ok(())
 }
 
+
 pub async fn logs(
-    config_path: &str,
+    config: &BoltConfig,
     service: Option<&str>,
     follow: bool,
     tail: Option<usize>,
 ) -> Result<()> {
-    let boltfile = BoltFile::load(config_path)?;
+    let boltfile = config.load_boltfile()?;
 
     match service {
         Some(service_name) => {
@@ -127,10 +133,10 @@ pub async fn logs(
     Ok(())
 }
 
-pub async fn scale(config_path: &str, services: &[String]) -> Result<()> {
+pub async fn scale(config: &BoltConfig, services: &[String]) -> Result<()> {
     info!("📈 Scaling services...");
 
-    let boltfile = BoltFile::load(config_path)?;
+    let boltfile = config.load_boltfile()?;
 
     for service_spec in services {
         let parts: Vec<&str> = service_spec.split('=').collect();
@@ -154,6 +160,7 @@ pub async fn scale(config_path: &str, services: &[String]) -> Result<()> {
 
     Ok(())
 }
+
 
 async fn setup_gaming_service(service_name: &str, gaming_config: &crate::config::GamingConfig) -> Result<()> {
     info!("🎮 Setting up gaming optimizations for {}", service_name);
@@ -194,3 +201,5 @@ async fn setup_gaming_service(service_name: &str, gaming_config: &crate::config:
 
     Ok(())
 }
+
+// API-only functions for library usage

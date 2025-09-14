@@ -2,10 +2,20 @@
 name = "bolt"
 version = "0.1.0"
 edition = "2024"
-description = "Next-generation container runtime for Linux gaming and development"
+description = "Next-generation Rust container runtime with gaming optimizations, GPU passthrough, and QUIC networking"
 license = "MIT"
-authors = ["ghostkellz"]
-repository = "https://github.com/ghostkellz/bolt"
+authors = ["ghostkellz <ghostkellz@proton.me>"]
+repository = "https://github.com/CK-Technology/bolt"
+homepage = "https://github.com/CK-Technology/bolt"
+documentation = "https://github.com/CK-Technology/bolt#api"
+readme = "README.md"
+keywords = ["containers", "gaming", "gpu", "quic", "orchestration"]
+categories = ["virtualization", "game-development", "network-programming"]
+rust-version = "1.85"
+
+[lib]
+name = "bolt"
+path = "src/lib.rs"
 
 [[bin]]
 name = "bolt"
@@ -28,7 +38,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # === PHASE 1: OCI RUNTIME & CONTAINERS ===
 # OCI runtime components
-oci-spec = "0.6"
+oci-spec = { version = "0.6", optional = true }
 # Container runtime components
 # libcontainer = "0.3"  # Not available, use alternatives
 # oci-distribution = "0.10"  # Not available, implement custom
@@ -49,8 +59,8 @@ memmap2 = "0.9"
 
 # === PHASE 3: QUIC NETWORKING ===
 # QUIC implementation
-quinn = "0.10"
-rustls = { version = "0.21", features = ["dangerous_configuration"] }
+quinn = { version = "0.10", optional = true }
+rustls = { version = "0.21", features = ["dangerous_configuration"], optional = true }
 # DNS and service discovery
 # trust-dns-client = "0.23"  # Use hickory-dns instead
 # trust-dns-server = "0.23"   # Use hickory-dns instead
@@ -75,15 +85,15 @@ flate2 = "1.0"
 # GPU management
 # nvml-wrapper = "0.9"  # NVIDIA-specific, optional
 # Wayland support
-wayland-client = "0.31"
-smithay-client-toolkit = "0.18"
+wayland-client = { version = "0.31", optional = true }
+smithay-client-toolkit = { version = "0.18", optional = true }
 # Audio systems
 # pipewire = "0.8"  # Linux-specific audio
 # pulse = "2.5"     # PulseAudio bindings
 
 # === SYSTEM INTERFACES ===
 # Low-level system calls
-nix = { version = "0.27", features = ["process", "mount", "sched", "user", "net", "signal", "fs"] }
+nix = { version = "0.27", features = ["process", "mount", "sched", "user", "net", "signal", "fs"], optional = true }
 # Cgroups management
 # cgroups-rs = "0.3"  # Linux-specific
 # Namespace management
@@ -112,9 +122,23 @@ regex = "1.10"
 rcgen = "0.12"
 # Random number generation
 rand = "0.8"
+# Directory utilities
+dirs = "5.0"
 
 [dev-dependencies]
 tempfile = "3.8"
 
 [features]
-default = []
+default = ["gaming", "quic-networking", "oci-runtime"]
+
+# Core features
+gaming = ["wayland-client", "smithay-client-toolkit"]
+quic-networking = ["quinn", "rustls"]
+oci-runtime = ["oci-spec", "nix"]
+
+# Optional GPU support
+nvidia-support = []  # Enable with nvidia-ml crate when available
+amd-support = []     # Enable with ROCm support
+
+# Development features
+examples = []

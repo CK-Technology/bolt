@@ -1,6 +1,13 @@
-use anyhow::{Result, anyhow};
+use crate::{Result, BoltError};
+use anyhow::anyhow;
 use tracing::{info, warn, debug};
-use crate::cli::GpuCommands;
+// Gaming commands enum for API usage
+#[derive(Debug, Clone)]
+pub enum GpuCommands {
+    List,
+    Nvidia { device: Option<u32>, dlss: bool, raytracing: bool },
+    Amd { device: Option<u32> },
+}
 
 pub async fn handle_gpu_command(command: GpuCommands) -> Result<()> {
     match command {
@@ -63,7 +70,7 @@ pub async fn setup_nvidia_gpu(device: Option<u32>, dlss: bool, raytracing: bool)
     info!("  Ray Tracing: {}", raytracing);
 
     if !check_nvidia_gpu().await {
-        return Err(anyhow!("NVIDIA GPU not detected. Install NVIDIA drivers first."));
+        return Err(BoltError::Other(anyhow!("NVIDIA GPU not detected. Install NVIDIA drivers first.")));
     }
 
     info!("✅ NVIDIA GPU configuration would be applied");
@@ -79,7 +86,7 @@ pub async fn setup_amd_gpu(device: Option<u32>) -> Result<()> {
     info!("  Device: {}", device_id);
 
     if !check_amd_gpu().await {
-        return Err(anyhow!("AMD GPU not detected. Install Mesa drivers."));
+        return Err(BoltError::Other(anyhow!("AMD GPU not detected. Install Mesa drivers.")));
     }
 
     info!("✅ AMD GPU configuration would be applied");
@@ -132,7 +139,7 @@ pub async fn setup_audio(system: &str) -> Result<()> {
             }
         }
         _ => {
-            return Err(anyhow!("Unsupported audio system: {}", system));
+            return Err(BoltError::Other(anyhow!("Unsupported audio system: {}", system)));
         }
     }
 

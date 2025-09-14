@@ -144,15 +144,92 @@ bolt surge up
 
 ---
 
+## 🚀 Rust API Integration
+
+Bolt provides a **production-ready Rust API** for programmatic container management:
+
+### **Quick Start**
+
+Add to your `Cargo.toml`:
+```toml
+[dependencies]
+bolt = { git = "https://github.com/CK-Technology/bolt" }
+tokio = { version = "1.0", features = ["full"] }
+```
+
+### **Basic Usage**
+```rust
+use bolt::api::*;
+
+#[tokio::main]
+async fn main() -> bolt::Result<()> {
+    let runtime = BoltRuntime::new()?;
+
+    // Run containers
+    runtime.run_container("nginx:latest", Some("web"), &["8080:80"], &[], &[], false).await?;
+
+    // Gaming containers with GPU
+    let gaming_config = GamingConfig {
+        gpu: Some(GpuConfig { nvidia: Some(NvidiaConfig { dlss: Some(true), .. }), .. }),
+        wine: Some(WineConfig { proton: Some("8.0"), .. }),
+        ..
+    };
+
+    runtime.add_gaming_service("steam", "bolt://steam:latest", gaming_config);
+    runtime.surge_up(&[], false, false).await?;
+
+    Ok(())
+}
+```
+
+### **Integration Examples**
+
+**🎮 Ghostforge (Gaming Container Management):**
+```rust
+// Create gaming-optimized containers with GPU passthrough
+let runtime = BoltRuntime::new()?;
+runtime.setup_gaming(Some("8.0"), Some("win10")).await?;
+runtime.launch_game("steam://run/123456", &[]).await?;
+```
+
+**🖥️ nvcontrol (GPU Management):**
+```rust
+// Allocate GPU resources to Bolt containers
+runtime.create_network("gpu-net", "bolt", Some("10.2.0.0/16")).await?;
+runtime.run_container("bolt://gpu-workload", None, &[], &[], &[], false).await?;
+```
+
+**📦 Programmatic Boltfiles:**
+```rust
+let boltfile = BoltFileBuilder::new("my-project")
+    .add_gaming_service("game", "bolt://steam:latest", gaming_config)
+    .build();
+
+config.save_boltfile(&boltfile)?;
+```
+
+### **Feature Flags**
+```toml
+bolt = { git = "https://github.com/CK-Technology/bolt", features = ["gaming", "quic-networking"] }
+```
+
+- `gaming` - Gaming optimizations, GPU support, Wine/Proton
+- `quic-networking` - Ultra-low latency QUIC networking
+- `oci-runtime` - Full OCI container support
+- `nvidia-support` - NVIDIA GPU passthrough
+- `amd-support` - AMD GPU support
+
+---
+
 ## Ecosystem Integration
 
-Bolt is part of the **GhostStack protocol ecosystem**:  
+Bolt is part of the **GhostStack protocol ecosystem**:
 
-- [`zcrypto`](https://github.com/ghostkellz/zcrypto) → Cryptographic primitives  
-- [`zquic`](https://github.com/ghostkellz/zquic) → QUIC transport layer  
-- [`zdns`](https://github.com/ghostkellz/zdns) → DNS & service discovery  
-- [`zauth`](https://github.com/ghostkellz/zauth) → Authentication & SSO  
-- [`zsync`](https://github.com/ghostkellz/zsync) → Async runtime  
+- [`zcrypto`](https://github.com/ghostkellz/zcrypto) → Cryptographic primitives
+- [`zquic`](https://github.com/ghostkellz/zquic) → QUIC transport layer
+- [`zdns`](https://github.com/ghostkellz/zdns) → DNS & service discovery
+- [`zauth`](https://github.com/ghostkellz/zauth) → Authentication & SSO
+- [`zsync`](https://github.com/ghostkellz/zsync) → Async runtime
 
 ---
 

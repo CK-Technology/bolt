@@ -9,8 +9,9 @@ mod builds;
 
 use clap::Parser;
 use cli::{Cli, Commands, SurgeCommands, GamingCommands, NetworkCommands};
-use tracing::{info, warn};
+use tracing::info;
 use anyhow::Result;
+use config::BoltConfig;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -23,6 +24,11 @@ async fn main() -> Result<()> {
         .init();
 
     info!("🚀 Bolt starting up...");
+
+    // Create BoltConfig from CLI config path
+    let mut bolt_config = BoltConfig::load()?;
+    bolt_config.boltfile_path = std::path::PathBuf::from(&cli.config);
+    bolt_config.verbose = cli.verbose;
 
     match cli.command {
         Commands::Run { image, name, ports, env, volumes, detach } => {
@@ -67,24 +73,24 @@ async fn main() -> Result<()> {
             match command {
                 SurgeCommands::Up { services, detach, force_recreate } => {
                     info!("Starting surge orchestration...");
-                    surge::up(&cli.config, &services, detach, force_recreate).await?;
+                    surge::up(&bolt_config, &services, detach, force_recreate).await?;
                 }
 
                 SurgeCommands::Down { services, volumes } => {
                     info!("Stopping surge services...");
-                    surge::down(&cli.config, &services, volumes).await?;
+                    surge::down(&bolt_config, &services, volumes).await?;
                 }
 
                 SurgeCommands::Status => {
-                    surge::status(&cli.config).await?;
+                    surge::status(&bolt_config).await?;
                 }
 
                 SurgeCommands::Logs { service, follow, tail } => {
-                    surge::logs(&cli.config, service.as_deref(), follow, tail).await?;
+                    surge::logs(&bolt_config, service.as_deref(), follow, tail).await?;
                 }
 
                 SurgeCommands::Scale { services } => {
-                    surge::scale(&cli.config, &services).await?;
+                    surge::scale(&bolt_config, &services).await?;
                 }
             }
         }
@@ -92,7 +98,12 @@ async fn main() -> Result<()> {
         Commands::Gaming { command } => {
             match command {
                 GamingCommands::Gpu { command } => {
-                    gaming::handle_gpu_command(command).await?;
+                    let gaming_command = match command {
+                        cli::GpuCommands::List => gaming::GpuCommands::List,
+                        cli::GpuCommands::Nvidia { device, dlss, raytracing } => gaming::GpuCommands::Nvidia { device, dlss, raytracing },
+                        cli::GpuCommands::Amd { device } => gaming::GpuCommands::Amd { device },
+                    };
+                    gaming::handle_gpu_command(gaming_command).await?;
                 }
 
                 GamingCommands::Wine { proton, winver } => {

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -11,7 +11,7 @@ pub struct BoltFile {
     pub volumes: Option<HashMap<String, Volume>>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct Service {
     pub image: Option<String>,
     pub build: Option<String>,
@@ -145,6 +145,49 @@ impl BoltFile {
             .with_context(|| format!("Failed to write Boltfile at {:?}", path.as_ref()))?;
 
         Ok(())
+    }
+}
+
+/// Bolt configuration for runtime operations
+#[derive(Debug, Clone, Default)]
+pub struct BoltConfig {
+    pub config_dir: PathBuf,
+    pub data_dir: PathBuf,
+    pub boltfile_path: PathBuf,
+    pub verbose: bool,
+}
+
+impl BoltConfig {
+    /// Load configuration from default locations
+    pub fn load() -> Result<Self> {
+        let config_dir = dirs::config_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("bolt");
+
+        let data_dir = dirs::data_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("bolt");
+
+        let boltfile_path = std::env::current_dir()
+            .unwrap_or_default()
+            .join("Boltfile.toml");
+
+        Ok(Self {
+            config_dir,
+            data_dir,
+            boltfile_path,
+            verbose: false,
+        })
+    }
+
+    /// Load Boltfile from the configured path
+    pub fn load_boltfile(&self) -> Result<BoltFile> {
+        BoltFile::load(&self.boltfile_path)
+    }
+
+    /// Save Boltfile to the configured path
+    pub fn save_boltfile(&self, boltfile: &BoltFile) -> Result<()> {
+        boltfile.save(&self.boltfile_path)
     }
 }
 

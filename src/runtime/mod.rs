@@ -1,11 +1,9 @@
-use anyhow::{Result, anyhow};
+use crate::{Result, BoltError};
 use tracing::{info, warn, debug};
 
 pub mod oci;
 pub mod storage;
 
-use oci::{OCIRuntime, ContainerConfig};
-use storage::StorageManager;
 
 pub async fn run_container(
     image: &str,
@@ -98,6 +96,15 @@ pub async fn list_containers(all: bool) -> Result<()> {
     println!("CONTAINER ID   IMAGE          COMMAND   CREATED   STATUS    PORTS     NAMES");
     println!("(No containers running)");
     Ok(())
+}
+
+// API-only functions for library usage
+use crate::ContainerInfo;
+
+pub async fn list_containers_info(all: bool) -> Result<Vec<ContainerInfo>> {
+    info!("📋 Listing containers (all: {})", all);
+    // TODO: Implement actual container listing
+    Ok(vec![])
 }
 
 pub async fn stop_container(container: &str) -> Result<()> {
