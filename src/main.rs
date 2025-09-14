@@ -117,6 +117,23 @@ async fn main() -> Result<()> {
                 GamingCommands::Launch { game, args } => {
                     gaming::launch_game(&game, &args).await?;
                 }
+
+                GamingCommands::Wayland => {
+                    let session_id = gaming::start_wayland_gaming_session().await?;
+                    info!("Wayland gaming session started: {}", session_id);
+                }
+
+                GamingCommands::Realtime { enable } => {
+                    gaming::apply_realtime_optimizations(enable).await?;
+                }
+
+                GamingCommands::Optimize { pid } => {
+                    gaming::optimize_game_process(pid).await?;
+                }
+
+                GamingCommands::Performance => {
+                    gaming::get_gaming_performance_report().await?;
+                }
             }
         }
 

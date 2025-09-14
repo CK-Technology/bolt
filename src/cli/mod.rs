@@ -198,6 +198,25 @@ pub enum GamingCommands {
         /// Launch arguments
         args: Vec<String>,
     },
+
+    /// Start Wayland gaming session
+    Wayland,
+
+    /// Configure real-time gaming optimizations
+    Realtime {
+        /// Enable optimizations
+        #[arg(long)]
+        enable: bool,
+    },
+
+    /// Optimize a running game process
+    Optimize {
+        /// Process ID of the game
+        pid: u32,
+    },
+
+    /// Show gaming performance report
+    Performance,
 }
 
 #[derive(Subcommand)]

@@ -180,11 +180,13 @@ impl AmdManager {
         // Set ROCm environment variables
         if let Some(ref devices) = amd_config.rocm_visible_devices {
             info!("  Setting ROCM_VISIBLE_DEVICES={}", devices);
-            std::env::set_var("ROCM_VISIBLE_DEVICES", devices);
+            unsafe { std::env::set_var("ROCM_VISIBLE_DEVICES", devices); }
         }
 
-        std::env::set_var("HIP_VISIBLE_DEVICES", "0"); // Default to first GPU
-        std::env::set_var("HSA_OVERRIDE_GFX_VERSION", "10.3.0"); // Common compatibility
+        unsafe {
+            std::env::set_var("HIP_VISIBLE_DEVICES", "0"); // Default to first GPU
+            std::env::set_var("HSA_OVERRIDE_GFX_VERSION", "10.3.0"); // Common compatibility
+        }
 
         Ok(())
     }
@@ -202,7 +204,7 @@ impl AmdManager {
         for path in &vulkan_paths {
             if Path::new(path).exists() {
                 info!("  ✓ AMD Vulkan ICD found: {}", path);
-                std::env::set_var("VK_ICD_FILENAMES", path);
+                unsafe { std::env::set_var("VK_ICD_FILENAMES", path); }
                 break;
             }
         }
@@ -231,7 +233,7 @@ impl AmdManager {
         info!("⚡ Running OpenCL application: {} in container: {}", app.name, container_id);
 
         // Set OpenCL environment for AMD
-        std::env::set_var("OPENCL_VENDOR_PATH", "/etc/OpenCL/vendors");
+        unsafe { std::env::set_var("OPENCL_VENDOR_PATH", "/etc/OpenCL/vendors"); }
 
         Ok(())
     }

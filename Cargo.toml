@@ -112,8 +112,9 @@ uuid = { version = "1.8", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 # Async utilities
 futures = "0.3"
+futures-util = "0.3"
 # HTTP client for registries
-reqwest = { version = "0.11", features = ["json", "stream"] }
+reqwest = { version = "0.11", features = ["json", "stream", "multipart"] }
 # JSON handling
 serde_json = "1.0"
 # Regular expressions
@@ -124,6 +125,10 @@ rcgen = "0.12"
 rand = "0.8"
 # Directory utilities
 dirs = "5.0"
+# AWS SDK for S3 storage
+aws-config = "1.1"
+aws-sdk-s3 = "1.14"
+aws-smithy-types = "1.1"
 
 [dev-dependencies]
 tempfile = "3.8"

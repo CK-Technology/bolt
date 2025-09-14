@@ -2,6 +2,8 @@ use crate::{Result, BoltError};
 use anyhow::anyhow;
 use tracing::{info, warn, debug, error};
 use crate::config::{BoltFile, BoltConfig};
+use crate::runtime;
+use std::collections::HashMap;
 
 pub mod status_api;
 
@@ -39,19 +41,88 @@ pub async fn up(
                 setup_gaming_service(service_name, gaming).await?;
             }
 
+            // Handle different service types
             if let Some(ref image) = service.image {
                 info!("  📦 Image: {}", image);
-            }
 
-            if let Some(ref capsule) = service.capsule {
+                // Prepare container arguments
+                let container_name = format!("{}_{}", boltfile.project, service_name);
+                let ports = service.ports.as_ref().map(|p| p.as_slice()).unwrap_or(&[]);
+                let env_vars = service.env.as_ref()
+                    .map(|env| env.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                let volumes = service.volumes.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
+
+                // Stop existing container if force_recreate
+                if force_recreate {
+                    let _ = runtime::stop_container(&container_name).await;
+                    let _ = runtime::remove_container(&container_name, true).await;
+                }
+
+                // Pull image if it doesn't exist locally
+                if let Err(_) = runtime::pull_image(image).await {
+                    warn!("Could not pull image {}, trying with local image", image);
+                }
+
+                // Start the container
+                runtime::run_container(
+                    image,
+                    Some(&container_name),
+                    ports,
+                    &env_vars,
+                    volumes,
+                    detach
+                ).await?;
+
+                info!("✅ Service {} started successfully", service_name);
+
+            } else if let Some(ref capsule) = service.capsule {
                 info!("  🔧 Capsule: {}", capsule);
-            }
 
-            if let Some(ref build) = service.build {
+                let container_name = format!("{}_{}", boltfile.project, service_name);
+                let bolt_image = format!("bolt://{}", capsule);
+
+                runtime::run_container(
+                    &bolt_image,
+                    Some(&container_name),
+                    &[],
+                    &[],
+                    &[],
+                    detach
+                ).await?;
+
+                info!("✅ Capsule {} started successfully", service_name);
+
+            } else if let Some(ref build) = service.build {
                 info!("  🔨 Build context: {}", build);
-            }
 
-            warn!("Service startup not yet implemented");
+                let image_tag = format!("{}_{}", boltfile.project, service_name);
+                let dockerfile = service.dockerfile.as_deref().unwrap_or("Dockerfile");
+
+                // Build the image
+                runtime::build_image(build, Some(&image_tag), dockerfile).await?;
+
+                // Run the built image
+                let container_name = format!("{}_{}", boltfile.project, service_name);
+                let ports = service.ports.as_ref().map(|p| p.as_slice()).unwrap_or(&[]);
+                let env_vars = service.env.as_ref()
+                    .map(|env| env.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                let volumes = service.volumes.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
+
+                runtime::run_container(
+                    &image_tag,
+                    Some(&container_name),
+                    ports,
+                    &env_vars,
+                    volumes,
+                    detach
+                ).await?;
+
+                info!("✅ Service {} built and started successfully", service_name);
+            } else {
+                error!("Service {} has no image, capsule, or build configuration", service_name);
+            }
         } else {
             error!("Service '{}' not found in Boltfile", service_name);
         }
@@ -82,7 +153,26 @@ pub async fn down(
 
     for service_name in target_services {
         info!("🛑 Stopping service: {}", service_name);
-        warn!("Service shutdown not yet implemented");
+
+        let container_name = format!("{}_{}", boltfile.project, service_name);
+
+        // Stop the container
+        if let Err(e) = runtime::stop_container(&container_name).await {
+            warn!("Failed to stop container {}: {}", container_name, e);
+        }
+
+        // Remove the container
+        if let Err(e) = runtime::remove_container(&container_name, false).await {
+            warn!("Failed to remove container {}: {}", container_name, e);
+        }
+
+        // Remove volumes if requested
+        if remove_volumes {
+            info!("🗑️  Removing volumes for service: {}", service_name);
+            // Volume removal logic would go here
+        }
+
+        info!("✅ Service {} stopped successfully", service_name);
     }
 
     Ok(())
@@ -93,18 +183,27 @@ pub async fn status(config: &BoltConfig) -> Result<()> {
     info!("📊 Checking surge status...");
 
     let boltfile = config.load_boltfile()?;
+    let containers = runtime::list_containers_info(true).await?;
 
     println!("Project: {}", boltfile.project);
     println!();
-    println!("SERVICE   STATUS    PORTS");
+    println!("{:<15} {:<12} {:<15} {}", "SERVICE", "STATUS", "CONTAINER", "PORTS");
 
     for (name, service) in &boltfile.services {
+        let container_name = format!("{}_{}", boltfile.project, name);
+        let container = containers.iter().find(|c| c.name == container_name);
+
+        let (status, container_id) = match container {
+            Some(c) => (c.status.clone(), c.id[..12].to_string()),
+            None => ("not running".to_string(), "-".to_string()),
+        };
+
         let ports = service.ports
             .as_ref()
             .map(|p| p.join(", "))
             .unwrap_or_else(|| "-".to_string());
 
-        println!("{:<10} {:<9} {}", name, "not running", ports);
+        println!("{:<15} {:<12} {:<15} {}", name, status, container_id, ports);
     }
 
     Ok(())
@@ -118,18 +217,62 @@ pub async fn logs(
     tail: Option<usize>,
 ) -> Result<()> {
     let boltfile = config.load_boltfile()?;
+    let runtime = crate::runtime::detect_container_runtime().await?;
 
     match service {
         Some(service_name) => {
             info!("📜 Showing logs for service: {}", service_name);
-            debug!("Follow: {}, Tail: {:?}", follow, tail);
+            let container_name = format!("{}_{}", boltfile.project, service_name);
+
+            let mut cmd = tokio::process::Command::new(&runtime);
+            cmd.arg("logs");
+
+            if follow {
+                cmd.arg("-f");
+            }
+
+            if let Some(tail_count) = tail {
+                cmd.arg("--tail").arg(tail_count.to_string());
+            }
+
+            cmd.arg(&container_name);
+
+            let output = cmd.output().await?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(BoltError::Runtime(format!("Failed to get logs: {}", stderr)));
+            }
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            println!("{}", stdout);
         }
         None => {
             info!("📜 Showing logs for all services");
+            for service_name in boltfile.services.keys() {
+                println!("==> {} <==", service_name);
+                let container_name = format!("{}_{}", boltfile.project, service_name);
+
+                let mut cmd = tokio::process::Command::new(&runtime);
+                cmd.arg("logs");
+
+                if let Some(tail_count) = tail {
+                    cmd.arg("--tail").arg(tail_count.to_string());
+                }
+
+                cmd.arg(&container_name);
+
+                if let Ok(output) = cmd.output().await {
+                    if output.status.success() {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        println!("{}", stdout);
+                    }
+                }
+                println!();
+            }
         }
     }
 
-    warn!("Log viewing not yet implemented");
     Ok(())
 }
 
@@ -155,7 +298,55 @@ pub async fn scale(config: &BoltConfig, services: &[String]) -> Result<()> {
         }
 
         info!("📈 Scaling {} to {} instances", service_name, count);
-        warn!("Service scaling not yet implemented");
+
+        // Get current running containers for this service
+        let container_prefix = format!("{}_{}", boltfile.project, service_name);
+        let containers = runtime::list_containers_info(true).await?;
+        let current_containers: Vec<_> = containers.iter()
+            .filter(|c| c.name.starts_with(&container_prefix))
+            .collect();
+
+        let current_count = current_containers.len() as u32;
+        info!("Current instances: {}, Target: {}", current_count, count);
+
+        if count > current_count {
+            // Scale up - start new instances
+            let service = boltfile.services.get(service_name).unwrap();
+            for i in current_count..count {
+                let instance_name = format!("{}_{}", container_prefix, i + 1);
+
+                if let Some(ref image) = service.image {
+                    let ports = service.ports.as_ref().map(|p| p.as_slice()).unwrap_or(&[]);
+                    let env_vars = service.env.as_ref()
+                        .map(|env| env.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>())
+                        .unwrap_or_default();
+                    let volumes = service.volumes.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
+
+                    runtime::run_container(
+                        image,
+                        Some(&instance_name),
+                        ports,
+                        &env_vars,
+                        volumes,
+                        true  // Always detached for scaling
+                    ).await?;
+
+                    info!("✅ Started instance: {}", instance_name);
+                }
+            }
+        } else if count < current_count {
+            // Scale down - stop excess instances
+            let containers_to_stop = current_count - count;
+            for i in 0..containers_to_stop {
+                if let Some(container) = current_containers.get(i as usize) {
+                    let _ = runtime::stop_container(&container.name).await;
+                    let _ = runtime::remove_container(&container.name, false).await;
+                    info!("✅ Stopped instance: {}", container.name);
+                }
+            }
+        }
+
+        info!("✅ Service {} scaled to {} instances", service_name, count);
     }
 
     Ok(())

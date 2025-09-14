@@ -1,8 +1,29 @@
 use crate::{Result, BoltError};
 use tracing::{info, warn, debug};
+use tokio::process::Command as AsyncCommand;
 
 pub mod oci;
 pub mod storage;
+
+#[cfg(feature = "gaming")]
+pub mod gpu;
+
+// Helper function to detect available container runtime
+pub async fn detect_container_runtime() -> Result<String> {
+    // Try podman first (preferred for rootless)
+    if AsyncCommand::new("podman").arg("--version").output().await.is_ok() {
+        return Ok("podman".to_string());
+    }
+
+    // Fall back to docker
+    if AsyncCommand::new("docker").arg("--version").output().await.is_ok() {
+        return Ok("docker".to_string());
+    }
+
+    Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
+        message: "No container runtime found (podman or docker required)".to_string()
+    }))
+}
 
 
 pub async fn run_container(
@@ -64,7 +85,48 @@ pub async fn run_oci_container(
     debug!("  Volumes: {:?}", volumes);
     debug!("  Detached: {}", detach);
 
-    warn!("OCI runtime not yet implemented");
+    // Build podman/docker command
+    let runtime = detect_container_runtime().await?;
+    let mut cmd = AsyncCommand::new(&runtime);
+    cmd.arg("run");
+
+    if detach {
+        cmd.arg("-d");
+    }
+
+    if let Some(name) = name {
+        cmd.arg("--name").arg(name);
+    }
+
+    // Add port mappings
+    for port in ports {
+        cmd.arg("-p").arg(port);
+    }
+
+    // Add environment variables
+    for env_var in env {
+        cmd.arg("-e").arg(env_var);
+    }
+
+    // Add volume mounts
+    for volume in volumes {
+        cmd.arg("-v").arg(volume);
+    }
+
+    cmd.arg(image);
+
+    let output = cmd.output().await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(BoltError::Runtime(crate::error::RuntimeError::StartFailed {
+            reason: format!("Failed to run container: {}", stderr)
+        }));
+    }
+
+    let container_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    info!("✅ Container started: {}", container_id);
+
     Ok(())
 }
 
@@ -75,26 +137,94 @@ pub async fn build_image(path: &str, tag: Option<&str>, dockerfile: &str) -> Res
         debug!("Tag: {}", tag);
     }
 
-    warn!("Image building not yet implemented");
+    let runtime = detect_container_runtime().await?;
+    let mut cmd = AsyncCommand::new(&runtime);
+    cmd.arg("build");
+
+    if let Some(tag) = tag {
+        cmd.arg("-t").arg(tag);
+    }
+
+    cmd.arg("-f").arg(dockerfile);
+    cmd.arg(path);
+
+    let output = cmd.output().await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
+            message: format!("Failed to build image: {}", stderr)
+        }));
+    }
+
+    info!("✅ Image built successfully");
     Ok(())
 }
 
 pub async fn pull_image(image: &str) -> Result<()> {
     info!("⬇️  Pulling image: {}", image);
-    warn!("Image pulling not yet implemented");
+
+    let runtime = detect_container_runtime().await?;
+    let mut cmd = AsyncCommand::new(&runtime);
+    cmd.arg("pull").arg(image);
+
+    let output = cmd.output().await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(BoltError::Runtime(crate::error::RuntimeError::ImagePullFailed {
+            image: format!("Failed to pull image: {}", stderr)
+        }));
+    }
+
+    info!("✅ Image pulled successfully: {}", image);
     Ok(())
 }
 
 pub async fn push_image(image: &str) -> Result<()> {
     info!("⬆️  Pushing image: {}", image);
-    warn!("Image pushing not yet implemented");
+
+    let runtime = detect_container_runtime().await?;
+    let mut cmd = AsyncCommand::new(&runtime);
+    cmd.arg("push").arg(image);
+
+    let output = cmd.output().await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
+            message: format!("Failed to push image: {}", stderr)
+        }));
+    }
+
+    info!("✅ Image pushed successfully: {}", image);
     Ok(())
 }
 
 pub async fn list_containers(all: bool) -> Result<()> {
     info!("📋 Listing containers (all: {})", all);
-    println!("CONTAINER ID   IMAGE          COMMAND   CREATED   STATUS    PORTS     NAMES");
-    println!("(No containers running)");
+
+    let runtime = detect_container_runtime().await?;
+    let mut cmd = AsyncCommand::new(&runtime);
+    cmd.arg("ps");
+
+    if all {
+        cmd.arg("-a");
+    }
+
+    cmd.arg("--format").arg("table {{.ID}}\t{{.Image}}\t{{.Command}}\t{{.CreatedAt}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}");
+
+    let output = cmd.output().await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
+            message: format!("Failed to list containers: {}", stderr)
+        }));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    println!("{}", stdout);
     Ok(())
 }
 
@@ -103,18 +233,92 @@ use crate::ContainerInfo;
 
 pub async fn list_containers_info(all: bool) -> Result<Vec<ContainerInfo>> {
     info!("📋 Listing containers (all: {})", all);
-    // TODO: Implement actual container listing
-    Ok(vec![])
+
+    let runtime = detect_container_runtime().await?;
+    let mut cmd = AsyncCommand::new(&runtime);
+    cmd.arg("ps");
+
+    if all {
+        cmd.arg("-a");
+    }
+
+    cmd.arg("--format").arg("json");
+
+    let output = cmd.output().await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
+            message: format!("Failed to list containers: {}", stderr)
+        }));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut containers = Vec::new();
+
+    // Parse JSON output line by line (podman/docker outputs one JSON object per line)
+    for line in stdout.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
+            let container = ContainerInfo {
+                id: value.get("Id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                name: value.get("Names").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                image: value.get("Image").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                status: value.get("Status").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                ports: value.get("Ports").and_then(|v| v.as_str()).unwrap_or("").split(',').map(|s| s.trim().to_string()).collect(),
+            };
+            containers.push(container);
+        }
+    }
+
+    Ok(containers)
 }
 
 pub async fn stop_container(container: &str) -> Result<()> {
     info!("🛑 Stopping container: {}", container);
-    warn!("Container stopping not yet implemented");
+
+    let runtime = detect_container_runtime().await?;
+    let mut cmd = AsyncCommand::new(&runtime);
+    cmd.arg("stop").arg(container);
+
+    let output = cmd.output().await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
+            message: format!("Failed to stop container: {}", stderr)
+        }));
+    }
+
+    info!("✅ Container stopped: {}", container);
     Ok(())
 }
 
 pub async fn remove_container(container: &str, force: bool) -> Result<()> {
     info!("🗑️  Removing container: {} (force: {})", container, force);
-    warn!("Container removal not yet implemented");
+
+    let runtime = detect_container_runtime().await?;
+    let mut cmd = AsyncCommand::new(&runtime);
+    cmd.arg("rm");
+
+    if force {
+        cmd.arg("-f");
+    }
+
+    cmd.arg(container);
+
+    let output = cmd.output().await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
+            message: format!("Failed to remove container: {}", stderr)
+        }));
+    }
+
+    info!("✅ Container removed: {}", container);
     Ok(())
 }

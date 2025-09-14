@@ -274,7 +274,7 @@ impl NvidiaManager {
             .join(",");
 
         info!("  Setting CUDA_VISIBLE_DEVICES={}", cuda_devices);
-        std::env::set_var("CUDA_VISIBLE_DEVICES", &cuda_devices);
+        unsafe { std::env::set_var("CUDA_VISIBLE_DEVICES", &cuda_devices); }
 
         // Set NVIDIA driver capabilities
         let mut capabilities = vec!["compute", "utility"];
@@ -289,18 +289,18 @@ impl NvidiaManager {
 
         let driver_capabilities = capabilities.join(",");
         info!("  Setting NVIDIA_DRIVER_CAPABILITIES={}", driver_capabilities);
-        std::env::set_var("NVIDIA_DRIVER_CAPABILITIES", &driver_capabilities);
+        unsafe { std::env::set_var("NVIDIA_DRIVER_CAPABILITIES", &driver_capabilities); }
 
         // Set CUDA requirements
         if let Some(ref cuda_version) = nvidia_config.require_cuda {
             info!("  Requiring CUDA version: {}", cuda_version);
-            std::env::set_var("NVIDIA_REQUIRE_CUDA", cuda_version);
+            unsafe { std::env::set_var("NVIDIA_REQUIRE_CUDA", cuda_version); }
         }
 
         // Set driver requirements
         if let Some(ref driver_version) = nvidia_config.require_driver {
             info!("  Requiring driver version: {}", driver_version);
-            std::env::set_var("NVIDIA_REQUIRE_DRIVER", driver_version);
+            unsafe { std::env::set_var("NVIDIA_REQUIRE_DRIVER", driver_version); }
         }
 
         Ok(())
@@ -317,8 +317,10 @@ impl NvidiaManager {
         }
 
         // Set DLSS environment variables
-        std::env::set_var("NVIDIA_ENABLE_DLSS", "1");
-        std::env::set_var("DLSS_PERFMODE", "BALANCED"); // PERFORMANCE, BALANCED, QUALITY
+        unsafe {
+            std::env::set_var("NVIDIA_ENABLE_DLSS", "1");
+            std::env::set_var("DLSS_PERFMODE", "BALANCED"); // PERFORMANCE, BALANCED, QUALITY
+        }
 
         Ok(())
     }
@@ -334,8 +336,10 @@ impl NvidiaManager {
         }
 
         // Enable RTX features
-        std::env::set_var("NVIDIA_ENABLE_RTX", "1");
-        std::env::set_var("RTX_OPTIMIZATION", "PERFORMANCE");
+        unsafe {
+            std::env::set_var("NVIDIA_ENABLE_RTX", "1");
+            std::env::set_var("RTX_OPTIMIZATION", "PERFORMANCE");
+        }
 
         Ok(())
     }
@@ -404,7 +408,7 @@ impl NvidiaManager {
         info!("⚡ Running OpenCL application: {} in container: {}", app.name, container_id);
 
         // Set OpenCL environment
-        std::env::set_var("OPENCL_VENDOR_PATH", "/etc/OpenCL/vendors");
+        unsafe { std::env::set_var("OPENCL_VENDOR_PATH", "/etc/OpenCL/vendors"); }
 
         Ok(())
     }
@@ -413,9 +417,11 @@ impl NvidiaManager {
         info!("🍷 Setting up NVIDIA integration for Wine/Proton");
 
         // Enable NVAPI for Wine
-        std::env::set_var("WINE_ENABLE_NVAPI", "1");
-        std::env::set_var("DXVK_ENABLE_NVAPI", "1");
-        std::env::set_var("DXVK_NVAPI_ALLOW_OTHER", "1");
+        unsafe {
+            std::env::set_var("WINE_ENABLE_NVAPI", "1");
+            std::env::set_var("DXVK_ENABLE_NVAPI", "1");
+            std::env::set_var("DXVK_NVAPI_ALLOW_OTHER", "1");
+        }
 
         // Set up DXVK NVAPI
         info!("  ✓ NVAPI enabled for Wine applications");

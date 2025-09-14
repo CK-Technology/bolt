@@ -128,8 +128,10 @@ impl GPUManager {
         self.mount_vulkan_drivers(container_id).await?;
 
         // Set environment variables
-        std::env::set_var("VK_ICD_FILENAMES", "/usr/share/vulkan/icd.d/nvidia_icd.json");
-        std::env::set_var("VK_LAYER_PATH", "/usr/share/vulkan/explicit_layer.d");
+        unsafe {
+            std::env::set_var("VK_ICD_FILENAMES", "/usr/share/vulkan/icd.d/nvidia_icd.json");
+            std::env::set_var("VK_LAYER_PATH", "/usr/share/vulkan/explicit_layer.d");
+        }
 
         Ok(())
     }
@@ -188,14 +190,16 @@ impl GPUManager {
         // Enable DXVK if specified
         if game.dxvk_enabled {
             info!("  ✓ DXVK enabled (DirectX → Vulkan)");
-            std::env::set_var("DXVK_ENABLE_NVAPI", "1");
-            std::env::set_var("DXVK_NVAPI_ALLOW_OTHER", "1");
+            unsafe {
+                std::env::set_var("DXVK_ENABLE_NVAPI", "1");
+                std::env::set_var("DXVK_NVAPI_ALLOW_OTHER", "1");
+            }
         }
 
         // Enable VKD3D for DirectX 12
         if game.vkd3d_enabled {
             info!("  ✓ VKD3D enabled (DirectX 12 → Vulkan)");
-            std::env::set_var("VKD3D_CONFIG", "dxr,dxr11");
+            unsafe { std::env::set_var("VKD3D_CONFIG", "dxr,dxr11"); }
         }
 
         // Configure for NVIDIA specific Wine features
@@ -210,8 +214,10 @@ impl GPUManager {
         info!("🎯 Configuring GPU for native gaming");
 
         // Set up OpenGL/Vulkan for native games
-        std::env::set_var("__GL_THREADED_OPTIMIZATIONS", "1");
-        std::env::set_var("__GL_SHADER_CACHE", "1");
+        unsafe {
+            std::env::set_var("__GL_THREADED_OPTIMIZATIONS", "1");
+            std::env::set_var("__GL_SHADER_CACHE", "1");
+        }
 
         Ok(())
     }
