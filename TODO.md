@@ -1,106 +1,35 @@
-# TODO
+Why Rust (for Bolt/Surge)
 
-Project roadmap for **Bolt** (runtime) and **Surge** (orchestration).
+Proven in this exact domain
 
----
+OCI runtime: youki (Rust) is real and fast; study/borrow pieces or interop with it.
 
-## Phase 1 – Core Runtime (Bolt)
-- [ ] Implement OCI image support
-  - [ ] Pull images from registries
-  - [ ] Build images from Boltfiles
-  - [ ] Cache layers locally
-- [ ] Implement Bolt **Capsules**
-  - [ ] Namespaces (pid, net, mount, ipc)
-  - [ ] Cgroups v2 resource limits
-  - [ ] Filesystem overlay (aufs/btrfs/zfs)
-  - [ ] Rootless execution mode
-- [ ] Networking primitives
-  - [ ] Bridge networking
-  - [ ] Host networking
-  - [ ] QUIC overlay foundation (`zquic`) - zig fetch --save https://github.com/ghostkellz/zquic
-- [ ] Storage primitives
-  - [ ] Volumes
-  - [ ] Snapshots (ZFS/Btrfs)
-  - [ ] Capsule persistence
+OCI image tooling: oci-spec-rs, containerd-client, oras-rs, tar, zstd, async-compression.
 
----
+Kernel plumbing: nix, caps, libseccomp-sys, cgroups-rs (v2), mount, rust-iptables / nftnl.
 
-## Phase 2 – Surge Orchestration
-- [ ] Boltfile (TOML) parser
-  - [ ] Schema validation
-  - [ ] Strict typing (ports, env, volumes)
-- [ ] Service orchestration
-  - [ ] `bolt surge up` / `down`
-  - [ ] Service dependencies & ordering
-  - [ ] Health checks
-  - [ ] Logs & monitoring
-- [ ] Networking & discovery
-  - [ ] Internal DNS (`zdns`)
-  - [ ] Service-to-service encryption (`zcrypto`) - zig fetch --save https://github.com/ghostkellz/zcrypto
-- [ ] Storage integration
-  - [ ] Declarative volumes
-  - [ ] Ephemeral vs persistent modes
+Networking stack you want
 
----
+QUIC: quinn (mature), TLS: rustls. Great fit for your QUIC fabric vision.
 
-## Phase 3 – Advanced Platform Features
-- [ ] Declarative builds (Nix-inspired)
-  - [ ] Deterministic builds
-  - [ ] Content-addressed store
-  - [ ] Reproducible environments
-- [ ] Security
-  - [ ] Signed manifests
-  - [ ] Capsule attestation
-  - [ ] User/role-based auth via `zauth`
-- [ ] Distributed orchestration
-  - [ ] Multi-node Surge clusters
-  - [ ] QUIC fabric overlay
-  - [ ] Scheduling & placement logic
-- [ ] Capsule management
-  - [ ] Live migration
-  - [ ] Rollbacks
-  - [ ] Resource quotas
+Rootless net: slirp4netns bindings exist; or drive pasta/vpnkit style helpers.
 
----
+Wayland/gaming UX
 
-## Phase 4 – Tooling & Ecosystem
-- [ ] CLI UX polish
-  - [ ] `bolt run` single capsules
-  - [ ] `bolt surge` multi-service stacks
-  - [ ] Logs, exec, attach, top
-- [ ] Developer tooling
-  - [ ] Dev mode (`bolt dev`)
-  - [ ] Hot reload for services
-  - [ ] Integration with IDEs / editors
-- [ ] Web UI
-  - [ ] Capsule + service dashboard
-  - [ ] Resource graphs
-  - [ ] Cluster management
-- [ ] API
-  - [ ] gRPC + REST control plane
-  - [ ] SDKs in Zig, Rust, Go
-  - [ ] WebSocket/QUIC event streams
+Wayland: wayland-client, smithay-client-toolkit.
 
----
+UI: egui/eframe for a native GUI with no npm; winit for windowing; integrates cleanly with gaming workflows.
 
-## Phase 5 – Production Hardening
-- [ ] CI/CD integration
-  - [ ] GitHub Actions Bolt runner
-  - [ ] GitLab CI Bolt runner
-- [ ] Monitoring & observability
-  - [ ] Metrics endpoint (Prometheus)
-  - [ ] Tracing hooks
-  - [ ] Centralized logs
-- [ ] Packaging & distribution
-  - [ ] Prebuilt binaries (Linux distros)
-  - [ ] Containerized installer
-  - [ ] Proxmox integration (Capsules as VMs/CTs)
+GPU inside containers: NVIDIA (nvidia-container-toolkit + libnvidia-container), AMD (rocm paths); Rust is friendlier to wrap/drive these CLIs + configs.
 
----
+Security model
 
-## Stretch Goals
-- [ ] Linux + Windows + macOS runtime support
-- [ ] WASM capsule type
-- [ ] GPU-accelerated capsules
-- [ ] Mobile/edge device mode (IoT deployments)
+Memory safety, rich seccomp + landlock bindings, capability dropping, serde + toml for strict config parsing.
 
+Dev velocity
+
+Async runtime (tokio), superb testing, fuzzing (cargo-fuzz), and cross-compilation with cross.
+
+Zig today lacks ready-made crates for OCI + kernel plumbing. You’ll spend time re-implementing what Rust already has. If you really want Zig, use it later for hot paths as a small FFI’d lib.
+
+Architecture suggestion (Rust)

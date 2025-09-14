@@ -1,0 +1,16 @@
+  - Wayland-native gaming containers
+  - Ultra-low latency networking for esports
+  - Specialized GPU memory management
+  - Game-specific filesystem optimizations
+  - Inspiration from podman too! and make it work with rootless containers 
+  - Open source pllatform 
+  - Work wonderfully with wine/proton and lutris.
+  - Compatibility with our rust project - Ghostforge a lutris alternative
+  - exceptional nvidia gpu vfio/passthrough support with native performance implementations 
+  - Support for nvidia gpu's latest features like DLSS, Raytracing, and CUDA
+  - What if we supported the ability to really streamline gaming on linux? 
+  - Framework for building game containers 
+  - Want it to run near native performance. 
+  - WAY better networking fuctionality than docker networking 
+  - We'll be competing directly with docker, podman, lxc, and nixOS 
+  - native wayland xwayland experience

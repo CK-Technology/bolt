@@ -12,7 +12,7 @@
 
 ## Badges
 
-![Zig](https://img.shields.io/badge/Zig-v0.16-yellow?logo=zig)  
+![Zig](https://img.shields.io/badge/rust-red?logo=rust)  
 ![Runtime](https://img.shields.io/badge/Runtime-Containers-blue?logo=docker)  
 ![Orchestration](https://img.shields.io/badge/Orchestration-Surge-orange?logo=kubernetes)  
 ![Declarative](https://img.shields.io/badge/Config-TOML-green?logo=toml)  
@@ -72,7 +72,7 @@ It’s designed to be **developer-friendly**, **secure by default**, and **scala
 
 ---
 
-## Configuration: Boltfile (TOML)
+## Configuration: Boltfile (TOM:wL)
 
 Bolt uses **TOML Boltfiles** for defining projects.  
 This eliminates YAML indentation issues and provides strict typing.  
