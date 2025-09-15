@@ -110,10 +110,9 @@ impl DockerApiCompat {
             ("GET", "/images/json") => self.list_images().await,
             ("POST", "/images/create") => self.pull_image(body).await,
             ("POST", "/build") => self.build_image(body).await,
-            _ => Err(BoltError::Runtime(format!(
-                "Unsupported API endpoint: {} {}",
-                method, path
-            ))),
+            _ => Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
+                message: format!("Unsupported API endpoint: {} {}", method, path),
+            })),
         }
     }
 

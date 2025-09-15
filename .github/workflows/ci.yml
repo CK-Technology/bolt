@@ -67,7 +67,10 @@ jobs:
             libssl-dev \
             pkg-config \
             libsystemd-dev \
-            libudev-dev
+            libudev-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libxcb1-dev
 
       - name: Cache cargo registry
         uses: actions/cache@v3
@@ -86,8 +89,9 @@ jobs:
       - name: Generate test report
         if: always()
         run: |
-          cargo install cargo-test-report
-          cargo test --lib --bins --message-format=json | cargo-test-report > test-report.html
+          # Create simple test report since cargo-test-report is not available
+          cargo test --lib --bins --features "oci-runtime" -- --format=json > test-results.json || true
+          echo "<h1>Test Results</h1><pre>$(cat test-results.json 2>/dev/null || echo 'Test results not available')</pre>" > test-report.html
 
       - name: Upload test report
         if: always()

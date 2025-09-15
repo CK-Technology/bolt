@@ -18,8 +18,14 @@ pub enum BoltError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("Serialization error: {0}")]
+    #[error("TOML serialization error: {0}")]
     Serialization(#[from] toml::de::Error),
+
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
+
+    #[error("YAML error: {0}")]
+    Yaml(#[from] serde_yaml::Error),
 
     #[error("Generic error: {0}")]
     Other(#[from] anyhow::Error),

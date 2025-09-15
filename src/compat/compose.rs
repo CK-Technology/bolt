@@ -19,7 +19,7 @@ pub struct ComposeService {
     pub build: Option<ComposeBuild>,
     pub ports: Option<Vec<String>>,
     pub volumes: Option<Vec<String>>,
-    pub environment: Option<HashMap<String, String>>,
+    pub environment: Option<ComposeEnvironment>,
     pub depends_on: Option<Vec<String>>,
     pub networks: Option<Vec<String>>,
     pub restart: Option<String>,
@@ -69,6 +69,13 @@ pub struct ComposeVolume {
     pub external: Option<bool>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ComposeEnvironment {
+    Map(HashMap<String, String>),
+    List(Vec<String>),
+}
+
 pub struct ComposeCompat;
 
 impl ComposeCompat {
@@ -84,6 +91,7 @@ impl ComposeCompat {
             project: "converted-from-compose".to_string(),
             services: HashMap::new(),
             networks: None,
+            volumes: None,
         };
 
         // Convert services
@@ -93,8 +101,11 @@ impl ComposeCompat {
         }
 
         // Convert to TOML
-        let toml_content = toml::to_string_pretty(&boltfile)
-            .map_err(|e| BoltError::Config(format!("Failed to generate Boltfile: {}", e)))?;
+        let toml_content = toml::to_string_pretty(&boltfile).map_err(|e| {
+            BoltError::Config(crate::error::ConfigError::InvalidFormat {
+                reason: format!("Failed to generate Boltfile: {}", e),
+            })
+        })?;
 
         Ok(format!(
             "# Converted from Docker Compose\n# Date: {}\n# Note: Review and adjust as needed\n\n{}",
@@ -135,7 +146,7 @@ impl ComposeCompat {
 
         // Environment variables
         if let Some(env) = &compose_service.environment {
-            service.env = Some(env.clone());
+            service.env = Some(Self::convert_environment(env));
         }
 
         // Dependencies
@@ -146,7 +157,7 @@ impl ComposeCompat {
         // Network configuration
         if let Some(networks) = &compose_service.networks {
             if !networks.is_empty() {
-                service.network = Some(networks[0].clone());
+                service.networks = Some(networks.clone());
             }
         }
 
@@ -171,11 +182,13 @@ impl ComposeCompat {
 
                         // Set up database auth if environment variables suggest it
                         if let Some(env) = &compose_service.environment {
-                            let user = env
+                            let env_map = Self::convert_environment(env);
+                            let user = env_map
                                 .get("POSTGRES_USER")
-                                .or_else(|| env.get("POSTGRES_DB"))
-                                .unwrap_or("postgres");
-                            let password = env.get("POSTGRES_PASSWORD").map_or("password", |v| v);
+                                .or_else(|| env_map.get("POSTGRES_DB"))
+                                .map_or("postgres", |v| v);
+                            let password =
+                                env_map.get("POSTGRES_PASSWORD").map_or("password", |v| v);
 
                             service.auth = Some(Auth {
                                 user: user.to_string(),
@@ -195,10 +208,11 @@ impl ComposeCompat {
                         service.image = None;
 
                         if let Some(env) = &compose_service.environment {
-                            let user = env.get("MYSQL_USER").map_or("mysql", |v| v);
-                            let password = env
+                            let env_map = Self::convert_environment(env);
+                            let user = env_map.get("MYSQL_USER").map_or("mysql", |v| v);
+                            let password = env_map
                                 .get("MYSQL_PASSWORD")
-                                .or_else(|| env.get("MYSQL_ROOT_PASSWORD"))
+                                .or_else(|| env_map.get("MYSQL_ROOT_PASSWORD"))
                                 .map_or("password", |v| v);
 
                             service.auth = Some(Auth {
@@ -237,6 +251,25 @@ impl ComposeCompat {
         }
 
         Ok(service)
+    }
+
+    /// Convert environment variables from array or map format to map
+    fn convert_environment(env: &ComposeEnvironment) -> HashMap<String, String> {
+        match env {
+            ComposeEnvironment::Map(map) => map.clone(),
+            ComposeEnvironment::List(list) => {
+                let mut map = HashMap::new();
+                for item in list {
+                    if let Some((key, value)) = item.split_once('=') {
+                        map.insert(key.to_string(), value.to_string());
+                    } else {
+                        // For items without '=', treat as key with empty value
+                        map.insert(item.clone(), String::new());
+                    }
+                }
+                map
+            }
+        }
     }
 
     /// Generate migration notes and recommendations
