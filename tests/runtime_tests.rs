@@ -1,6 +1,6 @@
-use bolt::runtime::{BoltRuntime, oci::*, storage::*, gpu::*};
-use bolt::config::{BoltConfig, GamingConfig, GpuConfig, NvidiaConfig, AmdConfig};
+use bolt::config::{AmdConfig, BoltConfig, GamingConfig, GpuConfig, NvidiaConfig};
 use bolt::error::{BoltError, Result};
+use bolt::runtime::{BoltRuntime, gpu::*, oci::*, storage::*};
 use std::path::PathBuf;
 use tempfile::TempDir;
 use tokio;
@@ -34,14 +34,16 @@ async fn test_container_lifecycle() {
     let runtime = BoltRuntime::new().unwrap();
 
     // Test running a container
-    let result = runtime.run_container(
-        "alpine:latest",
-        Some("test-container"),
-        &[],
-        &["TEST_VAR=value"],
-        &[],
-        true
-    ).await;
+    let result = runtime
+        .run_container(
+            "alpine:latest",
+            Some("test-container"),
+            &[],
+            &["TEST_VAR=value"],
+            &[],
+            true,
+        )
+        .await;
 
     assert!(result.is_ok(), "Should run container successfully");
 
@@ -64,14 +66,16 @@ async fn test_container_lifecycle() {
 async fn test_container_with_ports() {
     let runtime = BoltRuntime::new().unwrap();
 
-    let result = runtime.run_container(
-        "nginx:alpine",
-        Some("test-nginx"),
-        &["8080:80".to_string()],
-        &[],
-        &[],
-        true
-    ).await;
+    let result = runtime
+        .run_container(
+            "nginx:alpine",
+            Some("test-nginx"),
+            &["8080:80".to_string()],
+            &[],
+            &[],
+            true,
+        )
+        .await;
 
     assert!(result.is_ok());
 
@@ -95,14 +99,16 @@ async fn test_container_with_volumes() {
 
     let volume_spec = format!("{}:/data", host_path.display());
 
-    let result = runtime.run_container(
-        "alpine:latest",
-        Some("test-volume"),
-        &[],
-        &[],
-        &[volume_spec],
-        true
-    ).await;
+    let result = runtime
+        .run_container(
+            "alpine:latest",
+            Some("test-volume"),
+            &[],
+            &[],
+            &[volume_spec],
+            true,
+        )
+        .await;
 
     assert!(result.is_ok());
 
@@ -124,11 +130,13 @@ async fn test_image_operations() {
     let dockerfile_path = temp_dir.path().join("Dockerfile");
     std::fs::write(&dockerfile_path, "FROM alpine:latest\nRUN echo 'test'").unwrap();
 
-    let build_result = runtime.build_image(
-        temp_dir.path().to_str().unwrap(),
-        Some("test-image:latest"),
-        "Dockerfile"
-    ).await;
+    let build_result = runtime
+        .build_image(
+            temp_dir.path().to_str().unwrap(),
+            Some("test-image:latest"),
+            "Dockerfile",
+        )
+        .await;
 
     assert!(build_result.is_ok(), "Should build image successfully");
 }
@@ -138,11 +146,9 @@ async fn test_network_operations() {
     let runtime = BoltRuntime::new().unwrap();
 
     // Create a network
-    let create_result = runtime.create_network(
-        "test-network",
-        "bridge",
-        Some("172.30.0.0/16")
-    ).await;
+    let create_result = runtime
+        .create_network("test-network", "bridge", Some("172.30.0.0/16"))
+        .await;
     assert!(create_result.is_ok());
 
     // List networks
@@ -188,14 +194,9 @@ async fn test_error_handling() {
     let runtime = BoltRuntime::new().unwrap();
 
     // Test invalid image
-    let result = runtime.run_container(
-        "invalid:image:tag:format",
-        None,
-        &[],
-        &[],
-        &[],
-        false
-    ).await;
+    let result = runtime
+        .run_container("invalid:image:tag:format", None, &[], &[], &[], false)
+        .await;
 
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -213,24 +214,28 @@ async fn test_container_isolation() {
     let runtime = BoltRuntime::new().unwrap();
 
     // Create two isolated containers
-    let result1 = runtime.run_container(
-        "alpine:latest",
-        Some("isolated-1"),
-        &[],
-        &["INSTANCE=1".to_string()],
-        &[],
-        true
-    ).await;
+    let result1 = runtime
+        .run_container(
+            "alpine:latest",
+            Some("isolated-1"),
+            &[],
+            &["INSTANCE=1".to_string()],
+            &[],
+            true,
+        )
+        .await;
     assert!(result1.is_ok());
 
-    let result2 = runtime.run_container(
-        "alpine:latest",
-        Some("isolated-2"),
-        &[],
-        &["INSTANCE=2".to_string()],
-        &[],
-        true
-    ).await;
+    let result2 = runtime
+        .run_container(
+            "alpine:latest",
+            Some("isolated-2"),
+            &[],
+            &["INSTANCE=2".to_string()],
+            &[],
+            true,
+        )
+        .await;
     assert!(result2.is_ok());
 
     // Verify both containers are running
@@ -251,10 +256,7 @@ async fn test_gaming_setup() {
     let runtime = BoltRuntime::new().unwrap();
 
     // Test gaming setup with Proton
-    let setup_result = runtime.setup_gaming(
-        Some("8.0"),
-        Some("win10")
-    ).await;
+    let setup_result = runtime.setup_gaming(Some("8.0"), Some("win10")).await;
 
     if setup_result.is_ok() {
         // Gaming setup succeeded (GPU available)
@@ -274,11 +276,9 @@ async fn test_quic_network() {
     let runtime = BoltRuntime::new().unwrap();
 
     // Create QUIC-enabled network
-    let result = runtime.create_network(
-        "quic-net",
-        "bolt",
-        Some("10.99.0.0/16")
-    ).await;
+    let result = runtime
+        .create_network("quic-net", "bolt", Some("10.99.0.0/16"))
+        .await;
 
     assert!(result.is_ok(), "Should create QUIC network");
 

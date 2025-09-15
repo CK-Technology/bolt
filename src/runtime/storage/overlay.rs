@@ -1,8 +1,8 @@
-use anyhow::{Result, Context};
-use tracing::{info, warn, debug};
-use std::path::{Path, PathBuf};
+use anyhow::{Context, Result};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use tokio::fs;
+use tracing::{debug, info, warn};
 
 pub struct OverlayDriver {
     pub root_path: PathBuf,
@@ -36,7 +36,11 @@ impl OverlayDriver {
         })
     }
 
-    pub async fn create_layer(&mut self, layer_id: &str, parent_layers: &[String]) -> Result<LayerInfo> {
+    pub async fn create_layer(
+        &mut self,
+        layer_id: &str,
+        parent_layers: &[String],
+    ) -> Result<LayerInfo> {
         info!("📦 Creating overlay layer: {}", layer_id);
 
         let diff_path = self.root_path.join("diff").join(layer_id);
@@ -44,11 +48,14 @@ impl OverlayDriver {
         let work_path = self.root_path.join("work").join(layer_id);
 
         // Create directories
-        fs::create_dir_all(&diff_path).await
+        fs::create_dir_all(&diff_path)
+            .await
             .with_context(|| format!("Failed to create diff directory: {:?}", diff_path))?;
-        fs::create_dir_all(&merged_path).await
+        fs::create_dir_all(&merged_path)
+            .await
             .with_context(|| format!("Failed to create merged directory: {:?}", merged_path))?;
-        fs::create_dir_all(&work_path).await
+        fs::create_dir_all(&work_path)
+            .await
             .with_context(|| format!("Failed to create work directory: {:?}", work_path))?;
 
         let layer_info = LayerInfo {
@@ -114,18 +121,36 @@ impl OverlayDriver {
 
             // Remove directories
             if layer_info.merged_path.exists() {
-                fs::remove_dir_all(&layer_info.merged_path).await
-                    .with_context(|| format!("Failed to remove merged directory: {:?}", layer_info.merged_path))?;
+                fs::remove_dir_all(&layer_info.merged_path)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "Failed to remove merged directory: {:?}",
+                            layer_info.merged_path
+                        )
+                    })?;
             }
 
             if layer_info.diff_path.exists() {
-                fs::remove_dir_all(&layer_info.diff_path).await
-                    .with_context(|| format!("Failed to remove diff directory: {:?}", layer_info.diff_path))?;
+                fs::remove_dir_all(&layer_info.diff_path)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "Failed to remove diff directory: {:?}",
+                            layer_info.diff_path
+                        )
+                    })?;
             }
 
             if layer_info.work_path.exists() {
-                fs::remove_dir_all(&layer_info.work_path).await
-                    .with_context(|| format!("Failed to remove work directory: {:?}", layer_info.work_path))?;
+                fs::remove_dir_all(&layer_info.work_path)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "Failed to remove work directory: {:?}",
+                            layer_info.work_path
+                        )
+                    })?;
             }
 
             info!("✅ Overlay layer removed: {}", layer_id);
@@ -183,11 +208,12 @@ pub struct StorageUsage {
 fn get_directory_size_sync(path: &Path) -> Result<u64> {
     let mut total_size = 0u64;
 
-    for entry in std::fs::read_dir(path)
-        .with_context(|| format!("Failed to read directory: {:?}", path))? {
-
+    for entry in
+        std::fs::read_dir(path).with_context(|| format!("Failed to read directory: {:?}", path))?
+    {
         let entry = entry?;
-        let metadata = entry.metadata()
+        let metadata = entry
+            .metadata()
             .with_context(|| format!("Failed to get metadata for: {:?}", entry.path()))?;
 
         if metadata.is_file() {

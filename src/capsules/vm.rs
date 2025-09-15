@@ -1,11 +1,11 @@
 // VM-like isolation for Bolt Capsules with GPU passthrough
-use anyhow::{Result, Context};
-use tracing::{info, warn, debug};
-use std::path::{Path, PathBuf};
-use std::collections::HashMap;
+use anyhow::{Context, Result};
+use nix::unistd::{Gid, Uid};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use tokio::process::Command;
-use nix::unistd::{Uid, Gid};
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VMConfig {
@@ -143,7 +143,8 @@ impl VMManager {
         }
 
         // Configure network
-        self.setup_vm_network(&config.id, &config.network_mode).await?;
+        self.setup_vm_network(&config.id, &config.network_mode)
+            .await?;
 
         // Setup storage devices
         for device in &config.storage_devices {
@@ -175,7 +176,11 @@ impl VMManager {
         Ok(())
     }
 
-    async fn setup_nvidia_passthrough(&self, vm_id: &str, nvidia: &NvidiaPassthrough) -> Result<()> {
+    async fn setup_nvidia_passthrough(
+        &self,
+        vm_id: &str,
+        nvidia: &NvidiaPassthrough,
+    ) -> Result<()> {
         info!("🟢 Setting up NVIDIA GPU passthrough");
 
         if let Some(ref manager) = self.nvidia_manager {
@@ -189,7 +194,11 @@ impl VMManager {
         Ok(())
     }
 
-    async fn setup_nvidia_basic_passthrough(&self, vm_id: &str, nvidia: &NvidiaPassthrough) -> Result<()> {
+    async fn setup_nvidia_basic_passthrough(
+        &self,
+        vm_id: &str,
+        nvidia: &NvidiaPassthrough,
+    ) -> Result<()> {
         // Check for NVIDIA devices
         let nvidia_devices = vec![
             "/dev/nvidia0",
@@ -208,7 +217,10 @@ impl VMManager {
 
         // Set CUDA environment
         if !nvidia.cuda_visible_devices.is_empty() {
-            debug!("  Setting CUDA_VISIBLE_DEVICES={}", nvidia.cuda_visible_devices);
+            debug!(
+                "  Setting CUDA_VISIBLE_DEVICES={}",
+                nvidia.cuda_visible_devices
+            );
         }
 
         // Configure driver capabilities
@@ -289,7 +301,10 @@ impl VMManager {
 
         match mode {
             NetworkMode::QUIC(config) => {
-                info!("  Using QUIC networking: {}:{}", config.endpoint, config.port);
+                info!(
+                    "  Using QUIC networking: {}:{}",
+                    config.endpoint, config.port
+                );
                 // QUIC setup will be implemented in network module
             }
             NetworkMode::Slirp4netns => {
@@ -335,8 +350,7 @@ impl VMManager {
     pub async fn start_vm(&self, vm_id: &str) -> Result<()> {
         info!("▶️  Starting VM: {}", vm_id);
 
-        let config = self.vms.get(vm_id)
-            .context("VM not found")?;
+        let config = self.vms.get(vm_id).context("VM not found")?;
 
         // Would launch the actual VM process here
         info!("✅ VM {} started successfully", vm_id);
@@ -406,7 +420,8 @@ impl NvidiaManager {
             if self.driver_version < *required {
                 return Err(anyhow::anyhow!(
                     "Driver version {} required, but {} installed",
-                    required, self.driver_version
+                    required,
+                    self.driver_version
                 ));
             }
         }
@@ -417,7 +432,8 @@ impl NvidiaManager {
                 if cuda < required {
                     return Err(anyhow::anyhow!(
                         "CUDA version {} required, but {} installed",
-                        required, cuda
+                        required,
+                        cuda
                     ));
                 }
             } else {

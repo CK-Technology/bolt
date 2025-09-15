@@ -1,6 +1,6 @@
-use crate::{Result, BoltError};
-use tracing::{info, warn, debug};
+use crate::{BoltError, Result};
 use tokio::process::Command as AsyncCommand;
+use tracing::{debug, info, warn};
 
 pub mod oci;
 pub mod storage;
@@ -11,20 +11,29 @@ pub mod gpu;
 // Helper function to detect available container runtime
 pub async fn detect_container_runtime() -> Result<String> {
     // Try podman first (preferred for rootless)
-    if AsyncCommand::new("podman").arg("--version").output().await.is_ok() {
+    if AsyncCommand::new("podman")
+        .arg("--version")
+        .output()
+        .await
+        .is_ok()
+    {
         return Ok("podman".to_string());
     }
 
     // Fall back to docker
-    if AsyncCommand::new("docker").arg("--version").output().await.is_ok() {
+    if AsyncCommand::new("docker")
+        .arg("--version")
+        .output()
+        .await
+        .is_ok()
+    {
         return Ok("docker".to_string());
     }
 
     Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
-        message: "No container runtime found (podman or docker required)".to_string()
+        message: "No container runtime found (podman or docker required)".to_string(),
     }))
 }
-
 
 pub async fn run_container(
     image: &str,
@@ -119,9 +128,11 @@ pub async fn run_oci_container(
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(BoltError::Runtime(crate::error::RuntimeError::StartFailed {
-            reason: format!("Failed to run container: {}", stderr)
-        }));
+        return Err(BoltError::Runtime(
+            crate::error::RuntimeError::StartFailed {
+                reason: format!("Failed to run container: {}", stderr),
+            },
+        ));
     }
 
     let container_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -153,7 +164,7 @@ pub async fn build_image(path: &str, tag: Option<&str>, dockerfile: &str) -> Res
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
-            message: format!("Failed to build image: {}", stderr)
+            message: format!("Failed to build image: {}", stderr),
         }));
     }
 
@@ -172,9 +183,11 @@ pub async fn pull_image(image: &str) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(BoltError::Runtime(crate::error::RuntimeError::ImagePullFailed {
-            image: format!("Failed to pull image: {}", stderr)
-        }));
+        return Err(BoltError::Runtime(
+            crate::error::RuntimeError::ImagePullFailed {
+                image: format!("Failed to pull image: {}", stderr),
+            },
+        ));
     }
 
     info!("✅ Image pulled successfully: {}", image);
@@ -193,7 +206,7 @@ pub async fn push_image(image: &str) -> Result<()> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
-            message: format!("Failed to push image: {}", stderr)
+            message: format!("Failed to push image: {}", stderr),
         }));
     }
 
@@ -219,7 +232,7 @@ pub async fn list_containers(all: bool) -> Result<()> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
-            message: format!("Failed to list containers: {}", stderr)
+            message: format!("Failed to list containers: {}", stderr),
         }));
     }
 
@@ -229,7 +242,7 @@ pub async fn list_containers(all: bool) -> Result<()> {
 }
 
 // API-only functions for library usage
-use crate::{ContainerInfo};
+use crate::ContainerInfo;
 
 pub async fn list_containers_info(all: bool) -> Result<Vec<ContainerInfo>> {
     info!("📋 Listing containers (all: {})", all);
@@ -249,7 +262,7 @@ pub async fn list_containers_info(all: bool) -> Result<Vec<ContainerInfo>> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
-            message: format!("Failed to list containers: {}", stderr)
+            message: format!("Failed to list containers: {}", stderr),
         }));
     }
 
@@ -264,11 +277,33 @@ pub async fn list_containers_info(all: bool) -> Result<Vec<ContainerInfo>> {
 
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
             let container = ContainerInfo {
-                id: value.get("Id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                name: value.get("Names").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                image: value.get("Image").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                status: value.get("Status").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                ports: value.get("Ports").and_then(|v| v.as_str()).unwrap_or("").split(',').map(|s| s.trim().to_string()).collect(),
+                id: value
+                    .get("Id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                name: value
+                    .get("Names")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                image: value
+                    .get("Image")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                status: value
+                    .get("Status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                ports: value
+                    .get("Ports")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .collect(),
             };
             containers.push(container);
         }
@@ -289,7 +324,7 @@ pub async fn stop_container(container: &str) -> Result<()> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
-            message: format!("Failed to stop container: {}", stderr)
+            message: format!("Failed to stop container: {}", stderr),
         }));
     }
 
@@ -315,7 +350,7 @@ pub async fn remove_container(container: &str, force: bool) -> Result<()> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
-            message: format!("Failed to remove container: {}", stderr)
+            message: format!("Failed to remove container: {}", stderr),
         }));
     }
 

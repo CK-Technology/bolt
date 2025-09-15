@@ -1,10 +1,10 @@
-use crate::{Result, BoltError};
+use crate::config::{BoltConfig, BoltFile};
 use crate::error::RuntimeError;
-use anyhow::anyhow;
-use tracing::{info, warn, debug, error};
-use crate::config::{BoltFile, BoltConfig};
 use crate::runtime;
+use crate::{BoltError, Result};
+use anyhow::anyhow;
 use std::collections::HashMap;
+use tracing::{debug, error, info, warn};
 
 pub mod status_api;
 
@@ -16,11 +16,14 @@ pub async fn up(
 ) -> Result<()> {
     info!("🚀 Surge orchestration starting up...");
 
-    let boltfile = config.load_boltfile()
-        .map_err(|e| {
-            error!("Failed to load Boltfile: {}", e);
-            BoltError::Other(anyhow!("Cannot load Boltfile at {:?}: {}", config.boltfile_path, e))
-        })?;
+    let boltfile = config.load_boltfile().map_err(|e| {
+        error!("Failed to load Boltfile: {}", e);
+        BoltError::Other(anyhow!(
+            "Cannot load Boltfile at {:?}: {}",
+            config.boltfile_path,
+            e
+        ))
+    })?;
 
     info!("📦 Project: {}", boltfile.project);
 
@@ -49,10 +52,20 @@ pub async fn up(
                 // Prepare container arguments
                 let container_name = format!("{}_{}", boltfile.project, service_name);
                 let ports = service.ports.as_ref().map(|p| p.as_slice()).unwrap_or(&[]);
-                let env_vars = service.env.as_ref()
-                    .map(|env| env.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>())
+                let env_vars = service
+                    .env
+                    .as_ref()
+                    .map(|env| {
+                        env.iter()
+                            .map(|(k, v)| format!("{}={}", k, v))
+                            .collect::<Vec<_>>()
+                    })
                     .unwrap_or_default();
-                let volumes = service.volumes.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
+                let volumes = service
+                    .volumes
+                    .as_ref()
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[]);
 
                 // Stop existing container if force_recreate
                 if force_recreate {
@@ -72,28 +85,21 @@ pub async fn up(
                     ports,
                     &env_vars,
                     volumes,
-                    detach
-                ).await?;
+                    detach,
+                )
+                .await?;
 
                 info!("✅ Service {} started successfully", service_name);
-
             } else if let Some(ref capsule) = service.capsule {
                 info!("  🔧 Capsule: {}", capsule);
 
                 let container_name = format!("{}_{}", boltfile.project, service_name);
                 let bolt_image = format!("bolt://{}", capsule);
 
-                runtime::run_container(
-                    &bolt_image,
-                    Some(&container_name),
-                    &[],
-                    &[],
-                    &[],
-                    detach
-                ).await?;
+                runtime::run_container(&bolt_image, Some(&container_name), &[], &[], &[], detach)
+                    .await?;
 
                 info!("✅ Capsule {} started successfully", service_name);
-
             } else if let Some(ref build) = service.build {
                 info!("  🔨 Build context: {}", build);
 
@@ -106,10 +112,20 @@ pub async fn up(
                 // Run the built image
                 let container_name = format!("{}_{}", boltfile.project, service_name);
                 let ports = service.ports.as_ref().map(|p| p.as_slice()).unwrap_or(&[]);
-                let env_vars = service.env.as_ref()
-                    .map(|env| env.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>())
+                let env_vars = service
+                    .env
+                    .as_ref()
+                    .map(|env| {
+                        env.iter()
+                            .map(|(k, v)| format!("{}={}", k, v))
+                            .collect::<Vec<_>>()
+                    })
                     .unwrap_or_default();
-                let volumes = service.volumes.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
+                let volumes = service
+                    .volumes
+                    .as_ref()
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[]);
 
                 runtime::run_container(
                     &image_tag,
@@ -117,12 +133,16 @@ pub async fn up(
                     ports,
                     &env_vars,
                     volumes,
-                    detach
-                ).await?;
+                    detach,
+                )
+                .await?;
 
                 info!("✅ Service {} built and started successfully", service_name);
             } else {
-                error!("Service {} has no image, capsule, or build configuration", service_name);
+                error!(
+                    "Service {} has no image, capsule, or build configuration",
+                    service_name
+                );
             }
         } else {
             error!("Service '{}' not found in Boltfile", service_name);
@@ -132,12 +152,7 @@ pub async fn up(
     Ok(())
 }
 
-
-pub async fn down(
-    config: &BoltConfig,
-    services: &[String],
-    remove_volumes: bool,
-) -> Result<()> {
+pub async fn down(config: &BoltConfig, services: &[String], remove_volumes: bool) -> Result<()> {
     info!("🛑 Surge orchestration shutting down...");
 
     let boltfile = config.load_boltfile()?;
@@ -179,7 +194,6 @@ pub async fn down(
     Ok(())
 }
 
-
 pub async fn status(config: &BoltConfig) -> Result<()> {
     info!("📊 Checking surge status...");
 
@@ -188,7 +202,10 @@ pub async fn status(config: &BoltConfig) -> Result<()> {
 
     println!("Project: {}", boltfile.project);
     println!();
-    println!("{:<15} {:<12} {:<15} {}", "SERVICE", "STATUS", "CONTAINER", "PORTS");
+    println!(
+        "{:<15} {:<12} {:<15} {}",
+        "SERVICE", "STATUS", "CONTAINER", "PORTS"
+    );
 
     for (name, service) in &boltfile.services {
         let container_name = format!("{}_{}", boltfile.project, name);
@@ -199,7 +216,8 @@ pub async fn status(config: &BoltConfig) -> Result<()> {
             None => ("not running".to_string(), "-".to_string()),
         };
 
-        let ports = service.ports
+        let ports = service
+            .ports
             .as_ref()
             .map(|p| p.join(", "))
             .unwrap_or_else(|| "-".to_string());
@@ -209,7 +227,6 @@ pub async fn status(config: &BoltConfig) -> Result<()> {
 
     Ok(())
 }
-
 
 pub async fn logs(
     config: &BoltConfig,
@@ -242,7 +259,9 @@ pub async fn logs(
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(BoltError::Runtime(RuntimeError::StartFailed { reason: format!("Failed to get logs: {}", stderr) }));
+                return Err(BoltError::Runtime(RuntimeError::StartFailed {
+                    reason: format!("Failed to get logs: {}", stderr),
+                }));
             }
 
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -285,12 +304,16 @@ pub async fn scale(config: &BoltConfig, services: &[String]) -> Result<()> {
     for service_spec in services {
         let parts: Vec<&str> = service_spec.split('=').collect();
         if parts.len() != 2 {
-            error!("Invalid scale format: {} (expected service=count)", service_spec);
+            error!(
+                "Invalid scale format: {} (expected service=count)",
+                service_spec
+            );
             continue;
         }
 
         let service_name = parts[0];
-        let count: u32 = parts[1].parse()
+        let count: u32 = parts[1]
+            .parse()
             .map_err(|_| anyhow!("Invalid count: {}", parts[1]))?;
 
         if !boltfile.services.contains_key(service_name) {
@@ -303,7 +326,8 @@ pub async fn scale(config: &BoltConfig, services: &[String]) -> Result<()> {
         // Get current running containers for this service
         let container_prefix = format!("{}_{}", boltfile.project, service_name);
         let containers = runtime::list_containers_info(true).await?;
-        let current_containers: Vec<_> = containers.iter()
+        let current_containers: Vec<_> = containers
+            .iter()
             .filter(|c| c.name.starts_with(&container_prefix))
             .collect();
 
@@ -318,10 +342,20 @@ pub async fn scale(config: &BoltConfig, services: &[String]) -> Result<()> {
 
                 if let Some(ref image) = service.image {
                     let ports = service.ports.as_ref().map(|p| p.as_slice()).unwrap_or(&[]);
-                    let env_vars = service.env.as_ref()
-                        .map(|env| env.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>())
+                    let env_vars = service
+                        .env
+                        .as_ref()
+                        .map(|env| {
+                            env.iter()
+                                .map(|(k, v)| format!("{}={}", k, v))
+                                .collect::<Vec<_>>()
+                        })
                         .unwrap_or_default();
-                    let volumes = service.volumes.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
+                    let volumes = service
+                        .volumes
+                        .as_ref()
+                        .map(|v| v.as_slice())
+                        .unwrap_or(&[]);
 
                     runtime::run_container(
                         image,
@@ -329,8 +363,9 @@ pub async fn scale(config: &BoltConfig, services: &[String]) -> Result<()> {
                         ports,
                         &env_vars,
                         volumes,
-                        true  // Always detached for scaling
-                    ).await?;
+                        true, // Always detached for scaling
+                    )
+                    .await?;
 
                     info!("✅ Started instance: {}", instance_name);
                 }
@@ -353,8 +388,10 @@ pub async fn scale(config: &BoltConfig, services: &[String]) -> Result<()> {
     Ok(())
 }
 
-
-async fn setup_gaming_service(service_name: &str, gaming_config: &crate::config::GamingConfig) -> Result<()> {
+async fn setup_gaming_service(
+    service_name: &str,
+    gaming_config: &crate::config::GamingConfig,
+) -> Result<()> {
     info!("🎮 Setting up gaming optimizations for {}", service_name);
 
     if let Some(ref gpu) = gaming_config.gpu {

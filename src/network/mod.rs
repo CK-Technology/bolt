@@ -1,9 +1,9 @@
-use crate::{Result, BoltError};
-use crate::error::RuntimeError;
-use anyhow::anyhow;
-use tracing::{info, warn, debug};
 use crate::NetworkInfo;
+use crate::error::RuntimeError;
+use crate::{BoltError, Result};
+use anyhow::anyhow;
 use tokio::process::Command as AsyncCommand;
+use tracing::{debug, info, warn};
 
 pub async fn create_network(name: &str, driver: &str, subnet: Option<&str>) -> Result<()> {
     info!("🌐 Creating network: {}", name);
@@ -28,9 +28,10 @@ pub async fn create_network(name: &str, driver: &str, subnet: Option<&str>) -> R
             info!("  🏠 Using host networking");
             create_host_network(name).await
         }
-        _ => {
-            Err(BoltError::Other(anyhow!("Unsupported network driver: {}", driver)))
-        }
+        _ => Err(BoltError::Other(anyhow!(
+            "Unsupported network driver: {}",
+            driver
+        ))),
     }
 }
 
@@ -68,7 +69,9 @@ async fn create_bolt_network(name: &str, subnet: Option<&str>) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(BoltError::Runtime(RuntimeError::StartFailed { reason: format!("Failed to create Bolt network: {}", stderr) }));
+        return Err(BoltError::Runtime(RuntimeError::StartFailed {
+            reason: format!("Failed to create Bolt network: {}", stderr),
+        }));
     }
 
     info!("✅ Bolt QUIC network created: {}", name);
@@ -101,7 +104,9 @@ async fn create_bridge_network(name: &str, subnet: Option<&str>) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(BoltError::Runtime(RuntimeError::StartFailed { reason: format!("Failed to create network: {}", stderr) }));
+        return Err(BoltError::Runtime(RuntimeError::StartFailed {
+            reason: format!("Failed to create network: {}", stderr),
+        }));
     }
 
     info!("✅ Bridge network created: {}", name);
@@ -121,7 +126,9 @@ async fn create_host_network(name: &str) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(BoltError::Runtime(RuntimeError::StartFailed { reason: format!("Failed to create host network: {}", stderr) }));
+        return Err(BoltError::Runtime(RuntimeError::StartFailed {
+            reason: format!("Failed to create host network: {}", stderr),
+        }));
     }
 
     info!("✅ Host network created: {}", name);
@@ -150,13 +157,18 @@ pub async fn list_networks() -> Result<()> {
     let runtime = crate::runtime::detect_container_runtime().await?;
     let mut cmd = AsyncCommand::new(&runtime);
     cmd.arg("network").arg("ls");
-    cmd.arg("--format").arg("table {{.ID}}\t{{.Name}}\t{{.Driver}}\t{{.Scope}}");
+    cmd.arg("--format")
+        .arg("table {{.ID}}\t{{.Name}}\t{{.Driver}}\t{{.Scope}}");
 
     let output = cmd.output().await?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(BoltError::Runtime(crate::error::RuntimeError::StartFailed { reason: format!("Failed to list networks: {}", stderr) }));
+        return Err(BoltError::Runtime(
+            crate::error::RuntimeError::StartFailed {
+                reason: format!("Failed to list networks: {}", stderr),
+            },
+        ));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -169,7 +181,10 @@ pub async fn remove_network(name: &str) -> Result<()> {
     info!("🗑️  Removing network: {}", name);
 
     if name == "default" || name == "bridge" || name == "host" {
-        return Err(BoltError::Other(anyhow!("Cannot remove system network: {}", name)));
+        return Err(BoltError::Other(anyhow!(
+            "Cannot remove system network: {}",
+            name
+        )));
     }
 
     let runtime = crate::runtime::detect_container_runtime().await?;
@@ -180,7 +195,11 @@ pub async fn remove_network(name: &str) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(BoltError::Runtime(crate::error::RuntimeError::StartFailed { reason: format!("Failed to remove network: {}", stderr) }));
+        return Err(BoltError::Runtime(
+            crate::error::RuntimeError::StartFailed {
+                reason: format!("Failed to remove network: {}", stderr),
+            },
+        ));
     }
 
     info!("✅ Network removed: {}", name);
@@ -192,7 +211,10 @@ fn validate_subnet(subnet: &str) -> Result<()> {
         debug!("Subnet format appears valid: {}", subnet);
         Ok(())
     } else {
-        Err(BoltError::Other(anyhow!("Invalid subnet format: {} (expected CIDR notation)", subnet)))
+        Err(BoltError::Other(anyhow!(
+            "Invalid subnet format: {} (expected CIDR notation)",
+            subnet
+        )))
     }
 }
 
@@ -263,7 +285,10 @@ impl NetworkManager {
 }
 
 async fn configure_gaming_optimizations(network_name: &str) -> Result<()> {
-    info!("🎯 Configuring gaming optimizations for network: {}", network_name);
+    info!(
+        "🎯 Configuring gaming optimizations for network: {}",
+        network_name
+    );
 
     // Configure network parameters for gaming
     info!("  📊 Setting network parameters:");
@@ -281,7 +306,12 @@ async fn configure_podman_rootless() -> Result<()> {
     info!("🔧 Configuring Podman rootless networking");
 
     // Check for slirp4netns
-    if AsyncCommand::new("slirp4netns").arg("--version").output().await.is_ok() {
+    if AsyncCommand::new("slirp4netns")
+        .arg("--version")
+        .output()
+        .await
+        .is_ok()
+    {
         info!("  ✅ slirp4netns available");
     } else {
         warn!("  ⚠️  slirp4netns not found - install for better performance");
@@ -314,7 +344,11 @@ pub async fn list_networks_info() -> Result<Vec<NetworkInfo>> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(BoltError::Runtime(crate::error::RuntimeError::StartFailed { reason: format!("Failed to list networks: {}", stderr) }));
+        return Err(BoltError::Runtime(
+            crate::error::RuntimeError::StartFailed {
+                reason: format!("Failed to list networks: {}", stderr),
+            },
+        ));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -328,9 +362,20 @@ pub async fn list_networks_info() -> Result<Vec<NetworkInfo>> {
 
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
             let network = NetworkInfo {
-                name: value.get("Name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                driver: value.get("Driver").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                subnet: value.get("Subnet").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                name: value
+                    .get("Name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                driver: value
+                    .get("Driver")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                subnet: value
+                    .get("Subnet")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
             };
             networks.push(network);
         }

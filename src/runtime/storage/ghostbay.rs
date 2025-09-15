@@ -1,10 +1,9 @@
-use anyhow::{Result, Context};
-use tracing::{info, warn, debug};
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use serde::{Deserialize, Serialize};
-use tokio::fs;
+use anyhow::{Context, Result};
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use tokio::fs;
+use tracing::{debug, info};
 
 /// Specialized Ghostbay integration for Bolt container runtime
 /// Provides optimized container image storage, gaming asset management, and cluster coordination
@@ -160,7 +159,8 @@ impl GhostbayClient {
             "client": "bolt-runtime"
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&auth_url)
             .json(&auth_payload)
             .send()
@@ -171,7 +171,10 @@ impl GhostbayClient {
             debug!("✅ Ghostbay authentication successful");
         } else {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!("Ghostbay authentication failed: {}", error_text));
+            return Err(anyhow::anyhow!(
+                "Ghostbay authentication failed: {}",
+                error_text
+            ));
         }
 
         Ok(())
@@ -182,9 +185,13 @@ impl GhostbayClient {
 
         let features_url = format!("{}/api/v1/features", self.endpoint);
 
-        let response = self.client
+        let response = self
+            .client
             .get(&features_url)
-            .header("Authorization", format!("Bearer {}:{}", self.access_key, self.secret_key))
+            .header(
+                "Authorization",
+                format!("Bearer {}:{}", self.access_key, self.secret_key),
+            )
             .send()
             .await
             .context("Failed to get Ghostbay features")?;
@@ -221,13 +228,17 @@ impl GhostbayClient {
         // Parse image reference
         let (namespace, name, tag) = self.parse_image_ref(image_ref)?;
 
-        let push_url = format!("{}/api/v1/registry/{}/{}/push", self.endpoint, namespace, name);
+        let push_url = format!(
+            "{}/api/v1/registry/{}/{}/push",
+            self.endpoint, namespace, name
+        );
 
         // Read and analyze image for gaming content
         let gaming_optimized = self.analyze_gaming_content(local_path).await?;
 
         // Create multipart upload
-        let file_content = tokio::fs::read(local_path).await
+        let file_content = tokio::fs::read(local_path)
+            .await
             .context("Failed to read image file")?;
         let file_part = reqwest::multipart::Part::bytes(file_content)
             .file_name(tag.clone())
@@ -240,9 +251,13 @@ impl GhostbayClient {
             .text("bolt_runtime", "true")
             .part("image", file_part);
 
-        let response = self.client
+        let response = self
+            .client
             .post(&push_url)
-            .header("Authorization", format!("Bearer {}:{}", self.access_key, self.secret_key))
+            .header(
+                "Authorization",
+                format!("Bearer {}:{}", self.access_key, self.secret_key),
+            )
             .multipart(form)
             .send()
             .await
@@ -254,9 +269,15 @@ impl GhostbayClient {
         }
 
         let push_result: serde_json::Value = response.json().await?;
-        let digest = push_result["digest"].as_str().unwrap_or("unknown").to_string();
+        let digest = push_result["digest"]
+            .as_str()
+            .unwrap_or("unknown")
+            .to_string();
 
-        info!("✅ Image pushed successfully: {} (digest: {})", image_ref, digest);
+        info!(
+            "✅ Image pushed successfully: {} (digest: {})",
+            image_ref, digest
+        );
 
         if gaming_optimized {
             info!("  🎮 Gaming optimizations applied");
@@ -267,7 +288,11 @@ impl GhostbayClient {
     }
 
     /// Pull a container image from Ghostbay with optimized downloads
-    pub async fn pull_container_image(&self, image_ref: &str, local_path: &Path) -> Result<GhostbayContainerImage> {
+    pub async fn pull_container_image(
+        &self,
+        image_ref: &str,
+        local_path: &Path,
+    ) -> Result<GhostbayContainerImage> {
         info!("📥 Pulling container image from Ghostbay: {}", image_ref);
 
         if !self.features.container_registry {
@@ -277,13 +302,22 @@ impl GhostbayClient {
         let (namespace, name, tag) = self.parse_image_ref(image_ref)?;
 
         // Get image manifest first
-        let manifest_url = format!("{}/api/v1/registry/{}/{}/manifests/{}",
-                                  self.endpoint, namespace, name, tag);
+        let manifest_url = format!(
+            "{}/api/v1/registry/{}/{}/manifests/{}",
+            self.endpoint, namespace, name, tag
+        );
 
-        let manifest_response = self.client
+        let manifest_response = self
+            .client
             .get(&manifest_url)
-            .header("Authorization", format!("Bearer {}:{}", self.access_key, self.secret_key))
-            .header("Accept", "application/vnd.docker.distribution.manifest.v2+json")
+            .header(
+                "Authorization",
+                format!("Bearer {}:{}", self.access_key, self.secret_key),
+            )
+            .header(
+                "Accept",
+                "application/vnd.docker.distribution.manifest.v2+json",
+            )
             .send()
             .await
             .context("Failed to get image manifest")?;
@@ -295,12 +329,15 @@ impl GhostbayClient {
         let manifest: serde_json::Value = manifest_response.json().await?;
 
         // Download image with Ghostbay optimizations
-        let pull_url = format!("{}/api/v1/registry/{}/{}/pull/{}",
-                              self.endpoint, namespace, name, tag);
+        let pull_url = format!(
+            "{}/api/v1/registry/{}/{}/pull/{}",
+            self.endpoint, namespace, name, tag
+        );
 
-        let mut download_request = self.client
-            .get(&pull_url)
-            .header("Authorization", format!("Bearer {}:{}", self.access_key, self.secret_key));
+        let mut download_request = self.client.get(&pull_url).header(
+            "Authorization",
+            format!("Bearer {}:{}", self.access_key, self.secret_key),
+        );
 
         // Enable gaming optimizations if supported
         if self.features.gaming_assets {
@@ -343,7 +380,10 @@ impl GhostbayClient {
         Ok(GhostbayContainerImage {
             name: format!("{}/{}", namespace, name),
             tag,
-            digest: manifest["config"]["digest"].as_str().unwrap_or("").to_string(),
+            digest: manifest["config"]["digest"]
+                .as_str()
+                .unwrap_or("")
+                .to_string(),
             size: manifest["config"]["size"].as_u64().unwrap_or(0),
             layers: Vec::new(), // Would parse from manifest
             manifest,
@@ -353,7 +393,11 @@ impl GhostbayClient {
     }
 
     /// Upload gaming assets with specialized optimization
-    pub async fn upload_gaming_assets(&self, assets_dir: &Path, game_id: &str) -> Result<Vec<String>> {
+    pub async fn upload_gaming_assets(
+        &self,
+        assets_dir: &Path,
+        game_id: &str,
+    ) -> Result<Vec<String>> {
         info!("🎮 Uploading gaming assets for: {}", game_id);
 
         if !self.features.gaming_assets {
@@ -383,7 +427,11 @@ impl GhostbayClient {
     }
 
     async fn upload_gaming_asset(&self, local_path: &Path, asset_key: &str) -> Result<()> {
-        debug!("📤 Uploading gaming asset: {} -> {}", local_path.display(), asset_key);
+        debug!(
+            "📤 Uploading gaming asset: {} -> {}",
+            local_path.display(),
+            asset_key
+        );
 
         let upload_url = format!("{}/api/v1/gaming/assets/upload", self.endpoint);
 
@@ -398,15 +446,22 @@ impl GhostbayClient {
             .text("compression", "true")
             .part("asset", file_part);
 
-        let response = self.client
+        let response = self
+            .client
             .post(&upload_url)
-            .header("Authorization", format!("Bearer {}:{}", self.access_key, self.secret_key))
+            .header(
+                "Authorization",
+                format!("Bearer {}:{}", self.access_key, self.secret_key),
+            )
             .multipart(form)
             .send()
             .await?;
 
         if !response.status().is_success() {
-            return Err(anyhow::anyhow!("Failed to upload gaming asset: {}", asset_key));
+            return Err(anyhow::anyhow!(
+                "Failed to upload gaming asset: {}",
+                asset_key
+            ));
         }
 
         debug!("✅ Gaming asset uploaded: {}", asset_key);
@@ -418,10 +473,32 @@ impl GhostbayClient {
 
         // Gaming file extensions to look for
         let gaming_extensions = [
-            ".pak", ".vpk", ".wad", ".bsp", ".mdl", ".vtx", ".vvd", ".phy",
-            ".dds", ".tga", ".wav", ".ogg", ".mp3", ".bik", ".wmv",
-            ".dll", ".exe", ".bat", ".cfg", ".ini", ".lua", ".py",
-            ".unity3d", ".assets", ".resource", ".bundle",
+            ".pak",
+            ".vpk",
+            ".wad",
+            ".bsp",
+            ".mdl",
+            ".vtx",
+            ".vvd",
+            ".phy",
+            ".dds",
+            ".tga",
+            ".wav",
+            ".ogg",
+            ".mp3",
+            ".bik",
+            ".wmv",
+            ".dll",
+            ".exe",
+            ".bat",
+            ".cfg",
+            ".ini",
+            ".lua",
+            ".py",
+            ".unity3d",
+            ".assets",
+            ".resource",
+            ".bundle",
         ];
 
         let mut stack = vec![dir.to_path_buf()];
@@ -436,7 +513,10 @@ impl GhostbayClient {
                     stack.push(path);
                 } else if let Some(extension) = path.extension() {
                     let ext_str = extension.to_string_lossy().to_lowercase();
-                    if gaming_extensions.iter().any(|&ge| ge == format!(".{}", ext_str)) {
+                    if gaming_extensions
+                        .iter()
+                        .any(|&ge| ge == format!(".{}", ext_str))
+                    {
                         gaming_files.push(path);
                     }
                 }
@@ -486,35 +566,53 @@ impl GhostbayClient {
 
         let status_url = format!("{}/api/v1/cluster/status", self.endpoint);
 
-        let response = self.client
+        let response = self
+            .client
             .get(&status_url)
-            .header("Authorization", format!("Bearer {}:{}", self.access_key, self.secret_key))
+            .header(
+                "Authorization",
+                format!("Bearer {}:{}", self.access_key, self.secret_key),
+            )
             .send()
             .await
             .context("Failed to get cluster status")?;
 
         if response.status().is_success() {
-            let status: GhostbayClusterStatus = response.json().await
+            let status: GhostbayClusterStatus = response
+                .json()
+                .await
                 .context("Failed to parse cluster status")?;
 
-            info!("  📋 Cluster: {} ({})", status.name, match status.status {
-                ClusterStatus::Healthy => "✅ Healthy",
-                ClusterStatus::Degraded => "⚠️ Degraded",
-                ClusterStatus::Maintenance => "🔧 Maintenance",
-                ClusterStatus::Critical => "🚨 Critical",
-            });
+            info!(
+                "  📋 Cluster: {} ({})",
+                status.name,
+                match status.status {
+                    ClusterStatus::Healthy => "✅ Healthy",
+                    ClusterStatus::Degraded => "⚠️ Degraded",
+                    ClusterStatus::Maintenance => "🔧 Maintenance",
+                    ClusterStatus::Critical => "🚨 Critical",
+                }
+            );
             info!("  🖥️  Nodes: {}", status.nodes.len());
-            info!("  💾 Storage: {:.1}% used",
-                  (status.storage.used_space as f64 / status.storage.total_capacity as f64) * 100.0);
+            info!(
+                "  💾 Storage: {:.1}% used",
+                (status.storage.used_space as f64 / status.storage.total_capacity as f64) * 100.0
+            );
 
             Ok(status)
         } else {
-            Err(anyhow::anyhow!("Failed to get cluster status: HTTP {}", response.status()))
+            Err(anyhow::anyhow!(
+                "Failed to get cluster status: HTTP {}",
+                response.status()
+            ))
         }
     }
 
     pub async fn create_distributed_cache(&self, cache_name: &str, size_gb: u32) -> Result<()> {
-        info!("🗄️  Creating distributed cache: {} ({}GB)", cache_name, size_gb);
+        info!(
+            "🗄️  Creating distributed cache: {} ({}GB)",
+            cache_name, size_gb
+        );
 
         if !self.features.distributed_cache {
             return Err(anyhow::anyhow!("Distributed cache feature not enabled"));
@@ -530,9 +628,13 @@ impl GhostbayClient {
             "gaming_optimized": true
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&cache_url)
-            .header("Authorization", format!("Bearer {}:{}", self.access_key, self.secret_key))
+            .header(
+                "Authorization",
+                format!("Bearer {}:{}", self.access_key, self.secret_key),
+            )
             .json(&cache_config)
             .send()
             .await?;
@@ -586,11 +688,19 @@ pub async fn create_ghostbay_volume(config: GhostbayConfig, volume_name: &str) -
     info!("  👻 Provider: Ghostbay");
     info!("  🪣 Bucket: {}", bucket_name);
     info!("  🎮 Gaming optimized: {}", client.features.gaming_assets);
-    info!("  🗄️  Distributed cache: {}", client.features.distributed_cache);
-    info!("  🔗 Deduplication: {}", client.features.content_deduplication);
+    info!(
+        "  🗄️  Distributed cache: {}",
+        client.features.distributed_cache
+    );
+    info!(
+        "  🔗 Deduplication: {}",
+        client.features.content_deduplication
+    );
 
     if client.features.distributed_cache {
-        client.create_distributed_cache(&format!("{}-cache", volume_name), 10).await?;
+        client
+            .create_distributed_cache(&format!("{}-cache", volume_name), 10)
+            .await?;
     }
 
     info!("✅ Ghostbay volume created: {}", volume_name);

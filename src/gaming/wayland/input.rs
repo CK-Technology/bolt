@@ -1,9 +1,9 @@
-use anyhow::{Result, Context};
-use tracing::{info, debug, warn};
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
+use tracing::{debug, info, warn};
 
 use super::WaylandGamingConfig;
 
@@ -154,7 +154,7 @@ impl InputManager {
                 id: 3,
                 name: "Gaming Controller".to_string(),
                 device_type: InputDeviceType::Gamepad,
-                vendor_id: 0x045e, // Microsoft
+                vendor_id: 0x045e,  // Microsoft
                 product_id: 0x02ea, // Xbox Controller
                 gaming_optimized: false,
                 polling_rate: 125,
@@ -166,8 +166,10 @@ impl InputManager {
         {
             let mut device_map = self.devices.write().await;
             for device in devices {
-                info!("  🖱️  Detected: {} ({:?}, {}Hz)",
-                      device.name, device.device_type, device.polling_rate);
+                info!(
+                    "  🖱️  Detected: {} ({:?}, {}Hz)",
+                    device.name, device.device_type, device.polling_rate
+                );
 
                 device_map.insert(device.id, device);
             }

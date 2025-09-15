@@ -1,6 +1,8 @@
-/// Comprehensive API tests to verify production readiness
-use bolt::{BoltRuntime, BoltConfig, BoltFileBuilder, ContainerInfo, ServiceInfo, NetworkInfo, SurgeStatus};
 use bolt::api::*;
+/// Comprehensive API tests to verify production readiness
+use bolt::{
+    BoltConfig, BoltFileBuilder, BoltRuntime, ContainerInfo, NetworkInfo, ServiceInfo, SurgeStatus,
+};
 
 #[tokio::test]
 async fn test_complete_api_surface() {
@@ -12,7 +14,10 @@ async fn test_complete_api_surface() {
 
     // 2. Test BoltRuntime creation
     let runtime_result = BoltRuntime::new();
-    assert!(runtime_result.is_ok(), "BoltRuntime should create successfully");
+    assert!(
+        runtime_result.is_ok(),
+        "BoltRuntime should create successfully"
+    );
 
     let runtime = runtime_result.unwrap();
 
@@ -59,12 +64,15 @@ async fn test_complete_api_surface() {
 
     let boltfile = BoltFileBuilder::new("production-app")
         .add_service("cache", service_config)
-        .add_service("web", Service {
-            image: Some("nginx:alpine".to_string()),
-            ports: Some(vec!["80:80".to_string()]),
-            depends_on: Some(vec!["cache".to_string()]),
-            ..Default::default()
-        })
+        .add_service(
+            "web",
+            Service {
+                image: Some("nginx:alpine".to_string()),
+                ports: Some(vec!["80:80".to_string()]),
+                depends_on: Some(vec!["cache".to_string()]),
+                ..Default::default()
+            },
+        )
         .build();
 
     assert_eq!(boltfile.project, "production-app");
@@ -96,14 +104,14 @@ async fn test_error_handling_system() {
     match config_error {
         BoltError::Config(bolt::error::ConfigError::MissingField { field }) => {
             assert_eq!(field, "required_field");
-        },
+        }
         _ => panic!("Expected ConfigError::MissingField"),
     }
 
     match runtime_error {
         BoltError::Runtime(bolt::error::RuntimeError::ContainerNotFound { name }) => {
             assert_eq!(name, "missing-container");
-        },
+        }
         _ => panic!("Expected RuntimeError::ContainerNotFound"),
     }
 
@@ -112,11 +120,10 @@ async fn test_error_handling_system() {
     assert!(success_result.is_ok());
     assert_eq!(success_result.unwrap(), "success");
 
-    let error_result: Result<String> = Err(BoltError::Config(
-        bolt::error::ConfigError::InvalidFormat {
-            reason: "malformed TOML".to_string()
-        }
-    ));
+    let error_result: Result<String> =
+        Err(BoltError::Config(bolt::error::ConfigError::InvalidFormat {
+            reason: "malformed TOML".to_string(),
+        }));
     assert!(error_result.is_err());
 }
 
@@ -192,7 +199,10 @@ async fn test_configuration_serialization() {
 
     // Should be able to deserialize back
     let parsed_result: Result<bolt::config::BoltFile, _> = toml::from_str(&toml_string);
-    assert!(parsed_result.is_ok(), "TOML should deserialize back to BoltFile");
+    assert!(
+        parsed_result.is_ok(),
+        "TOML should deserialize back to BoltFile"
+    );
 
     let parsed_boltfile = parsed_result.unwrap();
     assert_eq!(parsed_boltfile.project, "serialization-test");

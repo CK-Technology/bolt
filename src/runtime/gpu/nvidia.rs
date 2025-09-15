@@ -1,10 +1,9 @@
-use anyhow::{Result, Context};
-use tracing::{info, warn, debug, error};
-use std::path::Path;
-use std::process::{Command, Stdio};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use super::{GPUInfo, GPUVendor};
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use std::path::Path;
+use std::process::Command;
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NvidiaManager {
@@ -38,7 +37,10 @@ impl NvidiaManager {
             .context("nvidia-smi not found - NVIDIA drivers may not be installed")?;
 
         if !output.status.success() {
-            return Err(anyhow::anyhow!("nvidia-smi failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow::anyhow!(
+                "nvidia-smi failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         // Parse GPU information
@@ -71,8 +73,8 @@ impl NvidiaManager {
         let cuda_version = Self::get_cuda_version().ok();
 
         // Check for nvidia-container-runtime
-        let container_runtime_available = Path::new("/usr/bin/nvidia-container-runtime").exists() ||
-                                         Path::new("/usr/bin/nvidia-docker").exists();
+        let container_runtime_available = Path::new("/usr/bin/nvidia-container-runtime").exists()
+            || Path::new("/usr/bin/nvidia-docker").exists();
 
         info!("📊 NVIDIA Detection Results:");
         info!("  Driver Version: {}", driver_version);
@@ -80,10 +82,20 @@ impl NvidiaManager {
             info!("  CUDA Version: {}", cuda);
         }
         info!("  GPUs Found: {}", gpus.len());
-        info!("  Container Runtime: {}", if container_runtime_available { "Available" } else { "Not Available" });
+        info!(
+            "  Container Runtime: {}",
+            if container_runtime_available {
+                "Available"
+            } else {
+                "Not Available"
+            }
+        );
 
         for gpu in &gpus {
-            info!("  GPU {}: {} ({}MB, {})", gpu.index, gpu.name, gpu.memory_mb, gpu.compute_capability);
+            info!(
+                "  GPU {}: {} ({}MB, {})",
+                gpu.index, gpu.name, gpu.memory_mb, gpu.compute_capability
+            );
         }
 
         Ok(Self {
@@ -144,10 +156,16 @@ impl NvidiaManager {
         container_id: &str,
         nvidia_config: &crate::config::NvidiaConfig,
     ) -> Result<()> {
-        info!("🟢 Setting up NVIDIA GPU access for container: {}", container_id);
+        info!(
+            "🟢 Setting up NVIDIA GPU access for container: {}",
+            container_id
+        );
 
         // Validate GPU device selection
-        let device_spec = nvidia_config.device.map(|d| d.to_string()).unwrap_or("all".to_string());
+        let device_spec = nvidia_config
+            .device
+            .map(|d| d.to_string())
+            .unwrap_or("all".to_string());
         let device_indices = self.parse_device_spec(&device_spec)?;
 
         for &index in &device_indices {
@@ -159,10 +177,12 @@ impl NvidiaManager {
         }
 
         // Setup device access
-        self.setup_device_access(container_id, &device_indices).await?;
+        self.setup_device_access(container_id, &device_indices)
+            .await?;
 
         // Configure CUDA environment
-        self.setup_cuda_environment(container_id, nvidia_config, &device_indices).await?;
+        self.setup_cuda_environment(container_id, nvidia_config, &device_indices)
+            .await?;
 
         // Enable specific features
         if nvidia_config.dlss == Some(true) {
@@ -175,13 +195,18 @@ impl NvidiaManager {
 
         // Set up container runtime integration
         if self.container_runtime_available {
-            self.setup_nvidia_container_runtime(container_id, nvidia_config).await?;
+            self.setup_nvidia_container_runtime(container_id, nvidia_config)
+                .await?;
         } else {
             warn!("⚠️ nvidia-container-runtime not available, using basic device access");
-            self.setup_basic_device_access(container_id, &device_indices).await?;
+            self.setup_basic_device_access(container_id, &device_indices)
+                .await?;
         }
 
-        info!("✅ NVIDIA GPU access configured for container: {}", container_id);
+        info!(
+            "✅ NVIDIA GPU access configured for container: {}",
+            container_id
+        );
         Ok(())
     }
 
@@ -204,7 +229,8 @@ impl NvidiaManager {
                 // Range: "0-2"
                 let parts: Vec<&str> = spec.split('-').collect();
                 if parts.len() == 2 {
-                    if let (Ok(start), Ok(end)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+                    if let (Ok(start), Ok(end)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>())
+                    {
                         indices.extend(start..=end);
                     }
                 }
@@ -216,7 +242,9 @@ impl NvidiaManager {
                 } else {
                     // Try UUID match
                     for (i, gpu) in self.gpus.iter().enumerate() {
-                        if gpu.uuid == spec || gpu.name.to_lowercase().contains(&spec.to_lowercase()) {
+                        if gpu.uuid == spec
+                            || gpu.name.to_lowercase().contains(&spec.to_lowercase())
+                        {
                             indices.push(i as u32);
                             break;
                         }
@@ -226,7 +254,10 @@ impl NvidiaManager {
         }
 
         if indices.is_empty() {
-            return Err(anyhow::anyhow!("No valid GPU devices found for spec: {}", device_spec));
+            return Err(anyhow::anyhow!(
+                "No valid GPU devices found for spec: {}",
+                device_spec
+            ));
         }
 
         Ok(indices)
@@ -269,13 +300,16 @@ impl NvidiaManager {
         info!("🔧 Configuring CUDA environment");
 
         // Set CUDA_VISIBLE_DEVICES
-        let cuda_devices = device_indices.iter()
+        let cuda_devices = device_indices
+            .iter()
             .map(|i| i.to_string())
             .collect::<Vec<_>>()
             .join(",");
 
         info!("  Setting CUDA_VISIBLE_DEVICES={}", cuda_devices);
-        unsafe { std::env::set_var("CUDA_VISIBLE_DEVICES", &cuda_devices); }
+        unsafe {
+            std::env::set_var("CUDA_VISIBLE_DEVICES", &cuda_devices);
+        }
 
         // Set NVIDIA driver capabilities
         let mut capabilities = vec!["compute", "utility"];
@@ -287,24 +321,36 @@ impl NvidiaManager {
         capabilities.extend(&["video", "display"]);
 
         let driver_capabilities = capabilities.join(",");
-        info!("  Setting NVIDIA_DRIVER_CAPABILITIES={}", driver_capabilities);
-        unsafe { std::env::set_var("NVIDIA_DRIVER_CAPABILITIES", &driver_capabilities); }
+        info!(
+            "  Setting NVIDIA_DRIVER_CAPABILITIES={}",
+            driver_capabilities
+        );
+        unsafe {
+            std::env::set_var("NVIDIA_DRIVER_CAPABILITIES", &driver_capabilities);
+        }
 
         // Set CUDA requirements (using cuda field from config)
         if nvidia_config.cuda.unwrap_or(false) {
             info!("  CUDA support enabled");
-            unsafe { std::env::set_var("NVIDIA_REQUIRE_CUDA", "11.0"); }
+            unsafe {
+                std::env::set_var("NVIDIA_REQUIRE_CUDA", "11.0");
+            }
         }
 
         // Set basic driver requirements
         info!("  Setting basic driver requirements");
-        unsafe { std::env::set_var("NVIDIA_REQUIRE_DRIVER", "470.0"); }
+        unsafe {
+            std::env::set_var("NVIDIA_REQUIRE_DRIVER", "470.0");
+        }
 
         Ok(())
     }
 
     async fn enable_dlss_support(&self, container_id: &str) -> Result<()> {
-        info!("✨ Enabling NVIDIA DLSS support for container: {}", container_id);
+        info!(
+            "✨ Enabling NVIDIA DLSS support for container: {}",
+            container_id
+        );
 
         // Check if GPUs support DLSS (RTX 20/30/40 series)
         for gpu in &self.gpus {
@@ -323,7 +369,10 @@ impl NvidiaManager {
     }
 
     async fn enable_raytracing_support(&self, container_id: &str) -> Result<()> {
-        info!("🌟 Enabling NVIDIA Ray Tracing support for container: {}", container_id);
+        info!(
+            "🌟 Enabling NVIDIA Ray Tracing support for container: {}",
+            container_id
+        );
 
         // Check for RTX support
         for gpu in &self.gpus {
@@ -341,7 +390,11 @@ impl NvidiaManager {
         Ok(())
     }
 
-    async fn setup_nvidia_container_runtime(&self, container_id: &str, nvidia_config: &crate::config::NvidiaConfig) -> Result<()> {
+    async fn setup_nvidia_container_runtime(
+        &self,
+        container_id: &str,
+        nvidia_config: &crate::config::NvidiaConfig,
+    ) -> Result<()> {
         info!("🐳 Configuring nvidia-container-runtime");
 
         // This would integrate with the actual nvidia-container-runtime
@@ -350,7 +403,11 @@ impl NvidiaManager {
         Ok(())
     }
 
-    async fn setup_basic_device_access(&self, container_id: &str, device_indices: &[u32]) -> Result<()> {
+    async fn setup_basic_device_access(
+        &self,
+        container_id: &str,
+        device_indices: &[u32],
+    ) -> Result<()> {
         info!("🔧 Setting up basic GPU device access");
 
         // Fallback: manually bind-mount NVIDIA devices
@@ -376,14 +433,24 @@ impl NvidiaManager {
         Ok(gpu_info)
     }
 
-    pub async fn run_cuda_application(&self, container_id: &str, app: &super::CudaApplication) -> Result<()> {
-        info!("🚀 Running CUDA application: {} in container: {}", app.name, container_id);
+    pub async fn run_cuda_application(
+        &self,
+        container_id: &str,
+        app: &super::CudaApplication,
+    ) -> Result<()> {
+        info!(
+            "🚀 Running CUDA application: {} in container: {}",
+            app.name, container_id
+        );
 
         // Validate compute capability if specified
         if let Some(ref required_cc) = app.compute_capability {
             for gpu in &self.gpus {
                 if gpu.compute_capability >= *required_cc {
-                    info!("  ✓ GPU {} meets compute capability requirement: {}", gpu.index, gpu.compute_capability);
+                    info!(
+                        "  ✓ GPU {} meets compute capability requirement: {}",
+                        gpu.index, gpu.compute_capability
+                    );
                 }
             }
         }
@@ -393,7 +460,10 @@ impl NvidiaManager {
             let memory_mb = memory_gb * 1024;
             for gpu in &self.gpus {
                 if gpu.memory_mb >= memory_mb {
-                    info!("  ✓ GPU {} has sufficient memory: {}MB >= {}MB", gpu.index, gpu.memory_mb, memory_mb);
+                    info!(
+                        "  ✓ GPU {} has sufficient memory: {}MB >= {}MB",
+                        gpu.index, gpu.memory_mb, memory_mb
+                    );
                 }
             }
         }
@@ -401,11 +471,20 @@ impl NvidiaManager {
         Ok(())
     }
 
-    pub async fn run_opencl_application(&self, container_id: &str, app: &super::OpenCLApplication) -> Result<()> {
-        info!("⚡ Running OpenCL application: {} in container: {}", app.name, container_id);
+    pub async fn run_opencl_application(
+        &self,
+        container_id: &str,
+        app: &super::OpenCLApplication,
+    ) -> Result<()> {
+        info!(
+            "⚡ Running OpenCL application: {} in container: {}",
+            app.name, container_id
+        );
 
         // Set OpenCL environment
-        unsafe { std::env::set_var("OPENCL_VENDOR_PATH", "/etc/OpenCL/vendors"); }
+        unsafe {
+            std::env::set_var("OPENCL_VENDOR_PATH", "/etc/OpenCL/vendors");
+        }
 
         Ok(())
     }

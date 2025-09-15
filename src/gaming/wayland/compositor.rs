@@ -1,11 +1,11 @@
-use anyhow::{Result, Context};
-use tracing::{info, debug, warn};
+use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use std::collections::HashMap;
+use tracing::{debug, info, warn};
 
-use super::{WaylandGamingConfig, GamingPerformanceMetrics};
+use super::{GamingPerformanceMetrics, WaylandGamingConfig};
 
 #[derive(Debug)]
 pub struct BoltCompositor {
@@ -295,7 +295,12 @@ impl BoltCompositor {
         Ok(())
     }
 
-    pub async fn create_surface(&mut self, width: u32, height: u32, game_surface: bool) -> Result<u32> {
+    pub async fn create_surface(
+        &mut self,
+        width: u32,
+        height: u32,
+        game_surface: bool,
+    ) -> Result<u32> {
         let surface_id = self.generate_surface_id().await;
 
         let surface = Surface {
@@ -319,8 +324,10 @@ impl BoltCompositor {
         let mut surfaces = self.surfaces.write().await;
         surfaces.insert(surface_id, surface);
 
-        info!("🖼️  Created surface {} ({}x{}, game: {})",
-              surface_id, width, height, game_surface);
+        info!(
+            "🖼️  Created surface {} ({}x{}, game: {})",
+            surface_id, width, height, game_surface
+        );
 
         Ok(surface_id)
     }
@@ -379,8 +386,14 @@ impl BoltCompositor {
     pub async fn get_performance_metrics(&self) -> Result<GamingPerformanceMetrics> {
         let metrics = GamingPerformanceMetrics {
             current_fps: self.frame_scheduler.get_current_fps(),
-            frame_time_ms: self.performance_monitor.get_average_frame_time().as_millis() as f64,
-            input_latency_ms: self.performance_monitor.get_average_input_latency().as_millis() as f64,
+            frame_time_ms: self
+                .performance_monitor
+                .get_average_frame_time()
+                .as_millis() as f64,
+            input_latency_ms: self
+                .performance_monitor
+                .get_average_input_latency()
+                .as_millis() as f64,
             gpu_utilization: self.performance_monitor.gpu_utilization,
             memory_usage_mb: self.performance_monitor.memory_usage,
             dropped_frames: self.performance_monitor.dropped_frames,

@@ -1,8 +1,8 @@
-use anyhow::{Result, Context};
-use tracing::{info, debug, warn};
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::{debug, info, warn};
 
 use super::WaylandGamingConfig;
 
@@ -136,13 +136,20 @@ impl OutputManager {
         {
             let mut outputs = self.outputs.write().await;
             for game_display in displays {
-                info!("  📺 Detected: {} ({}x{}@{}Hz, {})",
-                      game_display.name, game_display.width, game_display.height,
-                      game_display.refresh_rate, game_display.connector);
+                info!(
+                    "  📺 Detected: {} ({}x{}@{}Hz, {})",
+                    game_display.name,
+                    game_display.width,
+                    game_display.height,
+                    game_display.refresh_rate,
+                    game_display.connector
+                );
 
                 if game_display.vrr_capable {
-                    info!("    ✓ VRR capable (G-Sync: {}, FreeSync: {})",
-                          game_display.gsync_compatible, game_display.freesync_capable);
+                    info!(
+                        "    ✓ VRR capable (G-Sync: {}, FreeSync: {})",
+                        game_display.gsync_compatible, game_display.freesync_capable
+                    );
                 }
 
                 if game_display.hdr_capable {
@@ -174,7 +181,10 @@ impl OutputManager {
                     let optimal_rate = self.find_optimal_refresh_rate(output, target_fps);
                     output.refresh_rate = optimal_rate;
 
-                    info!("  🎯 Primary display configured for {}Hz gaming mode", optimal_rate);
+                    info!(
+                        "  🎯 Primary display configured for {}Hz gaming mode",
+                        optimal_rate
+                    );
                 }
 
                 // Enable gaming optimizations
@@ -204,7 +214,10 @@ impl OutputManager {
     }
 
     async fn enable_gaming_optimizations_for_output(&self, output: &mut GameOutput) -> Result<()> {
-        debug!("🔥 Enabling gaming optimizations for output: {}", output.name);
+        debug!(
+            "🔥 Enabling gaming optimizations for output: {}",
+            output.name
+        );
 
         // Reduce input lag by disabling post-processing
         info!("  ✓ Display post-processing disabled");
@@ -252,7 +265,10 @@ impl OutputManager {
             30 // Common VRR minimum for 60Hz displays
         };
 
-        info!("    VRR range: {}-{}Hz", min_refresh, output.max_refresh_rate);
+        info!(
+            "    VRR range: {}-{}Hz",
+            min_refresh, output.max_refresh_rate
+        );
 
         Ok(())
     }
@@ -266,8 +282,10 @@ impl OutputManager {
             if output.hdr_capable && output.gaming_mode {
                 output.hdr_enabled = true;
 
-                info!("  ✓ HDR enabled for {} ({:?})",
-                      output.name, output.color_depth);
+                info!(
+                    "  ✓ HDR enabled for {} ({:?})",
+                    output.name, output.color_depth
+                );
 
                 // Configure HDR metadata
                 self.configure_hdr_metadata(output).await?;
@@ -299,7 +317,8 @@ impl OutputManager {
     pub async fn get_output_info(&self, output_id: u32) -> Result<GameOutput> {
         let outputs = self.outputs.read().await;
 
-        outputs.get(&output_id)
+        outputs
+            .get(&output_id)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("Output not found: {}", output_id))
     }

@@ -1,9 +1,9 @@
-use anyhow::{Result, Context};
-use tracing::{info, warn, debug, error};
+use super::{GPUInfo, GPUVendor};
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::Command;
-use serde::{Deserialize, Serialize};
-use super::{GPUInfo, GPUVendor};
+use tracing::{debug, info};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AmdManager {
@@ -77,7 +77,12 @@ impl AmdManager {
 
     fn extract_gpu_name(line: &str) -> String {
         if let Some(start) = line.find(": ") {
-            line[start + 2..].split('[').next().unwrap_or("Unknown AMD GPU").trim().to_string()
+            line[start + 2..]
+                .split('[')
+                .next()
+                .unwrap_or("Unknown AMD GPU")
+                .trim()
+                .to_string()
         } else {
             "Unknown AMD GPU".to_string()
         }
@@ -102,7 +107,12 @@ impl AmdManager {
             let output_str = String::from_utf8(output.stdout)?;
             for line in output_str.lines() {
                 if line.starts_with("version:") {
-                    return Ok(line.split(':').nth(1).unwrap_or("unknown").trim().to_string());
+                    return Ok(line
+                        .split(':')
+                        .nth(1)
+                        .unwrap_or("unknown")
+                        .trim()
+                        .to_string());
                 }
             }
         }
@@ -116,7 +126,12 @@ impl AmdManager {
             let output_str = String::from_utf8(output.stdout)?;
             for line in output_str.lines() {
                 if line.contains("ROCm version") {
-                    return Ok(line.split(':').nth(1).unwrap_or("unknown").trim().to_string());
+                    return Ok(line
+                        .split(':')
+                        .nth(1)
+                        .unwrap_or("unknown")
+                        .trim()
+                        .to_string());
                 }
             }
         }
@@ -134,7 +149,10 @@ impl AmdManager {
         container_id: &str,
         amd_config: &crate::config::AmdConfig,
     ) -> Result<()> {
-        info!("🔴 Setting up AMD GPU access for container: {}", container_id);
+        info!(
+            "🔴 Setting up AMD GPU access for container: {}",
+            container_id
+        );
 
         // Setup DRI device access
         self.setup_dri_access(container_id).await?;
@@ -147,7 +165,10 @@ impl AmdManager {
         // Setup Vulkan drivers
         self.setup_vulkan_access(container_id).await?;
 
-        info!("✅ AMD GPU access configured for container: {}", container_id);
+        info!(
+            "✅ AMD GPU access configured for container: {}",
+            container_id
+        );
         Ok(())
     }
 
@@ -157,7 +178,9 @@ impl AmdManager {
         // Check for DRI devices
         let dri_path = Path::new("/dev/dri");
         if !dri_path.exists() {
-            return Err(anyhow::anyhow!("DRI devices not found - AMD graphics drivers may not be loaded"));
+            return Err(anyhow::anyhow!(
+                "DRI devices not found - AMD graphics drivers may not be loaded"
+            ));
         }
 
         // List available DRI devices
@@ -174,13 +197,19 @@ impl AmdManager {
         Ok(())
     }
 
-    async fn setup_rocm_access(&self, container_id: &str, amd_config: &crate::config::AmdConfig) -> Result<()> {
+    async fn setup_rocm_access(
+        &self,
+        container_id: &str,
+        amd_config: &crate::config::AmdConfig,
+    ) -> Result<()> {
         info!("⚡ Setting up ROCm access");
 
         // Set ROCm environment variables
         if let Some(device_id) = amd_config.device {
             info!("  Setting ROCM_VISIBLE_DEVICES={}", device_id);
-            unsafe { std::env::set_var("ROCM_VISIBLE_DEVICES", device_id.to_string()); }
+            unsafe {
+                std::env::set_var("ROCM_VISIBLE_DEVICES", device_id.to_string());
+            }
         }
 
         unsafe {
@@ -204,7 +233,9 @@ impl AmdManager {
         for path in &vulkan_paths {
             if Path::new(path).exists() {
                 info!("  ✓ AMD Vulkan ICD found: {}", path);
-                unsafe { std::env::set_var("VK_ICD_FILENAMES", path); }
+                unsafe {
+                    std::env::set_var("VK_ICD_FILENAMES", path);
+                }
                 break;
             }
         }
@@ -229,11 +260,20 @@ impl AmdManager {
         Ok(gpu_info)
     }
 
-    pub async fn run_opencl_application(&self, container_id: &str, app: &super::OpenCLApplication) -> Result<()> {
-        info!("⚡ Running OpenCL application: {} in container: {}", app.name, container_id);
+    pub async fn run_opencl_application(
+        &self,
+        container_id: &str,
+        app: &super::OpenCLApplication,
+    ) -> Result<()> {
+        info!(
+            "⚡ Running OpenCL application: {} in container: {}",
+            app.name, container_id
+        );
 
         // Set OpenCL environment for AMD
-        unsafe { std::env::set_var("OPENCL_VENDOR_PATH", "/etc/OpenCL/vendors"); }
+        unsafe {
+            std::env::set_var("OPENCL_VENDOR_PATH", "/etc/OpenCL/vendors");
+        }
 
         Ok(())
     }

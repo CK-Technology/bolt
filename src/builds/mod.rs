@@ -1,8 +1,8 @@
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use tracing::{info, debug, warn};
+use tracing::{debug, info, warn};
 
 /// Reproducible Build System - Our NixOS killer feature
 ///
@@ -45,10 +45,12 @@ pub struct BuildOutput {
 
 impl BuildSystem {
     pub fn new(store_path: PathBuf) -> Result<Self> {
-        info!("🏗️  Initializing reproducible build system at: {:?}", store_path);
+        info!(
+            "🏗️  Initializing reproducible build system at: {:?}",
+            store_path
+        );
 
-        std::fs::create_dir_all(&store_path)
-            .context("Failed to create build store directory")?;
+        std::fs::create_dir_all(&store_path).context("Failed to create build store directory")?;
 
         Ok(Self {
             store_path,

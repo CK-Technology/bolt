@@ -1,30 +1,34 @@
-use crate::{Result, BoltError};
+use crate::{BoltError, Result};
 use anyhow::anyhow;
-use tracing::{info, warn, debug};
 use std::process::Command;
 use tokio::process::Command as AsyncCommand;
+use tracing::{debug, info, warn};
 
-pub mod wayland;
 pub mod realtime;
+pub mod wayland;
 // Gaming commands enum for API usage
 #[derive(Debug, Clone)]
 pub enum GpuCommands {
     List,
-    Nvidia { device: Option<u32>, dlss: bool, raytracing: bool },
-    Amd { device: Option<u32> },
+    Nvidia {
+        device: Option<u32>,
+        dlss: bool,
+        raytracing: bool,
+    },
+    Amd {
+        device: Option<u32>,
+    },
 }
 
 pub async fn handle_gpu_command(command: GpuCommands) -> Result<()> {
     match command {
-        GpuCommands::List => {
-            list_gpus().await
-        }
-        GpuCommands::Nvidia { device, dlss, raytracing } => {
-            setup_nvidia_gpu(device, dlss, raytracing).await
-        }
-        GpuCommands::Amd { device } => {
-            setup_amd_gpu(device).await
-        }
+        GpuCommands::List => list_gpus().await,
+        GpuCommands::Nvidia {
+            device,
+            dlss,
+            raytracing,
+        } => setup_nvidia_gpu(device, dlss, raytracing).await,
+        GpuCommands::Amd { device } => setup_amd_gpu(device).await,
     }
 }
 
@@ -75,7 +79,9 @@ pub async fn setup_nvidia_gpu(device: Option<u32>, dlss: bool, raytracing: bool)
     info!("  Ray Tracing: {}", raytracing);
 
     if !check_nvidia_gpu().await {
-        return Err(BoltError::Other(anyhow!("NVIDIA GPU not detected. Install NVIDIA drivers first.")));
+        return Err(BoltError::Other(anyhow!(
+            "NVIDIA GPU not detected. Install NVIDIA drivers first."
+        )));
     }
 
     // Check for nvidia-container-runtime
@@ -98,7 +104,9 @@ pub async fn setup_amd_gpu(device: Option<u32>) -> Result<()> {
     info!("  Device: {}", device_id);
 
     if !check_amd_gpu().await {
-        return Err(BoltError::Other(anyhow!("AMD GPU not detected. Install Mesa drivers.")));
+        return Err(BoltError::Other(anyhow!(
+            "AMD GPU not detected. Install Mesa drivers."
+        )));
     }
 
     // Set up AMD GPU passthrough
@@ -140,7 +148,12 @@ async fn setup_docker_nvidia_gpu(device_id: u32, dlss: bool, raytracing: bool) -
     info!("🐳 Configuring Docker NVIDIA GPU passthrough");
 
     // Check for nvidia-container-runtime
-    if AsyncCommand::new("nvidia-container-runtime").arg("--version").output().await.is_ok() {
+    if AsyncCommand::new("nvidia-container-runtime")
+        .arg("--version")
+        .output()
+        .await
+        .is_ok()
+    {
         info!("  ✅ nvidia-container-runtime available");
     } else {
         warn!("  ⚠️  nvidia-container-runtime not found - install nvidia-docker2");
@@ -228,7 +241,10 @@ async fn setup_proton(version: &str) -> Result<()> {
     if proton_path.exists() {
         info!("  ✅ Proton {} found at {:?}", version, proton_path);
     } else {
-        info!("  📥 Proton {} not found, will use container-based Proton", version);
+        info!(
+            "  📥 Proton {} not found, will use container-based Proton",
+            version
+        );
     }
 
     info!("✅ Proton configuration ready");
@@ -239,10 +255,11 @@ async fn configure_wine_version(winver: &str) -> Result<()> {
     info!("🪟 Configuring Wine Windows version: {}", winver);
 
     // Set up WINEPREFIX if needed
-    let wine_prefix = std::env::var("WINEPREFIX")
-        .unwrap_or_else(|_| dirs::home_dir()
+    let wine_prefix = std::env::var("WINEPREFIX").unwrap_or_else(|_| {
+        dirs::home_dir()
             .map(|home| home.join(".wine").to_string_lossy().to_string())
-            .unwrap_or_else(|| "/tmp/wine".to_string()));
+            .unwrap_or_else(|| "/tmp/wine".to_string())
+    });
 
     info!("  📁 Wine prefix: {}", wine_prefix);
 
@@ -269,13 +286,15 @@ async fn configure_wine_environment() -> Result<()> {
         ("WINEDLLOVERRIDES", "winemenubuilder.exe=d"),
         ("WINEFSYNC", "1"),
         ("WINEESYNC", "1"),
-        ("WINE_CPU_TOPOLOGY", "4:2"),  // Example topology
+        ("WINE_CPU_TOPOLOGY", "4:2"), // Example topology
     ];
 
     for (key, value) in wine_config {
         info!("  🔧 Setting {}: {}", key, value);
         unsafe {
-            unsafe { std::env::set_var(key, value); }
+            unsafe {
+                std::env::set_var(key, value);
+            }
         }
     }
 
@@ -308,7 +327,10 @@ pub async fn setup_audio(system: &str) -> Result<()> {
             }
         }
         _ => {
-            return Err(BoltError::Other(anyhow!("Unsupported audio system: {}", system)));
+            return Err(BoltError::Other(anyhow!(
+                "Unsupported audio system: {}",
+                system
+            )));
         }
     }
 
@@ -327,7 +349,11 @@ async fn configure_pipewire_gaming() -> Result<()> {
     info!("    - Pro Audio profile activation");
 
     // Check for wireplumber
-    if Command::new("wireplumber").arg("--version").output().is_ok() {
+    if Command::new("wireplumber")
+        .arg("--version")
+        .output()
+        .is_ok()
+    {
         info!("  ✅ WirePlumber session manager detected");
     }
 
@@ -367,7 +393,8 @@ async fn launch_steam_game(game_uri: &str, args: &[String]) -> Result<()> {
     info!("💨 Launching Steam game: {}", game_uri);
 
     // Extract app ID from steam:// URI
-    let app_id = game_uri.strip_prefix("steam://")
+    let app_id = game_uri
+        .strip_prefix("steam://")
         .and_then(|s| s.strip_prefix("run/"))
         .unwrap_or(game_uri);
 
@@ -390,7 +417,11 @@ async fn launch_steam_game(game_uri: &str, args: &[String]) -> Result<()> {
             info!("✅ Steam game launched successfully");
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(BoltError::Runtime(crate::error::RuntimeError::StartFailed { reason: format!("Failed to launch Steam game: {}", stderr) }));
+            return Err(BoltError::Runtime(
+                crate::error::RuntimeError::StartFailed {
+                    reason: format!("Failed to launch Steam game: {}", stderr),
+                },
+            ));
         }
     } else {
         warn!("  ❌ Steam not found");
@@ -428,7 +459,11 @@ async fn launch_wine_game(game_path: &str, args: &[String]) -> Result<()> {
         info!("✅ Wine game launched successfully");
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(BoltError::Runtime(crate::error::RuntimeError::StartFailed { reason: format!("Failed to launch Wine game: {}", stderr) }));
+        return Err(BoltError::Runtime(
+            crate::error::RuntimeError::StartFailed {
+                reason: format!("Failed to launch Wine game: {}", stderr),
+            },
+        ));
     }
 
     Ok(())
@@ -454,7 +489,11 @@ async fn launch_native_game(game_path: &str, args: &[String]) -> Result<()> {
         info!("✅ Native game launched successfully");
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(BoltError::Runtime(crate::error::RuntimeError::StartFailed { reason: format!("Failed to launch native game: {}", stderr) }));
+        return Err(BoltError::Runtime(
+            crate::error::RuntimeError::StartFailed {
+                reason: format!("Failed to launch native game: {}", stderr),
+            },
+        ));
     }
 
     Ok(())
@@ -471,8 +510,8 @@ async fn launch_containerized_game(game_name: &str, args: &[String]) -> Result<(
         .arg("--rm")
         .arg("--interactive")
         .arg("--tty")
-        .arg("--network=gaming")  // Use gaming-optimized network
-        .arg("--device=/dev/dri")  // GPU access
+        .arg("--network=gaming") // Use gaming-optimized network
+        .arg("--device=/dev/dri") // GPU access
         .arg("--env=DISPLAY")
         .arg("--volume=/tmp/.X11-unix:/tmp/.X11-unix")
         .arg("--volume=/dev/shm:/dev/shm")
@@ -494,7 +533,11 @@ async fn launch_containerized_game(game_name: &str, args: &[String]) -> Result<(
         info!("  - Performance monitoring");
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(BoltError::Runtime(crate::error::RuntimeError::StartFailed { reason: format!("Failed to launch containerized game: {}", stderr) }));
+        return Err(BoltError::Runtime(
+            crate::error::RuntimeError::StartFailed {
+                reason: format!("Failed to launch containerized game: {}", stderr),
+            },
+        ));
     }
 
     Ok(())
@@ -507,38 +550,45 @@ pub async fn start_wayland_gaming_session() -> Result<String> {
     let config = wayland::WaylandGamingConfig::default();
     let mut manager = wayland::WaylandGamingManager::new();
 
-    let session_id = manager.create_gaming_session(config).await
-        .map_err(|e| BoltError::Gaming(crate::error::GamingError::OptimizationFailed {
-            reason: format!("Failed to create Wayland session: {}", e)
-        }))?;
+    let session_id = manager.create_gaming_session(config).await.map_err(|e| {
+        BoltError::Gaming(crate::error::GamingError::OptimizationFailed {
+            reason: format!("Failed to create Wayland session: {}", e),
+        })
+    })?;
 
-    manager.start_session(&session_id).await
-        .map_err(|e| BoltError::Gaming(crate::error::GamingError::OptimizationFailed {
-            reason: format!("Failed to start Wayland session: {}", e)
-        }))?;
+    manager.start_session(&session_id).await.map_err(|e| {
+        BoltError::Gaming(crate::error::GamingError::OptimizationFailed {
+            reason: format!("Failed to start Wayland session: {}", e),
+        })
+    })?;
 
     info!("✅ Wayland gaming session started: {}", session_id);
     Ok(session_id)
 }
 
 pub async fn apply_realtime_optimizations(enable: bool) -> Result<()> {
-    info!("⚡ {} real-time gaming optimizations", if enable { "Enabling" } else { "Disabling" });
+    info!(
+        "⚡ {} real-time gaming optimizations",
+        if enable { "Enabling" } else { "Disabling" }
+    );
 
     let config = realtime::RealtimeGamingConfig::default();
     let mut optimizer = realtime::RealtimeOptimizer::new(config);
 
     if enable {
-        optimizer.apply_gaming_optimizations().await
-            .map_err(|e| BoltError::Gaming(crate::error::GamingError::OptimizationFailed {
-                reason: format!("Failed to apply optimizations: {}", e)
-            }))?;
+        optimizer.apply_gaming_optimizations().await.map_err(|e| {
+            BoltError::Gaming(crate::error::GamingError::OptimizationFailed {
+                reason: format!("Failed to apply optimizations: {}", e),
+            })
+        })?;
 
         info!("✅ Real-time gaming optimizations applied");
     } else {
-        optimizer.restore_original_settings().await
-            .map_err(|e| BoltError::Gaming(crate::error::GamingError::OptimizationFailed {
-                reason: format!("Failed to restore settings: {}", e)
-            }))?;
+        optimizer.restore_original_settings().await.map_err(|e| {
+            BoltError::Gaming(crate::error::GamingError::OptimizationFailed {
+                reason: format!("Failed to restore settings: {}", e),
+            })
+        })?;
 
         info!("✅ Original system settings restored");
     }
@@ -552,10 +602,14 @@ pub async fn optimize_game_process(pid: u32) -> Result<()> {
     let config = realtime::RealtimeGamingConfig::default();
     let optimizer = realtime::RealtimeOptimizer::new(config);
 
-    optimizer.apply_process_optimizations(pid).await
-        .map_err(|e| BoltError::Gaming(crate::error::GamingError::OptimizationFailed {
-            reason: format!("Failed to optimize process {}: {}", pid, e)
-        }))?;
+    optimizer
+        .apply_process_optimizations(pid)
+        .await
+        .map_err(|e| {
+            BoltError::Gaming(crate::error::GamingError::OptimizationFailed {
+                reason: format!("Failed to optimize process {}: {}", pid, e),
+            })
+        })?;
 
     info!("✅ Gaming optimizations applied to process {}", pid);
     Ok(())
@@ -567,19 +621,36 @@ pub async fn get_gaming_performance_report() -> Result<()> {
     let config = realtime::RealtimeGamingConfig::default();
     let optimizer = realtime::RealtimeOptimizer::new(config);
 
-    let report = optimizer.get_performance_metrics().await
-        .map_err(|e| BoltError::Gaming(crate::error::GamingError::OptimizationFailed {
-            reason: format!("Failed to get performance metrics: {}", e)
-        }))?;
+    let report = optimizer.get_performance_metrics().await.map_err(|e| {
+        BoltError::Gaming(crate::error::GamingError::OptimizationFailed {
+            reason: format!("Failed to get performance metrics: {}", e),
+        })
+    })?;
 
     info!("🎮 Gaming Performance Report:");
     info!("  CPU Usage: {:.1}%", report.cpu_usage);
     info!("  Memory Usage: {} MB", report.memory_usage);
-    info!("  Scheduling Latency: {:.1} μs", report.latency_metrics.scheduling_latency_us);
-    info!("  Interrupt Latency: {:.1} μs", report.latency_metrics.interrupt_latency_us);
-    info!("  Memory Latency: {:.1} ns", report.latency_metrics.memory_latency_ns);
+    info!(
+        "  Scheduling Latency: {:.1} μs",
+        report.latency_metrics.scheduling_latency_us
+    );
+    info!(
+        "  Interrupt Latency: {:.1} μs",
+        report.latency_metrics.interrupt_latency_us
+    );
+    info!(
+        "  Memory Latency: {:.1} ns",
+        report.latency_metrics.memory_latency_ns
+    );
     info!("  Active Optimizations: {}", report.optimizations_active);
-    info!("  Real-time Priority: {}", if report.realtime_priority_active { "✅" } else { "❌" });
+    info!(
+        "  Real-time Priority: {}",
+        if report.realtime_priority_active {
+            "✅"
+        } else {
+            "❌"
+        }
+    );
 
     Ok(())
 }

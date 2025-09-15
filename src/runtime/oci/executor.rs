@@ -1,17 +1,14 @@
-use anyhow::{Result, Context};
-use oci_spec::runtime::{Spec, LinuxNamespace, LinuxNamespaceType};
-use tracing::{info, debug, warn, error};
-use std::process::Stdio;
+use anyhow::{Context, Result};
+use nix::mount::{MsFlags, mount};
+use nix::sched::{CloneFlags, unshare};
+use oci_spec::runtime::{LinuxNamespaceType, Spec};
 use std::fs;
 use std::path::PathBuf;
-use std::os::unix::fs::PermissionsExt;
+use std::process::Stdio;
 use tokio::process::Command;
-use nix::unistd::{Pid, Uid, Gid};
-use nix::sched::{CloneFlags, unshare};
-use nix::mount::{mount, MsFlags, umount2, MntFlags};
-use nix::sys::signal::{kill, Signal};
+use tracing::{debug, error, info, warn};
 
-use super::{ContainerState, ContainerStatus};
+use super::ContainerState;
 
 pub async fn execute_container(state: &ContainerState, spec: &Spec) -> Result<u32> {
     info!("🚀 Executing container: {}", state.id);
@@ -26,11 +23,13 @@ pub async fn execute_container(state: &ContainerState, spec: &Spec) -> Result<u3
     setup_security_profile(state).await?;
 
     // Get the process configuration
-    let process = spec.process()
+    let process = spec
+        .process()
         .as_ref()
         .context("No process configuration in spec")?;
 
-    let args = process.args()
+    let args = process
+        .args()
         .as_ref()
         .context("No args in process configuration")?;
 
@@ -154,7 +153,10 @@ async fn execute_simple_container(
     let child = cmd.spawn().context("Failed to spawn container process")?;
     let pid = child.id().context("Failed to get child PID")?;
 
-    info!("✅ Container process started with PID: {} (simple mode)", pid);
+    info!(
+        "✅ Container process started with PID: {} (simple mode)",
+        pid
+    );
 
     // Monitor the process
     tokio::spawn(async move {
@@ -213,7 +215,10 @@ async fn execute_container_process(state: &ContainerState, spec: &Spec) -> Resul
     let child = cmd.spawn().context("Failed to spawn container process")?;
     let pid = child.id().context("Failed to get child PID")?;
 
-    info!("✅ Container process started with PID: {} (namespaced)", pid);
+    info!(
+        "✅ Container process started with PID: {} (namespaced)",
+        pid
+    );
 
     // Monitor the process
     tokio::spawn(async move {
@@ -273,7 +278,10 @@ async fn setup_user_namespace_mappings() -> Result<()> {
     std::fs::write("/proc/self/gid_map", &gid_map)
         .context("Failed to write gid_map for rootless container")?;
 
-    info!("✅ User namespace mappings configured: uid {} -> 0, gid {} -> 0", current_uid, current_gid);
+    info!(
+        "✅ User namespace mappings configured: uid {} -> 0, gid {} -> 0",
+        current_uid, current_gid
+    );
     Ok(())
 }
 
@@ -293,8 +301,9 @@ async fn setup_rootless_security(state: &ContainerState) -> Result<()> {
 
     // Drop all capabilities except basic ones needed for rootless
     let allowed_caps = vec![
-        "CAP_SETUID", "CAP_SETGID", // Basic user/group management
-        "CAP_CHOWN",   // File ownership changes within user namespace
+        "CAP_SETUID",
+        "CAP_SETGID", // Basic user/group management
+        "CAP_CHOWN",  // File ownership changes within user namespace
     ];
 
     for cap in &allowed_caps {
@@ -364,13 +373,18 @@ async fn setup_rootless_audio_access(audio: &crate::config::AudioConfig) -> Resu
         "pulseaudio" => {
             info!("  🔊 Configuring rootless PulseAudio access");
             // Check for user PulseAudio session
-            if std::env::var("PULSE_SERVER").is_ok() ||
-               std::path::Path::new(&format!("/run/user/{}/pulse", nix::unistd::getuid())).exists() {
+            if std::env::var("PULSE_SERVER").is_ok()
+                || std::path::Path::new(&format!("/run/user/{}/pulse", nix::unistd::getuid()))
+                    .exists()
+            {
                 info!("    ✓ PulseAudio session detected");
             }
         }
         _ => {
-            warn!("  ⚠️  Audio system '{}' may not work in rootless mode", audio.system);
+            warn!(
+                "  ⚠️  Audio system '{}' may not work in rootless mode",
+                audio.system
+            );
         }
     }
     Ok(())
@@ -480,10 +494,19 @@ async fn setup_mounts(state: &ContainerState, spec: &Spec) -> Result<()> {
     if let Some(mounts) = spec.mounts() {
         for mount in mounts {
             let destination = mount.destination();
-            let source = mount.source().as_ref().map(|s| s.as_path()).unwrap_or_else(|| std::path::Path::new(""));
+            let source = mount
+                .source()
+                .as_ref()
+                .map(|s| s.as_path())
+                .unwrap_or_else(|| std::path::Path::new(""));
             let fs_type = mount.typ().as_ref().map(|t| t.as_str()).unwrap_or("bind");
 
-            info!("  📂 Mounting {} -> {} ({})", source.display(), destination.display(), fs_type);
+            info!(
+                "  📂 Mounting {} -> {} ({})",
+                source.display(),
+                destination.display(),
+                fs_type
+            );
 
             let full_dest = rootfs_path.join(destination.strip_prefix("/").unwrap_or(destination));
 
@@ -514,7 +537,7 @@ async fn setup_mounts(state: &ContainerState, spec: &Spec) -> Result<()> {
 
 async fn create_essential_dirs(rootfs_path: &std::path::Path) -> Result<()> {
     let essential_dirs = [
-        "proc", "sys", "dev", "tmp", "run", "var", "etc", "bin", "usr", "lib"
+        "proc", "sys", "dev", "tmp", "run", "var", "etc", "bin", "usr", "lib",
     ];
 
     for dir in &essential_dirs {
@@ -538,7 +561,8 @@ async fn mount_proc(dest: &std::path::Path) -> Result<()> {
         Some("proc"),
         MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
         None::<&str>,
-    ).context("Failed to mount proc")?;
+    )
+    .context("Failed to mount proc")?;
 
     Ok(())
 }
@@ -553,7 +577,8 @@ async fn mount_sysfs(dest: &std::path::Path) -> Result<()> {
         Some("sysfs"),
         MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV | MsFlags::MS_RDONLY,
         None::<&str>,
-    ).context("Failed to mount sysfs")?;
+    )
+    .context("Failed to mount sysfs")?;
 
     Ok(())
 }
@@ -568,13 +593,18 @@ async fn mount_tmpfs(dest: &std::path::Path) -> Result<()> {
         Some("tmpfs"),
         MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
         Some("mode=755"),
-    ).context("Failed to mount tmpfs")?;
+    )
+    .context("Failed to mount tmpfs")?;
 
     Ok(())
 }
 
 async fn mount_bind(source: &std::path::Path, dest: &std::path::Path) -> Result<()> {
-    info!("  🔗 Bind mounting {} -> {}", source.display(), dest.display());
+    info!(
+        "  🔗 Bind mounting {} -> {}",
+        source.display(),
+        dest.display()
+    );
 
     if !source.exists() {
         warn!("Bind mount source does not exist: {}", source.display());
@@ -599,12 +629,16 @@ async fn mount_bind(source: &std::path::Path, dest: &std::path::Path) -> Result<
         None::<&str>,
         MsFlags::MS_BIND,
         None::<&str>,
-    ).context("Failed to create bind mount")?;
+    )
+    .context("Failed to create bind mount")?;
 
     Ok(())
 }
 
-async fn setup_gaming_mounts(rootfs_path: &std::path::Path, gaming: &crate::config::GamingConfig) -> Result<()> {
+async fn setup_gaming_mounts(
+    rootfs_path: &std::path::Path,
+    gaming: &crate::config::GamingConfig,
+) -> Result<()> {
     info!("🎮 Setting up gaming-specific mounts");
 
     // GPU device access
@@ -682,7 +716,11 @@ async fn mount_display_sockets(rootfs_path: &std::path::Path) -> Result<()> {
         let wayland_socket = format!("/run/user/{}/{}", nix::unistd::getuid(), wayland_display);
         if std::path::Path::new(&wayland_socket).exists() {
             info!("  🖼️  Mounting Wayland socket: {}", wayland_socket);
-            let dest = rootfs_path.join(format!("run/user/{}/{}", nix::unistd::getuid(), wayland_display));
+            let dest = rootfs_path.join(format!(
+                "run/user/{}/{}",
+                nix::unistd::getuid(),
+                wayland_display
+            ));
             if let Some(parent) = dest.parent() {
                 fs::create_dir_all(parent)?;
             }
@@ -736,7 +774,10 @@ async fn setup_cgroups(state: &ContainerState) -> Result<()> {
 }
 
 async fn set_memory_limit(cgroup_path: &str, limit_bytes: u64) -> Result<()> {
-    info!("💾 Setting memory limit: {:.1} MB", limit_bytes as f64 / 1024.0 / 1024.0);
+    info!(
+        "💾 Setting memory limit: {:.1} MB",
+        limit_bytes as f64 / 1024.0 / 1024.0
+    );
 
     let memory_max_path = format!("{}/memory.max", cgroup_path);
     fs::write(&memory_max_path, limit_bytes.to_string())
@@ -867,8 +908,7 @@ pub async fn create_container_rootfs(
     info!("📁 Creating rootfs for container: {}", container_id);
 
     let rootfs_path = bundle_path.join("rootfs");
-    std::fs::create_dir_all(&rootfs_path)
-        .context("Failed to create rootfs directory")?;
+    std::fs::create_dir_all(&rootfs_path).context("Failed to create rootfs directory")?;
 
     // Check if there's an extracted image available
     let image_storage_path = PathBuf::from("/var/lib/bolt/images");
@@ -883,7 +923,10 @@ pub async fn create_container_rootfs(
                     if path.is_dir() {
                         let extracted_rootfs = path.join("rootfs");
                         if extracted_rootfs.exists() {
-                            info!("📦 Using extracted image rootfs from: {:?}", extracted_rootfs);
+                            info!(
+                                "📦 Using extracted image rootfs from: {:?}",
+                                extracted_rootfs
+                            );
 
                             // Copy the extracted rootfs
                             copy_dir_all(&extracted_rootfs, &rootfs_path)?;
@@ -901,10 +944,31 @@ pub async fn create_container_rootfs(
 
         // Fallback: Create basic directory structure for a minimal Linux container
         let dirs = [
-            "bin", "sbin", "usr/bin", "usr/sbin", "usr/local/bin", "usr/local/sbin",
-            "etc", "home", "root", "tmp", "var", "var/log", "var/tmp",
-            "dev", "proc", "sys", "run", "opt", "srv", "media", "mnt",
-            "lib", "lib64", "usr/lib", "usr/lib64"
+            "bin",
+            "sbin",
+            "usr/bin",
+            "usr/sbin",
+            "usr/local/bin",
+            "usr/local/sbin",
+            "etc",
+            "home",
+            "root",
+            "tmp",
+            "var",
+            "var/log",
+            "var/tmp",
+            "dev",
+            "proc",
+            "sys",
+            "run",
+            "opt",
+            "srv",
+            "media",
+            "mnt",
+            "lib",
+            "lib64",
+            "usr/lib",
+            "usr/lib64",
         ];
 
         for dir in &dirs {
@@ -978,8 +1042,6 @@ sys:x:3:
 }
 
 async fn create_device_nodes(rootfs_path: &std::path::Path) -> Result<()> {
-    use std::os::unix::fs::DirBuilderExt;
-
     let dev_path = rootfs_path.join("dev");
 
     // Create /dev/null, /dev/zero, /dev/random, /dev/urandom as regular files
@@ -1001,8 +1063,16 @@ async fn create_device_nodes(rootfs_path: &std::path::Path) -> Result<()> {
 async fn copy_essential_binaries(rootfs_path: &std::path::Path) -> Result<()> {
     // Copy essential binaries from host system
     let essential_bins = [
-        "/bin/sh", "/bin/bash", "/bin/ls", "/bin/cat", "/bin/echo",
-        "/bin/mkdir", "/bin/touch", "/bin/rm", "/bin/cp", "/bin/mv"
+        "/bin/sh",
+        "/bin/bash",
+        "/bin/ls",
+        "/bin/cat",
+        "/bin/echo",
+        "/bin/mkdir",
+        "/bin/touch",
+        "/bin/rm",
+        "/bin/cp",
+        "/bin/mv",
     ];
 
     for bin in &essential_bins {
@@ -1015,7 +1085,10 @@ async fn copy_essential_binaries(rootfs_path: &std::path::Path) -> Result<()> {
             // Copy the binary
             if let Err(_e) = std::fs::copy(bin, &target_path) {
                 // If copy fails, create a simple stub
-                std::fs::write(&target_path, "#!/bin/sh\necho 'Command not available in minimal container'\n")?;
+                std::fs::write(
+                    &target_path,
+                    "#!/bin/sh\necho 'Command not available in minimal container'\n",
+                )?;
 
                 // Make it executable
                 use std::os::unix::fs::PermissionsExt;
@@ -1029,7 +1102,10 @@ async fn copy_essential_binaries(rootfs_path: &std::path::Path) -> Result<()> {
     // Ensure /bin/sh exists (essential for containers)
     let sh_path = rootfs_path.join("bin/sh");
     if !sh_path.exists() {
-        std::fs::write(&sh_path, "#!/bin/sh\n# Minimal shell stub\necho 'Minimal container shell'\nexec /bin/bash \"$@\"\n")?;
+        std::fs::write(
+            &sh_path,
+            "#!/bin/sh\n# Minimal shell stub\necho 'Minimal container shell'\nexec /bin/bash \"$@\"\n",
+        )?;
 
         use std::os::unix::fs::PermissionsExt;
         let mut perms = std::fs::metadata(&sh_path)?.permissions();

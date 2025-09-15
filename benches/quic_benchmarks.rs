@@ -1,8 +1,8 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
 use bolt::network::quic::*;
-use tokio::runtime::Runtime;
-use std::time::Duration;
 use bytes::Bytes;
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use std::time::Duration;
+use tokio::runtime::Runtime;
 
 fn quic_connection_establishment(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
@@ -46,35 +46,31 @@ fn quic_throughput_benchmark(c: &mut Criterion) {
 
     for size in [1024, 4096, 16384, 65536, 1048576].iter() {
         group.throughput(Throughput::Bytes(*size as u64));
-        group.bench_with_input(
-            BenchmarkId::new("message_size", size),
-            size,
-            |b, &size| {
-                b.to_async(&rt).iter(|| async move {
-                    let server = QuicServer::new("127.0.0.1:0").await.unwrap();
-                    let addr = server.local_addr().unwrap();
+        group.bench_with_input(BenchmarkId::new("message_size", size), size, |b, &size| {
+            b.to_async(&rt).iter(|| async move {
+                let server = QuicServer::new("127.0.0.1:0").await.unwrap();
+                let addr = server.local_addr().unwrap();
 
-                    // Server task
-                    let server_handle = tokio::spawn(async move {
-                        let mut stream = server.accept().await.unwrap();
-                        while let Some(data) = stream.recv().await {
-                            black_box(data);
-                        }
-                    });
-
-                    // Client task
-                    let client = QuicClient::connect(addr).await.unwrap();
-                    let data = Bytes::from(vec![0u8; size]);
-
-                    for _ in 0..100 {
-                        client.send(data.clone()).await.unwrap();
+                // Server task
+                let server_handle = tokio::spawn(async move {
+                    let mut stream = server.accept().await.unwrap();
+                    while let Some(data) = stream.recv().await {
+                        black_box(data);
                     }
-
-                    client.close().await.unwrap();
-                    server_handle.await.unwrap();
                 });
-            },
-        );
+
+                // Client task
+                let client = QuicClient::connect(addr).await.unwrap();
+                let data = Bytes::from(vec![0u8; size]);
+
+                for _ in 0..100 {
+                    client.send(data.clone()).await.unwrap();
+                }
+
+                client.close().await.unwrap();
+                server_handle.await.unwrap();
+            });
+        });
     }
     group.finish();
 }
@@ -147,8 +143,8 @@ fn quic_vs_tcp_comparison(c: &mut Criterion) {
 
     group.bench_function("tcp_transfer", |b| {
         b.to_async(&rt).iter(|| async {
-            use tokio::net::{TcpListener, TcpStream};
             use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            use tokio::net::{TcpListener, TcpStream};
 
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let addr = listener.local_addr().unwrap();
@@ -242,7 +238,9 @@ fn quic_packet_loss_recovery(c: &mut Criterion) {
                     let mut config = QuicConfig::default();
                     config.set_packet_loss_simulation(loss_rate);
 
-                    let server = QuicServer::with_config("127.0.0.1:0", config.clone()).await.unwrap();
+                    let server = QuicServer::with_config("127.0.0.1:0", config.clone())
+                        .await
+                        .unwrap();
                     let addr = server.local_addr().unwrap();
 
                     let server_handle = tokio::spawn(async move {
@@ -288,7 +286,9 @@ fn quic_congestion_control(c: &mut Criterion) {
                     let mut config = QuicConfig::default();
                     config.set_congestion_control(algorithm);
 
-                    let server = QuicServer::with_config("127.0.0.1:0", config.clone()).await.unwrap();
+                    let server = QuicServer::with_config("127.0.0.1:0", config.clone())
+                        .await
+                        .unwrap();
                     let addr = server.local_addr().unwrap();
 
                     let server_handle = tokio::spawn(async move {
@@ -334,7 +334,9 @@ fn quic_encryption_overhead(c: &mut Criterion) {
                     let mut config = QuicConfig::default();
                     config.set_encryption_cipher(encryption);
 
-                    let server = QuicServer::with_config("127.0.0.1:0", config.clone()).await.unwrap();
+                    let server = QuicServer::with_config("127.0.0.1:0", config.clone())
+                        .await
+                        .unwrap();
                     let addr = server.local_addr().unwrap();
 
                     let server_handle = tokio::spawn(async move {

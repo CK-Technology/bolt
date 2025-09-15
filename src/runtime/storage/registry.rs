@@ -1,12 +1,11 @@
-use anyhow::{Result, Context};
-use tracing::{info, warn, debug};
-use serde::{Deserialize, Serialize};
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, ACCEPT, CONTENT_TYPE};
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use tokio::fs;
-use tar::Archive;
+use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
+use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderValue};
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use tar::Archive;
+use tokio::fs;
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone)]
 pub struct RegistryClient {
@@ -74,39 +73,50 @@ impl RegistryClient {
         self.authenticate(&registry, &namespace, &image).await?;
 
         // Fetch manifest
-        let manifest = self.fetch_manifest(&registry, &namespace, &image, &tag).await?;
+        let manifest = self
+            .fetch_manifest(&registry, &namespace, &image, &tag)
+            .await?;
 
         // Create local storage directory
         let storage_dir = PathBuf::from("/var/lib/bolt/images");
-        fs::create_dir_all(&storage_dir).await
+        fs::create_dir_all(&storage_dir)
+            .await
             .context("Failed to create image storage directory")?;
 
         let image_dir = storage_dir.join(format!("{}-{}-{}", namespace, image, tag));
-        fs::create_dir_all(&image_dir).await
+        fs::create_dir_all(&image_dir)
+            .await
             .context("Failed to create image directory")?;
 
         // Download config
         info!("📄 Downloading image config");
-        let config_data = self.fetch_blob(&registry, &namespace, &image, &manifest.config.digest).await?;
+        let config_data = self
+            .fetch_blob(&registry, &namespace, &image, &manifest.config.digest)
+            .await?;
         let config_path = image_dir.join("config.json");
-        fs::write(&config_path, &config_data).await
+        fs::write(&config_path, &config_data)
+            .await
             .context("Failed to write config")?;
 
         // Download and extract layers
         info!("📦 Downloading {} layers", manifest.layers.len());
         for (idx, layer) in manifest.layers.iter().enumerate() {
-            info!("  Layer {}/{}: {} ({}MB)",
+            info!(
+                "  Layer {}/{}: {} ({}MB)",
                 idx + 1,
                 manifest.layers.len(),
                 layer.digest,
                 layer.size / 1_000_000
             );
 
-            let layer_data = self.fetch_blob(&registry, &namespace, &image, &layer.digest).await?;
+            let layer_data = self
+                .fetch_blob(&registry, &namespace, &image, &layer.digest)
+                .await?;
 
             // Save layer tarball
             let layer_path = image_dir.join(format!("layer_{}.tar.gz", idx));
-            fs::write(&layer_path, &layer_data).await
+            fs::write(&layer_path, &layer_data)
+                .await
                 .context("Failed to write layer")?;
 
             // Extract layer to rootfs
@@ -131,14 +141,17 @@ impl RegistryClient {
                     namespace, image
                 );
 
-                let response = self.client
+                let response = self
+                    .client
                     .get(&auth_url)
                     .send()
                     .await
                     .context("Failed to authenticate with Docker Hub")?;
 
                 if response.status().is_success() {
-                    let auth: AuthResponse = response.json().await
+                    let auth: AuthResponse = response
+                        .json()
+                        .await
                         .context("Failed to parse auth response")?;
                     self.auth_token = Some(format!("Bearer {}", auth.token));
                     info!("✅ Authenticated with Docker Hub");
@@ -155,7 +168,13 @@ impl RegistryClient {
         Ok(())
     }
 
-    async fn fetch_manifest(&self, registry: &str, namespace: &str, image: &str, tag: &str) -> Result<ImageManifest> {
+    async fn fetch_manifest(
+        &self,
+        registry: &str,
+        namespace: &str,
+        image: &str,
+        tag: &str,
+    ) -> Result<ImageManifest> {
         info!("📋 Fetching manifest for {}:{}", image, tag);
 
         let manifest_url = format!(
@@ -166,17 +185,18 @@ impl RegistryClient {
         let mut headers = HeaderMap::new();
         headers.insert(
             ACCEPT,
-            HeaderValue::from_static("application/vnd.docker.distribution.manifest.v2+json")
+            HeaderValue::from_static("application/vnd.docker.distribution.manifest.v2+json"),
         );
 
         if let Some(token) = &self.auth_token {
             headers.insert(
                 AUTHORIZATION,
-                HeaderValue::from_str(token).context("Invalid auth token")?
+                HeaderValue::from_str(token).context("Invalid auth token")?,
             );
         }
 
-        let response = self.client
+        let response = self
+            .client
             .get(&manifest_url)
             .headers(headers)
             .send()
@@ -190,10 +210,10 @@ impl RegistryClient {
             ));
         }
 
-        let manifest: ImageManifest = response.json().await
-            .context("Failed to parse manifest")?;
+        let manifest: ImageManifest = response.json().await.context("Failed to parse manifest")?;
 
-        debug!("Manifest: {} layers, config: {}",
+        debug!(
+            "Manifest: {} layers, config: {}",
             manifest.layers.len(),
             manifest.config.digest
         );
@@ -201,7 +221,13 @@ impl RegistryClient {
         Ok(manifest)
     }
 
-    async fn fetch_blob(&self, registry: &str, namespace: &str, image: &str, digest: &str) -> Result<Vec<u8>> {
+    async fn fetch_blob(
+        &self,
+        registry: &str,
+        namespace: &str,
+        image: &str,
+        digest: &str,
+    ) -> Result<Vec<u8>> {
         debug!("⬇️  Fetching blob: {}", digest);
 
         let blob_url = format!(
@@ -213,11 +239,12 @@ impl RegistryClient {
         if let Some(token) = &self.auth_token {
             headers.insert(
                 AUTHORIZATION,
-                HeaderValue::from_str(token).context("Invalid auth token")?
+                HeaderValue::from_str(token).context("Invalid auth token")?,
             );
         }
 
-        let response = self.client
+        let response = self
+            .client
             .get(&blob_url)
             .headers(headers)
             .send()
@@ -231,8 +258,7 @@ impl RegistryClient {
             ));
         }
 
-        let data = response.bytes().await
-            .context("Failed to read blob data")?;
+        let data = response.bytes().await.context("Failed to read blob data")?;
 
         Ok(data.to_vec())
     }
@@ -241,15 +267,15 @@ impl RegistryClient {
         debug!("📂 Extracting layer to rootfs");
 
         // Read the compressed layer
-        let layer_file = std::fs::File::open(layer_path)
-            .context("Failed to open layer file")?;
+        let layer_file = std::fs::File::open(layer_path).context("Failed to open layer file")?;
 
         // Decompress and extract
         let gz_decoder = GzDecoder::new(layer_file);
         let mut archive = Archive::new(gz_decoder);
 
         // Extract to rootfs
-        archive.unpack(rootfs_dir)
+        archive
+            .unpack(rootfs_dir)
             .context("Failed to extract layer")?;
 
         Ok(())

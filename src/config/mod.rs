@@ -1,8 +1,8 @@
+use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use anyhow::{Context, Result, anyhow};
-use tracing::{info, warn, debug};
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BoltFile {
@@ -132,8 +132,8 @@ impl BoltFile {
         let content = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read Boltfile at {:?}", path.as_ref()))?;
 
-        let config: BoltFile = toml::from_str(&content)
-            .with_context(|| "Failed to parse Boltfile")?;
+        let config: BoltFile =
+            toml::from_str(&content).with_context(|| "Failed to parse Boltfile")?;
 
         // Validate the configuration
         config.validate()?;
@@ -145,8 +145,8 @@ impl BoltFile {
         // Validate before saving
         self.validate()?;
 
-        let content = toml::to_string_pretty(self)
-            .with_context(|| "Failed to serialize Boltfile")?;
+        let content =
+            toml::to_string_pretty(self).with_context(|| "Failed to serialize Boltfile")?;
 
         std::fs::write(&path, content)
             .with_context(|| format!("Failed to write Boltfile at {:?}", path.as_ref()))?;
@@ -192,7 +192,10 @@ impl BoltFile {
         }
 
         if self.project.contains(' ') {
-            return Err(anyhow!("Project name cannot contain spaces: '{}'", self.project));
+            return Err(anyhow!(
+                "Project name cannot contain spaces: '{}'",
+                self.project
+            ));
         }
 
         if self.services.is_empty() {
@@ -219,17 +222,27 @@ impl BoltFile {
 
             // Service must have at least one of: image, build, or capsule
             if service.image.is_none() && service.build.is_none() && service.capsule.is_none() {
-                return Err(anyhow!("Service '{}' must specify either 'image', 'build', or 'capsule'", name));
+                return Err(anyhow!(
+                    "Service '{}' must specify either 'image', 'build', or 'capsule'",
+                    name
+                ));
             }
 
             // Validate mutually exclusive options
-            let options_count = [service.image.is_some(), service.build.is_some(), service.capsule.is_some()]
-                .iter()
-                .filter(|&&x| x)
-                .count();
+            let options_count = [
+                service.image.is_some(),
+                service.build.is_some(),
+                service.capsule.is_some(),
+            ]
+            .iter()
+            .filter(|&&x| x)
+            .count();
 
             if options_count > 1 {
-                return Err(anyhow!("Service '{}' can only specify one of 'image', 'build', or 'capsule'", name));
+                return Err(anyhow!(
+                    "Service '{}' can only specify one of 'image', 'build', or 'capsule'",
+                    name
+                ));
             }
 
             // Validate gaming configuration
@@ -268,7 +281,11 @@ impl BoltFile {
                 // Validate that all dependencies exist
                 for dep in deps {
                     if !self.services.contains_key(dep) {
-                        return Err(anyhow!("Service '{}' depends on non-existent service '{}'", name, dep));
+                        return Err(anyhow!(
+                            "Service '{}' depends on non-existent service '{}'",
+                            name,
+                            dep
+                        ));
                     }
                 }
             }
@@ -278,9 +295,17 @@ impl BoltFile {
         Ok(())
     }
 
-    fn check_circular_dependencies(&self, service: &str, deps: &[String], visited: &mut HashSet<String>) -> Result<()> {
+    fn check_circular_dependencies(
+        &self,
+        service: &str,
+        deps: &[String],
+        visited: &mut HashSet<String>,
+    ) -> Result<()> {
         if visited.contains(service) {
-            return Err(anyhow!("Circular dependency detected involving service '{}'", service));
+            return Err(anyhow!(
+                "Circular dependency detected involving service '{}'",
+                service
+            ));
         }
 
         visited.insert(service.to_string());
@@ -308,7 +333,10 @@ impl BoltFile {
                     let host_port = self.extract_host_port(port_mapping)?;
 
                     if used_host_ports.contains(&host_port) {
-                        return Err(anyhow!("Port conflict: host port {} is used by multiple services", host_port));
+                        return Err(anyhow!(
+                            "Port conflict: host port {} is used by multiple services",
+                            host_port
+                        ));
                     }
 
                     used_host_ports.insert(host_port);
@@ -328,7 +356,8 @@ impl BoltFile {
         }
 
         let host_port_str = parts[0];
-        host_port_str.parse::<u16>()
+        host_port_str
+            .parse::<u16>()
             .with_context(|| format!("Invalid host port number: '{}'", host_port_str))
     }
 
@@ -338,20 +367,33 @@ impl BoltFile {
             if port.contains(':') {
                 let parts: Vec<&str> = port.split(':').collect();
                 if parts.len() != 2 {
-                    return Err(anyhow!("Service '{}': invalid port mapping format '{}'", service_name, port));
+                    return Err(anyhow!(
+                        "Service '{}': invalid port mapping format '{}'",
+                        service_name,
+                        port
+                    ));
                 }
 
                 // Validate host port
-                parts[0].parse::<u16>()
-                    .with_context(|| format!("Service '{}': invalid host port '{}'", service_name, parts[0]))?;
+                parts[0].parse::<u16>().with_context(|| {
+                    format!(
+                        "Service '{}': invalid host port '{}'",
+                        service_name, parts[0]
+                    )
+                })?;
 
                 // Validate container port
-                parts[1].parse::<u16>()
-                    .with_context(|| format!("Service '{}': invalid container port '{}'", service_name, parts[1]))?;
+                parts[1].parse::<u16>().with_context(|| {
+                    format!(
+                        "Service '{}': invalid container port '{}'",
+                        service_name, parts[1]
+                    )
+                })?;
             } else {
                 // Single port number
-                port.parse::<u16>()
-                    .with_context(|| format!("Service '{}': invalid port number '{}'", service_name, port))?;
+                port.parse::<u16>().with_context(|| {
+                    format!("Service '{}': invalid port number '{}'", service_name, port)
+                })?;
             }
         }
 
@@ -363,19 +405,31 @@ impl BoltFile {
             if volume.contains(':') {
                 let parts: Vec<&str> = volume.split(':').collect();
                 if parts.len() < 2 || parts.len() > 3 {
-                    return Err(anyhow!("Service '{}': invalid volume mapping format '{}'", service_name, volume));
+                    return Err(anyhow!(
+                        "Service '{}': invalid volume mapping format '{}'",
+                        service_name,
+                        volume
+                    ));
                 }
 
                 // Validate host path (first part)
                 let host_path = parts[0];
                 if host_path.is_empty() {
-                    return Err(anyhow!("Service '{}': empty host path in volume mapping '{}'", service_name, volume));
+                    return Err(anyhow!(
+                        "Service '{}': empty host path in volume mapping '{}'",
+                        service_name,
+                        volume
+                    ));
                 }
 
                 // Validate container path (second part)
                 let container_path = parts[1];
                 if container_path.is_empty() {
-                    return Err(anyhow!("Service '{}': empty container path in volume mapping '{}'", service_name, volume));
+                    return Err(anyhow!(
+                        "Service '{}': empty container path in volume mapping '{}'",
+                        service_name,
+                        volume
+                    ));
                 }
 
                 // Validate options (third part, if present)
@@ -383,8 +437,11 @@ impl BoltFile {
                     let options = parts[2];
                     for option in options.split(',') {
                         match option {
-                            "ro" | "rw" | "z" | "Z" => {},  // Valid options
-                            _ => warn!("Service '{}': unknown volume option '{}' in '{}'", service_name, option, volume),
+                            "ro" | "rw" | "z" | "Z" => {} // Valid options
+                            _ => warn!(
+                                "Service '{}': unknown volume option '{}' in '{}'",
+                                service_name, option, volume
+                            ),
                         }
                     }
                 }
@@ -400,34 +457,56 @@ impl BoltFile {
         if let Some(ref gpu) = gaming.gpu {
             if let Some(ref nvidia) = gpu.nvidia {
                 if nvidia.device.is_some() && nvidia.device.unwrap() > 7 {
-                    warn!("Service '{}': NVIDIA device ID {} is unusually high", service_name, nvidia.device.unwrap());
+                    warn!(
+                        "Service '{}': NVIDIA device ID {} is unusually high",
+                        service_name,
+                        nvidia.device.unwrap()
+                    );
                 }
             }
 
             if let Some(ref amd) = gpu.amd {
                 if amd.device.is_some() && amd.device.unwrap() > 7 {
-                    warn!("Service '{}': AMD device ID {} is unusually high", service_name, amd.device.unwrap());
+                    warn!(
+                        "Service '{}': AMD device ID {} is unusually high",
+                        service_name,
+                        amd.device.unwrap()
+                    );
                 }
             }
         }
 
         if let Some(ref audio) = gaming.audio {
             match audio.system.as_str() {
-                "pipewire" | "pulseaudio" => {},
-                _ => return Err(anyhow!("Service '{}': unsupported audio system '{}'", service_name, audio.system)),
+                "pipewire" | "pulseaudio" => {}
+                _ => {
+                    return Err(anyhow!(
+                        "Service '{}': unsupported audio system '{}'",
+                        service_name,
+                        audio.system
+                    ));
+                }
             }
         }
 
         if let Some(ref perf) = gaming.performance {
             if let Some(nice) = perf.nice_level {
                 if nice < -20 || nice > 19 {
-                    return Err(anyhow!("Service '{}': nice level {} out of range (-20 to 19)", service_name, nice));
+                    return Err(anyhow!(
+                        "Service '{}': nice level {} out of range (-20 to 19)",
+                        service_name,
+                        nice
+                    ));
                 }
             }
 
             if let Some(rt_prio) = perf.rt_priority {
                 if rt_prio > 99 {
-                    return Err(anyhow!("Service '{}': RT priority {} out of range (0 to 99)", service_name, rt_prio));
+                    return Err(anyhow!(
+                        "Service '{}': RT priority {} out of range (0 to 99)",
+                        service_name,
+                        rt_prio
+                    ));
                 }
             }
         }
@@ -438,14 +517,28 @@ impl BoltFile {
     fn validate_storage_config(&self, service_name: &str, storage: &Storage) -> Result<()> {
         // Validate storage size format
         let size = &storage.size;
-        if !size.ends_with("Gi") && !size.ends_with("Mi") && !size.ends_with("Ki") && !size.ends_with("G") && !size.ends_with("M") && !size.ends_with("K") {
-            return Err(anyhow!("Service '{}': invalid storage size format '{}' (use formats like '5Gi', '500Mi')", service_name, size));
+        if !size.ends_with("Gi")
+            && !size.ends_with("Mi")
+            && !size.ends_with("Ki")
+            && !size.ends_with("G")
+            && !size.ends_with("M")
+            && !size.ends_with("K")
+        {
+            return Err(anyhow!(
+                "Service '{}': invalid storage size format '{}' (use formats like '5Gi', '500Mi')",
+                service_name,
+                size
+            ));
         }
 
         // Extract numeric part
         let numeric_part = size.trim_end_matches(|c: char| c.is_alphabetic());
-        numeric_part.parse::<f64>()
-            .with_context(|| format!("Service '{}': invalid storage size number in '{}'", service_name, size))?;
+        numeric_part.parse::<f64>().with_context(|| {
+            format!(
+                "Service '{}': invalid storage size number in '{}'",
+                service_name, size
+            )
+        })?;
 
         Ok(())
     }
@@ -456,14 +549,22 @@ impl BoltFile {
         for (name, network) in networks {
             if let Some(ref subnet) = network.subnet {
                 if !subnet.contains('/') {
-                    return Err(anyhow!("Network '{}': subnet '{}' must be in CIDR notation", name, subnet));
+                    return Err(anyhow!(
+                        "Network '{}': subnet '{}' must be in CIDR notation",
+                        name,
+                        subnet
+                    ));
                 }
             }
 
             if let Some(ref ipam) = network.ipam {
                 for config in &ipam.config {
                     if !config.subnet.contains('/') {
-                        return Err(anyhow!("Network '{}': IPAM subnet '{}' must be in CIDR notation", name, config.subnet));
+                        return Err(anyhow!(
+                            "Network '{}': IPAM subnet '{}' must be in CIDR notation",
+                            name,
+                            config.subnet
+                        ));
                     }
                 }
             }
@@ -479,7 +580,7 @@ impl BoltFile {
         for (name, volume) in volumes {
             if let Some(ref driver) = volume.driver {
                 match driver.as_str() {
-                    "local" | "nfs" | "cifs" => {},
+                    "local" | "nfs" | "cifs" => {}
                     _ => warn!("Volume '{}': unknown driver '{}'", name, driver),
                 }
             }
@@ -504,12 +605,18 @@ impl BoltFile {
 
             // Suggest restart policies
             if service.restart.is_none() {
-                suggestions.push(format!("Service '{}': Consider adding a restart policy (e.g., 'always', 'on-failure')", name));
+                suggestions.push(format!(
+                    "Service '{}': Consider adding a restart policy (e.g., 'always', 'on-failure')",
+                    name
+                ));
             }
 
             // Suggest health checks for long-running services
             if service.restart == Some(RestartPolicy::Always) {
-                suggestions.push(format!("Service '{}': Consider adding health checks for better reliability", name));
+                suggestions.push(format!(
+                    "Service '{}': Consider adding health checks for better reliability",
+                    name
+                ));
             }
 
             // Gaming-specific suggestions
@@ -519,7 +626,10 @@ impl BoltFile {
                 }
 
                 if gaming.gpu.is_some() && gaming.audio.is_none() {
-                    suggestions.push(format!("Service '{}': Gaming service should configure audio system", name));
+                    suggestions.push(format!(
+                        "Service '{}': Gaming service should configure audio system",
+                        name
+                    ));
                 }
             }
 
@@ -536,7 +646,8 @@ impl BoltFile {
 
         // Network suggestions
         if self.networks.is_none() {
-            suggestions.push("Consider defining custom networks for better service isolation".to_string());
+            suggestions
+                .push("Consider defining custom networks for better service isolation".to_string());
         }
 
         // Gaming network suggestion
@@ -608,7 +719,8 @@ subnet = "10.0.0.0/16"          # Network subnet in CIDR notation (optional)
 [volumes.<name>]                 # Optional named volumes
 driver = "local"                 # Volume driver (optional)
 external = false                 # Use external volume (optional)
-"#.to_string()
+"#
+        .to_string()
     }
 }
 
@@ -659,114 +771,126 @@ pub fn create_example_boltfile() -> BoltFile {
     let mut services = HashMap::new();
 
     // Web service
-    services.insert("web".to_string(), Service {
-        image: Some("bolt://nginx:latest".to_string()),
-        build: None,
-        capsule: None,
-        ports: Some(vec!["80:80".to_string()]),
-        volumes: Some(vec!["./site:/usr/share/nginx/html".to_string()]),
-        environment: None,
-        env: None,
-        depends_on: Some(vec!["api".to_string()]),
-        restart: Some(RestartPolicy::Always),
-        networks: None,
-        storage: None,
-        auth: None,
-        gaming: None,
-    });
+    services.insert(
+        "web".to_string(),
+        Service {
+            image: Some("bolt://nginx:latest".to_string()),
+            build: None,
+            capsule: None,
+            ports: Some(vec!["80:80".to_string()]),
+            volumes: Some(vec!["./site:/usr/share/nginx/html".to_string()]),
+            environment: None,
+            env: None,
+            depends_on: Some(vec!["api".to_string()]),
+            restart: Some(RestartPolicy::Always),
+            networks: None,
+            storage: None,
+            auth: None,
+            gaming: None,
+        },
+    );
 
     // API service
-    services.insert("api".to_string(), Service {
-        image: None,
-        build: Some("./api".to_string()),
-        capsule: None,
-        ports: Some(vec!["3000:3000".to_string()]),
-        volumes: None,
-        environment: None,
-        env: {
-            let mut env = HashMap::new();
-            env.insert("DATABASE_URL".to_string(), "bolt://db".to_string());
-            Some(env)
+    services.insert(
+        "api".to_string(),
+        Service {
+            image: None,
+            build: Some("./api".to_string()),
+            capsule: None,
+            ports: Some(vec!["3000:3000".to_string()]),
+            volumes: None,
+            environment: None,
+            env: {
+                let mut env = HashMap::new();
+                env.insert("DATABASE_URL".to_string(), "bolt://db".to_string());
+                Some(env)
+            },
+            depends_on: Some(vec!["db".to_string()]),
+            restart: Some(RestartPolicy::Always),
+            networks: None,
+            storage: None,
+            auth: None,
+            gaming: None,
         },
-        depends_on: Some(vec!["db".to_string()]),
-        restart: Some(RestartPolicy::Always),
-        networks: None,
-        storage: None,
-        auth: None,
-        gaming: None,
-    });
+    );
 
     // Database service
-    services.insert("db".to_string(), Service {
-        image: None,
-        build: None,
-        capsule: Some("postgres".to_string()),
-        ports: None,
-        volumes: None,
-        environment: None,
-        env: None,
-        depends_on: None,
-        restart: Some(RestartPolicy::Always),
-        networks: None,
-        storage: Some(Storage {
-            size: "5Gi".to_string(),
-            driver: None,
-        }),
-        auth: Some(Auth {
-            user: "demo".to_string(),
-            password: "secret".to_string(),
-        }),
-        gaming: None,
-    });
+    services.insert(
+        "db".to_string(),
+        Service {
+            image: None,
+            build: None,
+            capsule: Some("postgres".to_string()),
+            ports: None,
+            volumes: None,
+            environment: None,
+            env: None,
+            depends_on: None,
+            restart: Some(RestartPolicy::Always),
+            networks: None,
+            storage: Some(Storage {
+                size: "5Gi".to_string(),
+                driver: None,
+            }),
+            auth: Some(Auth {
+                user: "demo".to_string(),
+                password: "secret".to_string(),
+            }),
+            gaming: None,
+        },
+    );
 
     // Gaming service example
-    services.insert("game".to_string(), Service {
-        image: Some("bolt://steam:latest".to_string()),
-        build: None,
-        capsule: None,
-        ports: None,
-        volumes: Some(vec![
-            "./games:/games".to_string(),
-            "/dev/dri:/dev/dri".to_string(),
-        ]),
-        environment: None,
-        env: None,
-        depends_on: None,
-        restart: Some(RestartPolicy::No),
-        networks: None,
-        storage: Some(Storage {
-            size: "100Gi".to_string(),
-            driver: None,
-        }),
-        auth: None,
-        gaming: Some(GamingConfig {
-            gpu: Some(GpuConfig {
-                nvidia: Some(NvidiaConfig {
-                    device: Some(0),
-                    dlss: Some(true),
-                    raytracing: Some(true),
-                    cuda: Some(false),
+    services.insert(
+        "game".to_string(),
+        Service {
+            image: Some("bolt://steam:latest".to_string()),
+            build: None,
+            capsule: None,
+            ports: None,
+            volumes: Some(vec![
+                "./games:/games".to_string(),
+                "/dev/dri:/dev/dri".to_string(),
+            ]),
+            environment: None,
+            env: None,
+            depends_on: None,
+            restart: Some(RestartPolicy::No),
+            networks: None,
+            storage: Some(Storage {
+                size: "100Gi".to_string(),
+                driver: None,
+            }),
+            auth: None,
+            gaming: Some(GamingConfig {
+                gpu: Some(GpuConfig {
+                    nvidia: Some(NvidiaConfig {
+                        device: Some(0),
+                        dlss: Some(true),
+                        raytracing: Some(true),
+                        cuda: Some(false),
+                    }),
+                    amd: None,
+                    passthrough: Some(true),
                 }),
-                amd: None,
-                passthrough: Some(true),
+                audio: Some(AudioConfig {
+                    system: "pipewire".to_string(),
+                    latency: Some("low".to_string()),
+                }),
+                wine: Some(WineConfig {
+                    version: None,
+                    proton: Some("8.0".to_string()),
+                    winver: Some("win10".to_string()),
+                    prefix: Some("/games/wine-prefix".to_string()),
+                }),
+                performance: Some(PerformanceConfig {
+                    cpu_governor: Some("performance".to_string()),
+                    nice_level: Some(-10),
+                    rt_priority: Some(50),
+                }),
             }),
-            audio: Some(AudioConfig {
-                system: "pipewire".to_string(),
-                latency: Some("low".to_string()),
-            }),
-            wine: Some(WineConfig {
-                version: None,
-                proton: Some("8.0".to_string()),
-                winver: Some("win10".to_string()),
-                prefix: Some("/games/wine-prefix".to_string()),
-            }),
-            performance: Some(PerformanceConfig {
-                cpu_governor: Some("performance".to_string()),
-                nice_level: Some(-10),
-                rt_priority: Some(50),
-            }),
-        }),
-    });
+        },
+    );
 
     BoltFile {
         project: "demo".to_string(),

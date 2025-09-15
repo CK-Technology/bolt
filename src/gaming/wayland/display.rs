@@ -1,9 +1,9 @@
-use anyhow::{Result, Context};
-use tracing::{info, debug, warn};
-use std::path::PathBuf;
+use anyhow::{Context, Result};
 use std::os::unix::net::UnixListener;
-use tokio::sync::RwLock;
+use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::RwLock;
+use tracing::{debug, info, warn};
 
 use super::WaylandGamingConfig;
 
@@ -49,28 +49,32 @@ impl DisplayManager {
             running: false,
         };
 
-        debug!("✅ Display manager initialized for: {}", config.display_name);
+        debug!(
+            "✅ Display manager initialized for: {}",
+            config.display_name
+        );
         Ok(display_manager)
     }
 
     pub async fn start(&mut self) -> Result<()> {
-        info!("🚀 Starting Wayland display server at: {:?}", self.socket_path);
+        info!(
+            "🚀 Starting Wayland display server at: {:?}",
+            self.socket_path
+        );
 
         // Clean up any existing socket
         if self.socket_path.exists() {
-            std::fs::remove_file(&self.socket_path)
-                .context("Failed to remove existing socket")?;
+            std::fs::remove_file(&self.socket_path).context("Failed to remove existing socket")?;
         }
 
         // Create socket directory if it doesn't exist
         if let Some(parent) = self.socket_path.parent() {
-            std::fs::create_dir_all(parent)
-                .context("Failed to create socket directory")?;
+            std::fs::create_dir_all(parent).context("Failed to create socket directory")?;
         }
 
         // Create Unix socket listener
-        let listener = UnixListener::bind(&self.socket_path)
-            .context("Failed to bind Wayland socket")?;
+        let listener =
+            UnixListener::bind(&self.socket_path).context("Failed to bind Wayland socket")?;
 
         self.listener = Some(listener);
         self.running = true;
@@ -151,7 +155,8 @@ impl DisplayManager {
         }
 
         // Apply gaming optimizations for this client
-        self.apply_gaming_optimizations_for_client(client_id).await?;
+        self.apply_gaming_optimizations_for_client(client_id)
+            .await?;
 
         info!("✅ Gaming client registered with ID: {}", client_id);
         Ok(client_id)
@@ -209,7 +214,10 @@ impl DisplayManager {
     }
 
     async fn setup_presentation_timing(&self, client_id: u32) -> Result<()> {
-        debug!("⏱️  Setting up presentation timing for client: {}", client_id);
+        debug!(
+            "⏱️  Setting up presentation timing for client: {}",
+            client_id
+        );
 
         // Configure precise presentation timing for smooth gameplay
         info!("  ✓ Presentation timing configured");
@@ -247,8 +255,7 @@ impl DisplayManager {
 
         // Clean up socket
         if self.socket_path.exists() {
-            std::fs::remove_file(&self.socket_path)
-                .context("Failed to clean up socket")?;
+            std::fs::remove_file(&self.socket_path).context("Failed to clean up socket")?;
         }
 
         // Clear clients

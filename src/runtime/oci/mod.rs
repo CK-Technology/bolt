@@ -1,17 +1,16 @@
-use anyhow::{Result, Context};
-use oci_spec::runtime::{Spec, Process, Root, Mount, Linux};
-use tracing::{info, debug, warn, error};
-use std::path::{Path, PathBuf};
-use std::collections::HashMap;
-use uuid::Uuid;
+use anyhow::{Context, Result};
+use oci_spec::runtime::{Linux, Mount, Process, Root, Spec};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use tracing::{debug, info, warn};
 
 pub mod container;
 pub mod executor;
 pub mod namespace;
 
-use crate::runtime::storage::StorageManager;
 use crate::capsules::CapsuleManager;
+use crate::runtime::storage::StorageManager;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContainerConfig {
@@ -61,11 +60,11 @@ pub struct SecurityProfile {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceLimits {
-    pub memory_limit: Option<u64>,    // bytes
-    pub cpu_limit: Option<f64>,       // cores
-    pub pids_limit: Option<u32>,      // max processes
-    pub blkio_weight: Option<u16>,    // 10-1000
-    pub cpu_shares: Option<u32>,      // relative weight
+    pub memory_limit: Option<u64>, // bytes
+    pub cpu_limit: Option<f64>,    // cores
+    pub pids_limit: Option<u32>,   // max processes
+    pub blkio_weight: Option<u16>, // 10-1000
+    pub cpu_shares: Option<u32>,   // relative weight
 }
 
 impl Default for SecurityProfile {
@@ -89,10 +88,10 @@ impl Default for ResourceLimits {
     fn default() -> Self {
         Self {
             memory_limit: Some(512 * 1024 * 1024), // 512MB default
-            cpu_limit: Some(1.0),                   // 1 core default
-            pids_limit: Some(1024),                 // 1024 processes
-            blkio_weight: Some(500),                // medium I/O priority
-            cpu_shares: Some(1024),                 // standard weight
+            cpu_limit: Some(1.0),                  // 1 core default
+            pids_limit: Some(1024),                // 1024 processes
+            blkio_weight: Some(500),               // medium I/O priority
+            cpu_shares: Some(1024),                // standard weight
         }
     }
 }
@@ -128,8 +127,7 @@ pub enum ContainerStatus {
 
 impl OCIRuntime {
     pub fn new(runtime_dir: PathBuf) -> Result<Self> {
-        std::fs::create_dir_all(&runtime_dir)
-            .context("Failed to create runtime directory")?;
+        std::fs::create_dir_all(&runtime_dir).context("Failed to create runtime directory")?;
 
         let storage = StorageManager::new(runtime_dir.join("storage"))?;
         let capsule_manager = CapsuleManager::new(runtime_dir.join("capsules"))?;
@@ -156,13 +154,13 @@ impl OCIRuntime {
 
         // Gaming optimizations
         if let Some(ref gaming) = config.gaming_config {
-            self.apply_gaming_optimizations(&container_id, gaming).await?;
+            self.apply_gaming_optimizations(&container_id, gaming)
+                .await?;
         }
 
         // Create container bundle directory
         let bundle_path = self.runtime_dir.join("bundles").join(&container_id);
-        std::fs::create_dir_all(&bundle_path)
-            .context("Failed to create container bundle")?;
+        std::fs::create_dir_all(&bundle_path).context("Failed to create container bundle")?;
 
         // Pull image if needed
         self.storage.pull_image(&config.image).await?;
@@ -171,8 +169,7 @@ impl OCIRuntime {
         let spec = self.create_oci_spec(&config)?;
         let spec_path = bundle_path.join("config.json");
         let spec_json = serde_json::to_string_pretty(&spec)?;
-        std::fs::write(&spec_path, spec_json)
-            .context("Failed to write OCI spec")?;
+        std::fs::write(&spec_path, spec_json).context("Failed to write OCI spec")?;
 
         // Create container state
         let state = ContainerState {
@@ -205,13 +202,16 @@ impl OCIRuntime {
     pub async fn run_capsule(&mut self, config: ContainerConfig) -> Result<String> {
         info!("🔧 Starting Bolt Capsule: {}", config.image);
 
-        let capsule_name = config.image.strip_prefix("bolt://").unwrap_or(&config.image);
+        let capsule_name = config
+            .image
+            .strip_prefix("bolt://")
+            .unwrap_or(&config.image);
 
         // Use Capsule manager for VM-like containers
-        let capsule_id = self.capsule_manager.create_capsule(
-            capsule_name,
-            &config,
-        ).await?;
+        let capsule_id = self
+            .capsule_manager
+            .create_capsule(capsule_name, &config)
+            .await?;
 
         info!("✅ Bolt Capsule {} created", capsule_id);
         Ok(capsule_id)
@@ -222,7 +222,10 @@ impl OCIRuntime {
         container_id: &str,
         gaming_config: &crate::config::GamingConfig,
     ) -> Result<()> {
-        info!("🎮 Applying gaming optimizations for container: {}", container_id);
+        info!(
+            "🎮 Applying gaming optimizations for container: {}",
+            container_id
+        );
 
         // GPU passthrough setup
         if let Some(ref gpu) = gaming_config.gpu {
@@ -333,7 +336,10 @@ impl OCIRuntime {
             // TODO: Apply real-time priority
         }
 
-        info!("✅ Performance tuning applied to container: {}", container_id);
+        info!(
+            "✅ Performance tuning applied to container: {}",
+            container_id
+        );
         Ok(())
     }
 
@@ -351,12 +357,12 @@ impl OCIRuntime {
 
         // Process configuration
         let mut process = Process::default();
-        process.set_args(Some(
-            [config.command.clone(), config.args.clone()].concat()
-        ));
+        process.set_args(Some([config.command.clone(), config.args.clone()].concat()));
 
         // Environment variables
-        let env: Vec<String> = config.env.iter()
+        let env: Vec<String> = config
+            .env
+            .iter()
             .map(|(k, v)| format!("{}={}", k, v))
             .collect();
         process.set_env(Some(env));
@@ -390,7 +396,11 @@ impl OCIRuntime {
                 mount.set_destination("/sys".into());
                 mount.set_source(Some("sysfs".to_string().into()));
                 mount.set_typ(Some("sysfs".to_string()));
-                mount.set_options(Some(vec!["nosuid".to_string(), "noexec".to_string(), "nodev".to_string()]));
+                mount.set_options(Some(vec![
+                    "nosuid".to_string(),
+                    "noexec".to_string(),
+                    "nodev".to_string(),
+                ]));
                 mount
             },
         ];
@@ -429,23 +439,25 @@ impl OCIRuntime {
                 nix::sys::signal::kill(
                     nix::unistd::Pid::from_raw(pid as i32),
                     nix::sys::signal::Signal::SIGTERM,
-                ).context("Failed to send SIGTERM")?;
+                )
+                .context("Failed to send SIGTERM")?;
 
                 // Wait a bit, then SIGKILL if needed
                 tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
 
                 // Check if process still exists
-                match nix::sys::signal::kill(
-                    nix::unistd::Pid::from_raw(pid as i32),
-                    None,
-                ) {
+                match nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), None) {
                     Ok(_) => {
                         // Process still exists, force kill
-                        warn!("Container {} didn't respond to SIGTERM, sending SIGKILL", container_id);
+                        warn!(
+                            "Container {} didn't respond to SIGTERM, sending SIGKILL",
+                            container_id
+                        );
                         nix::sys::signal::kill(
                             nix::unistd::Pid::from_raw(pid as i32),
                             nix::sys::signal::Signal::SIGKILL,
-                        ).context("Failed to send SIGKILL")?;
+                        )
+                        .context("Failed to send SIGKILL")?;
                     }
                     Err(_) => {
                         // Process already dead
@@ -464,7 +476,8 @@ impl OCIRuntime {
     }
 
     pub fn list_containers(&self, all: bool) -> Vec<&ContainerState> {
-        self.containers.values()
+        self.containers
+            .values()
             .filter(|state| all || state.status == ContainerStatus::Running)
             .collect()
     }

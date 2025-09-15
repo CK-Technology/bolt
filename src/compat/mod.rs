@@ -1,9 +1,9 @@
+pub mod compose;
 pub mod docker;
 pub mod podman;
-pub mod compose;
 
+use crate::BoltRuntime;
 use crate::error::{BoltError, Result};
-use crate::runtime::BoltRuntime;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -98,19 +98,22 @@ impl DockerApiCompat {
             ("POST", path) if path.starts_with("/containers/") && path.ends_with("/start") => {
                 let id = self.extract_container_id(path)?;
                 self.start_container(&id).await
-            },
+            }
             ("POST", path) if path.starts_with("/containers/") && path.ends_with("/stop") => {
                 let id = self.extract_container_id(path)?;
                 self.stop_container(&id).await
-            },
+            }
             ("DELETE", path) if path.starts_with("/containers/") => {
                 let id = self.extract_container_id(path)?;
                 self.remove_container(&id).await
-            },
+            }
             ("GET", "/images/json") => self.list_images().await,
             ("POST", "/images/create") => self.pull_image(body).await,
             ("POST", "/build") => self.build_image(body).await,
-            _ => Err(BoltError::Runtime(format!("Unsupported API endpoint: {} {}", method, path))),
+            _ => Err(BoltError::Runtime(format!(
+                "Unsupported API endpoint: {} {}",
+                method, path
+            ))),
         }
     }
 
@@ -300,7 +303,8 @@ impl DockerApiCompat {
                 if let Some(bindings) = host_bindings.as_array() {
                     for binding in bindings {
                         if let Some(host_port) = binding["HostPort"].as_str() {
-                            let container_port_clean = container_port.replace("/tcp", "").replace("/udp", "");
+                            let container_port_clean =
+                                container_port.replace("/tcp", "").replace("/udp", "");
                             ports.push(format!("{}:{}", host_port, container_port_clean));
                         }
                     }
@@ -329,34 +333,42 @@ impl DockerApiCompat {
         }
 
         // Create container using Bolt runtime
-        self.runtime.run_container(
-            &image,
-            name.as_deref(),
-            &ports,
-            &env,
-            &volumes,
-            false, // Don't start immediately
-        ).await?;
+        self.runtime
+            .run_container(
+                &image,
+                name.as_deref(),
+                &ports,
+                &env,
+                &volumes,
+                false, // Don't start immediately
+            )
+            .await?;
 
-        let container_id = format!("bolt-{}", uuid::Uuid::new_v4().to_string().replace("-", "")[..12].to_string());
+        let container_id = format!(
+            "bolt-{}",
+            uuid::Uuid::new_v4().to_string().replace("-", "")[..12].to_string()
+        );
 
         Ok(serde_json::json!({
             "Id": container_id,
             "Warnings": []
-        }).to_string())
+        })
+        .to_string())
     }
 
     async fn start_container(&self, id: &str) -> Result<String> {
         // In a real implementation, we'd need to track container IDs
         // For now, assume container name matches ID
-        self.runtime.run_container(
-            "existing", // Would need to look up image
-            Some(id),
-            &[],
-            &[],
-            &[],
-            true,
-        ).await?;
+        self.runtime
+            .run_container(
+                "existing", // Would need to look up image
+                Some(id),
+                &[],
+                &[],
+                &[],
+                true,
+            )
+            .await?;
 
         Ok("".to_string())
     }
@@ -391,9 +403,8 @@ impl DockerApiCompat {
     }
 
     async fn pull_image(&self, body: &str) -> Result<String> {
-        let request: serde_json::Value = serde_json::from_str(body).unwrap_or_else(|_| {
-            serde_json::json!({ "fromImage": "nginx:latest" })
-        });
+        let request: serde_json::Value = serde_json::from_str(body)
+            .unwrap_or_else(|_| serde_json::json!({ "fromImage": "nginx:latest" }));
 
         let image = request["fromImage"].as_str().unwrap_or("nginx:latest");
         self.runtime.pull_image(image).await?;
@@ -401,16 +412,20 @@ impl DockerApiCompat {
         Ok(serde_json::json!({
             "status": "Downloaded newer image",
             "id": image
-        }).to_string())
+        })
+        .to_string())
     }
 
     async fn build_image(&self, body: &str) -> Result<String> {
         // Extract build context and Dockerfile
-        self.runtime.build_image(".", Some("bolt-built:latest"), "Dockerfile").await?;
+        self.runtime
+            .build_image(".", Some("bolt-built:latest"), "Dockerfile")
+            .await?;
 
         Ok(serde_json::json!({
             "stream": "Successfully built bolt-built:latest\n"
-        }).to_string())
+        })
+        .to_string())
     }
 
     fn extract_container_id(&self, path: &str) -> Result<String> {
@@ -418,7 +433,9 @@ impl DockerApiCompat {
         if parts.len() >= 3 {
             Ok(parts[2].to_string())
         } else {
-            Err(BoltError::Runtime("Invalid container path".to_string()))
+            Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
+                message: "Invalid container path".to_string(),
+            }))
         }
     }
 

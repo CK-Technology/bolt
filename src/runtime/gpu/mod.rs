@@ -1,12 +1,11 @@
-use anyhow::{Result, Context};
-use tracing::{info, warn, debug, error};
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::Command;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use tracing::{debug, info, warn};
 
-pub mod nvidia;
 pub mod amd;
+pub mod nvidia;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GPUManager {
@@ -57,7 +56,9 @@ impl GPUManager {
 
         if let Some(ref nvidia_config) = gpu_config.nvidia {
             if let Some(ref nvidia_manager) = self.nvidia {
-                nvidia_manager.setup_container_access(container_id, nvidia_config).await?;
+                nvidia_manager
+                    .setup_container_access(container_id, nvidia_config)
+                    .await?;
             } else {
                 warn!("⚠️ NVIDIA GPU requested but not available");
             }
@@ -65,7 +66,9 @@ impl GPUManager {
 
         if let Some(ref amd_config) = gpu_config.amd {
             if let Some(ref amd_manager) = self.amd {
-                amd_manager.setup_container_access(container_id, amd_config).await?;
+                amd_manager
+                    .setup_container_access(container_id, amd_config)
+                    .await?;
             } else {
                 warn!("⚠️ AMD GPU requested but not available");
             }
@@ -88,11 +91,7 @@ impl GPUManager {
         Ok(gpus)
     }
 
-    pub async fn run_gpu_workload(
-        &self,
-        container_id: &str,
-        workload: GPUWorkload,
-    ) -> Result<()> {
+    pub async fn run_gpu_workload(&self, container_id: &str, workload: GPUWorkload) -> Result<()> {
         info!("💻 Running GPU workload in container: {}", container_id);
 
         match workload {
@@ -104,14 +103,18 @@ impl GPUManager {
             GPUWorkload::OpenCL(opencl_app) => {
                 // Can run on both NVIDIA and AMD
                 if let Some(ref nvidia) = self.nvidia {
-                    nvidia.run_opencl_application(container_id, &opencl_app).await?;
+                    nvidia
+                        .run_opencl_application(container_id, &opencl_app)
+                        .await?;
                 } else if let Some(ref amd) = self.amd {
-                    amd.run_opencl_application(container_id, &opencl_app).await?;
+                    amd.run_opencl_application(container_id, &opencl_app)
+                        .await?;
                 }
             }
             GPUWorkload::Vulkan(vulkan_app) => {
                 // Gaming and compute with Vulkan
-                self.run_vulkan_application(container_id, &vulkan_app).await?;
+                self.run_vulkan_application(container_id, &vulkan_app)
+                    .await?;
             }
             GPUWorkload::Gaming(game_config) => {
                 self.setup_gaming_gpu(container_id, &game_config).await?;
@@ -121,7 +124,11 @@ impl GPUManager {
         Ok(())
     }
 
-    async fn run_vulkan_application(&self, container_id: &str, app: &VulkanApplication) -> Result<()> {
+    async fn run_vulkan_application(
+        &self,
+        container_id: &str,
+        app: &VulkanApplication,
+    ) -> Result<()> {
         info!("🎮 Setting up Vulkan application: {}", app.name);
 
         // Configure Vulkan drivers for container
@@ -129,7 +136,10 @@ impl GPUManager {
 
         // Set environment variables
         unsafe {
-            std::env::set_var("VK_ICD_FILENAMES", "/usr/share/vulkan/icd.d/nvidia_icd.json");
+            std::env::set_var(
+                "VK_ICD_FILENAMES",
+                "/usr/share/vulkan/icd.d/nvidia_icd.json",
+            );
             std::env::set_var("VK_LAYER_PATH", "/usr/share/vulkan/explicit_layer.d");
         }
 
@@ -199,7 +209,9 @@ impl GPUManager {
         // Enable VKD3D for DirectX 12
         if game.vkd3d_enabled {
             info!("  ✓ VKD3D enabled (DirectX 12 → Vulkan)");
-            unsafe { std::env::set_var("VKD3D_CONFIG", "dxr,dxr11"); }
+            unsafe {
+                std::env::set_var("VKD3D_CONFIG", "dxr,dxr11");
+            }
         }
 
         // Configure for NVIDIA specific Wine features

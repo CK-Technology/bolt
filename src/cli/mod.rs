@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 
 pub mod compat;
-pub use compat::{CompatArgs as CompatCommands};
+pub use compat::CompatArgs as CompatCommands;
 
 #[derive(Parser)]
 #[command(name = "bolt")]

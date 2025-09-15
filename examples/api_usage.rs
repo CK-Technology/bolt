@@ -1,5 +1,5 @@
 use bolt::api::*;
-use bolt::{BoltRuntime, BoltFileBuilder, Result};
+use bolt::{BoltFileBuilder, BoltRuntime, Result};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -7,14 +7,16 @@ async fn main() -> Result<()> {
     let runtime = BoltRuntime::new()?;
 
     // Run a container
-    runtime.run_container(
-        "nginx:latest",
-        Some("my-nginx"),
-        &["8080:80".to_string()],
-        &[],
-        &[],
-        false,
-    ).await?;
+    runtime
+        .run_container(
+            "nginx:latest",
+            Some("my-nginx"),
+            &["8080:80".to_string()],
+            &[],
+            &[],
+            false,
+        )
+        .await?;
 
     // List containers
     let containers = runtime.list_containers(false).await?;
@@ -64,7 +66,9 @@ async fn main() -> Result<()> {
     println!("Services: {}", status.services.len());
 
     // Example 5: Network management
-    runtime.create_network("gaming-net", "bolt", Some("10.1.0.0/16")).await?;
+    runtime
+        .create_network("gaming-net", "bolt", Some("10.1.0.0/16"))
+        .await?;
     let networks = runtime.list_networks().await?;
     println!("Networks: {}", networks.len());
 

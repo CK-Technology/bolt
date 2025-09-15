@@ -1,13 +1,13 @@
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use tracing::{info, debug, warn, error};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-pub mod vm;
 pub mod snapshots;
 pub mod templates;
+pub mod vm;
 
 use crate::runtime::oci::ContainerConfig;
 
@@ -78,8 +78,8 @@ pub struct CapsuleResources {
     pub memory_mb: u64,
     pub vcpus: u32,
     pub cpu_shares: u32,
-    pub memory_balloon: bool,    // Dynamic memory allocation
-    pub cpu_hotplug: bool,       // Hot-add/remove CPUs
+    pub memory_balloon: bool, // Dynamic memory allocation
+    pub cpu_hotplug: bool,    // Hot-add/remove CPUs
     pub numa_topology: Option<NumaConfig>,
 }
 
@@ -102,8 +102,8 @@ pub struct CapsuleNetworking {
 pub enum NetworkType {
     Bridge,
     Host,
-    QuicFabric,     // Our advanced QUIC-based networking
-    IsolatedVPN,    // Completely isolated network
+    QuicFabric,  // Our advanced QUIC-based networking
+    IsolatedVPN, // Completely isolated network
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,7 +124,7 @@ pub struct DnsConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FirewallRule {
-    pub action: String,  // ALLOW, DENY, DROP
+    pub action: String,   // ALLOW, DENY, DROP
     pub protocol: String, // TCP, UDP, QUIC
     pub port_range: String,
     pub source: Option<String>,
@@ -153,8 +153,8 @@ pub enum DiskType {
     SSD,
     NVMe,
     HDD,
-    Memory,      // RAM disk for ultra-fast I/O
-    Network,     // Network-attached storage
+    Memory,  // RAM disk for ultra-fast I/O
+    Network, // Network-attached storage
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,7 +162,7 @@ pub enum CachePolicy {
     WriteThrough,
     WriteBack,
     DirectSync,
-    Gaming,      // Optimized for gaming workloads
+    Gaming, // Optimized for gaming workloads
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,17 +192,17 @@ pub struct CapsuleSecurity {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum IsolationLevel {
-    Container,   // Container-like isolation
-    LightVM,     // Light virtual machine isolation
-    FullVM,      // Full virtual machine isolation
-    Gaming,      // Gaming-optimized isolation
+    Container, // Container-like isolation
+    LightVM,   // Light virtual machine isolation
+    FullVM,    // Full virtual machine isolation
+    Gaming,    // Gaming-optimized isolation
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PrivilegeMode {
     Unprivileged,
     Privileged,
-    Gaming,      // Special gaming privileges
+    Gaming, // Special gaming privileges
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -305,8 +305,7 @@ impl CapsuleManager {
     pub fn new(root_path: PathBuf) -> Result<Self> {
         info!("🔧 Initializing Bolt Capsule Manager at: {:?}", root_path);
 
-        std::fs::create_dir_all(&root_path)
-            .context("Failed to create capsules root directory")?;
+        std::fs::create_dir_all(&root_path).context("Failed to create capsules root directory")?;
 
         // Create capsule subdirectories
         let dirs = ["instances", "templates", "snapshots", "images", "networks"];
@@ -387,21 +386,29 @@ impl CapsuleManager {
 
         // Check for development tools
         for env_var in &config.args {
-            if env_var.contains("rust") || env_var.contains("cargo") ||
-               env_var.contains("gcc") || env_var.contains("npm") {
+            if env_var.contains("rust")
+                || env_var.contains("cargo")
+                || env_var.contains("gcc")
+                || env_var.contains("npm")
+            {
                 return CapsuleType::Development;
             }
         }
 
         // Check for database
-        if config.image.contains("postgres") || config.image.contains("mysql") ||
-           config.image.contains("redis") || config.image.contains("mongo") {
+        if config.image.contains("postgres")
+            || config.image.contains("mysql")
+            || config.image.contains("redis")
+            || config.image.contains("mongo")
+        {
             return CapsuleType::Database;
         }
 
         // Check for network services
-        if config.image.contains("nginx") || config.image.contains("haproxy") ||
-           config.image.contains("envoy") {
+        if config.image.contains("nginx")
+            || config.image.contains("haproxy")
+            || config.image.contains("envoy")
+        {
             return CapsuleType::NetworkService;
         }
 
@@ -415,15 +422,15 @@ impl CapsuleManager {
     ) -> Result<CapsuleConfig> {
         let resources = match capsule_type {
             CapsuleType::Gaming => CapsuleResources {
-                memory_mb: 8192,  // 8GB for gaming
+                memory_mb: 8192, // 8GB for gaming
                 vcpus: 4,
-                cpu_shares: 2048, // High priority
+                cpu_shares: 2048,      // High priority
                 memory_balloon: false, // Stable memory for gaming
                 cpu_hotplug: false,
                 numa_topology: None,
             },
             CapsuleType::Development => CapsuleResources {
-                memory_mb: 4096,  // 4GB for development
+                memory_mb: 4096, // 4GB for development
                 vcpus: 2,
                 cpu_shares: 1024,
                 memory_balloon: true, // Dynamic memory
@@ -431,15 +438,15 @@ impl CapsuleManager {
                 numa_topology: None,
             },
             CapsuleType::Database => CapsuleResources {
-                memory_mb: 2048,  // 2GB for database
+                memory_mb: 2048, // 2GB for database
                 vcpus: 2,
-                cpu_shares: 1536, // Higher priority for DB
+                cpu_shares: 1536,      // Higher priority for DB
                 memory_balloon: false, // Stable memory for DB
                 cpu_hotplug: false,
                 numa_topology: None,
             },
             _ => CapsuleResources {
-                memory_mb: 1024,  // 1GB default
+                memory_mb: 1024, // 1GB default
                 vcpus: 1,
                 cpu_shares: 1024,
                 memory_balloon: true,
@@ -474,12 +481,12 @@ impl CapsuleManager {
                 name: "root".to_string(),
                 size_gb: match capsule_type {
                     CapsuleType::Gaming => 100,     // 100GB for games
-                    CapsuleType::Development => 50,  // 50GB for dev tools
-                    CapsuleType::Database => 20,     // 20GB for database
-                    _ => 10,                          // 10GB default
+                    CapsuleType::Development => 50, // 50GB for dev tools
+                    CapsuleType::Database => 20,    // 20GB for database
+                    _ => 10,                        // 10GB default
                 },
                 disk_type: if matches!(capsule_type, CapsuleType::Gaming) {
-                    DiskType::NVMe  // Fast storage for gaming
+                    DiskType::NVMe // Fast storage for gaming
                 } else {
                     DiskType::SSD
                 },
@@ -494,7 +501,11 @@ impl CapsuleManager {
             shared_folders: Vec::new(),
             snapshot_policy: SnapshotPolicy {
                 auto_snapshot: matches!(capsule_type, CapsuleType::Gaming | CapsuleType::Database),
-                interval_minutes: if matches!(capsule_type, CapsuleType::Gaming) { 30 } else { 60 },
+                interval_minutes: if matches!(capsule_type, CapsuleType::Gaming) {
+                    30
+                } else {
+                    60
+                },
                 max_snapshots: 10,
                 compress_snapshots: !matches!(capsule_type, CapsuleType::Gaming),
             },
@@ -531,8 +542,10 @@ impl CapsuleManager {
             mandatory_access_control: false,
         };
 
-        let gaming_config = container_config.gaming_config.as_ref().map(|gc| {
-            GamingCapsuleConfig {
+        let gaming_config = container_config
+            .gaming_config
+            .as_ref()
+            .map(|gc| GamingCapsuleConfig {
                 gpu_passthrough: gc.gpu.is_some(),
                 audio_passthrough: gc.audio.is_some(),
                 input_devices: vec!["/dev/input".to_string()],
@@ -548,8 +561,7 @@ impl CapsuleManager {
                     esync_enabled: true,
                     fsync_enabled: true,
                 }),
-            }
-        });
+            });
 
         Ok(CapsuleConfig {
             template: None,
@@ -634,13 +646,19 @@ impl CapsuleManager {
     }
 
     async fn setup_audio_passthrough(&self, capsule_id: &str) -> Result<()> {
-        info!("🔊 Setting up audio passthrough for capsule: {}", capsule_id);
+        info!(
+            "🔊 Setting up audio passthrough for capsule: {}",
+            capsule_id
+        );
         // TODO: Implement audio device passthrough
         Ok(())
     }
 
     async fn setup_gaming_performance(&self, capsule_id: &str) -> Result<()> {
-        info!("⚡ Setting up gaming performance for capsule: {}", capsule_id);
+        info!(
+            "⚡ Setting up gaming performance for capsule: {}",
+            capsule_id
+        );
         // TODO: Implement gaming performance optimizations
         Ok(())
     }

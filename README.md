@@ -1,7 +1,7 @@
 # Bolt
 
 <div align="center">
-  <img src="assets/icons/bolt.png" alt="bolt icon" width="128" height="128">
+  <img src="assets/icons/sizes/bolt-icon-128.png" alt="bolt icon" width="128" height="128">
 
 **Next-Generation Container Runtime & Orchestration**  
 *Fast. Secure. Declarative.*

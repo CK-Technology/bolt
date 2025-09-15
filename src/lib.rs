@@ -3,30 +3,32 @@
 //! This crate provides programmatic access to Bolt's container runtime, orchestration,
 //! and gaming optimization features.
 
+#![recursion_limit = "512"]
+
+pub mod builds;
+pub mod capsules;
+pub mod compat;
 pub mod config;
+pub mod error;
+pub mod gaming;
+pub mod network;
 pub mod runtime;
 pub mod surge;
-pub mod network;
-pub mod gaming;
-pub mod capsules;
-pub mod builds;
-pub mod error;
 pub mod types;
-pub mod compat;
 
 pub use config::*;
 pub use error::{BoltError, Result};
 
 // Export main types at root level
-pub use types::{ContainerInfo, SurgeStatus, ServiceInfo, NetworkInfo};
+pub use types::{ContainerInfo, NetworkInfo, ServiceInfo, SurgeStatus};
 
 // Re-export anyhow for compatibility
 pub use anyhow;
 
 /// Re-exports for easier API usage
 pub mod api {
-    pub use crate::config::{BoltFile, BoltConfig, Service, GamingConfig, create_example_boltfile};
-    pub use crate::{BoltRuntime, ContainerInfo, SurgeStatus, ServiceInfo, NetworkInfo};
+    pub use crate::config::{BoltConfig, BoltFile, GamingConfig, Service, create_example_boltfile};
+    pub use crate::{BoltRuntime, ContainerInfo, NetworkInfo, ServiceInfo, SurgeStatus};
 }
 
 /// Builder for creating Boltfiles programmatically
@@ -52,7 +54,7 @@ impl BoltFileBuilder {
         self,
         name: impl Into<String>,
         image: impl Into<String>,
-        gaming_config: config::GamingConfig
+        gaming_config: config::GamingConfig,
     ) -> Self {
         let service = config::Service {
             image: Some(image.into()),
@@ -105,12 +107,7 @@ impl BoltRuntime {
     }
 
     /// Build an image
-    pub async fn build_image(
-        &self,
-        path: &str,
-        tag: Option<&str>,
-        dockerfile: &str,
-    ) -> Result<()> {
+    pub async fn build_image(&self, path: &str, tag: Option<&str>, dockerfile: &str) -> Result<()> {
         runtime::build_image(path, tag, dockerfile).await
     }
 
@@ -165,11 +162,7 @@ impl BoltRuntime {
     }
 
     /// Setup gaming environment
-    pub async fn setup_gaming(
-        &self,
-        proton: Option<&str>,
-        winver: Option<&str>,
-    ) -> Result<()> {
+    pub async fn setup_gaming(&self, proton: Option<&str>, winver: Option<&str>) -> Result<()> {
         gaming::setup_wine(proton, winver).await
     }
 

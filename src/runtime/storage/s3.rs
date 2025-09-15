@@ -1,9 +1,9 @@
-use anyhow::{Result, Context};
-use tracing::{info, warn, debug};
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use serde::{Deserialize, Serialize};
 use tokio::fs;
+use tracing::{debug, info};
 
 /// S3-compatible object storage client for MinIO and Ghostbay integration
 #[derive(Debug, Clone)]
@@ -64,7 +64,10 @@ impl S3StorageClient {
                 info!("  🪣 Provider: MinIO at {}", endpoint);
                 (endpoint.clone(), "us-east-1".to_string())
             }
-            S3Provider::Ghostbay { endpoint, cluster_id } => {
+            S3Provider::Ghostbay {
+                endpoint,
+                cluster_id,
+            } => {
                 info!("  👻 Provider: Ghostbay at {}", endpoint);
                 if let Some(cluster) = cluster_id {
                     info!("    🏭 Cluster: {}", cluster);
@@ -75,8 +78,14 @@ impl S3StorageClient {
                 info!("  ☁️  Provider: AWS S3 in {}", region);
                 ("https://s3.amazonaws.com".to_string(), region.clone())
             }
-            S3Provider::Generic { endpoint, path_style } => {
-                info!("  🔧 Provider: Generic S3 at {} (path-style: {})", endpoint, path_style);
+            S3Provider::Generic {
+                endpoint,
+                path_style,
+            } => {
+                info!(
+                    "  🔧 Provider: Generic S3 at {} (path-style: {})",
+                    endpoint, path_style
+                );
                 (endpoint.clone(), "us-east-1".to_string())
             }
         };
@@ -90,7 +99,7 @@ impl S3StorageClient {
                 &config.secret_key,
                 None,
                 None,
-                "bolt-runtime"
+                "bolt-runtime",
             ))
             .load()
             .await;
@@ -99,7 +108,11 @@ impl S3StorageClient {
 
         // Configure for non-AWS providers
         match &config.provider {
-            S3Provider::MinIO { .. } | S3Provider::Ghostbay { .. } | S3Provider::Generic { path_style: true, .. } => {
+            S3Provider::MinIO { .. }
+            | S3Provider::Ghostbay { .. }
+            | S3Provider::Generic {
+                path_style: true, ..
+            } => {
                 s3_config_builder = s3_config_builder.force_path_style(true);
             }
             _ => {}
@@ -120,7 +133,10 @@ impl S3StorageClient {
         // Test connection and create bucket if needed
         storage_client.ensure_bucket_exists().await?;
 
-        info!("✅ S3 storage client initialized for bucket: {}", config.bucket);
+        info!(
+            "✅ S3 storage client initialized for bucket: {}",
+            config.bucket
+        );
         Ok(storage_client)
     }
 
@@ -147,8 +163,10 @@ impl S3StorageClient {
         if self.region != "us-east-1" {
             create_request = create_request.create_bucket_configuration(
                 aws_sdk_s3::types::CreateBucketConfiguration::builder()
-                    .location_constraint(aws_sdk_s3::types::BucketLocationConstraint::from(self.region.as_str()))
-                    .build()
+                    .location_constraint(aws_sdk_s3::types::BucketLocationConstraint::from(
+                        self.region.as_str(),
+                    ))
+                    .build(),
             );
         }
 
@@ -158,10 +176,16 @@ impl S3StorageClient {
             }
             Err(e) => {
                 // Bucket might have been created by another process
-                if e.to_string().contains("BucketAlreadyExists") || e.to_string().contains("BucketAlreadyOwnedByYou") {
+                if e.to_string().contains("BucketAlreadyExists")
+                    || e.to_string().contains("BucketAlreadyOwnedByYou")
+                {
                     info!("✅ Bucket '{}' already exists", self.bucket);
                 } else {
-                    return Err(anyhow::anyhow!("Failed to create bucket '{}': {}", self.bucket, e));
+                    return Err(anyhow::anyhow!(
+                        "Failed to create bucket '{}': {}",
+                        self.bucket,
+                        e
+                    ));
                 }
             }
         }
@@ -170,12 +194,18 @@ impl S3StorageClient {
     }
 
     pub async fn upload_file(&self, local_path: &Path, s3_key: &str) -> Result<()> {
-        info!("📤 Uploading {} to s3://{}/{}", local_path.display(), self.bucket, s3_key);
+        info!(
+            "📤 Uploading {} to s3://{}/{}",
+            local_path.display(),
+            self.bucket,
+            s3_key
+        );
 
         let client = self.client.as_ref().unwrap();
 
         // Read file content
-        let body = aws_smithy_types::byte_stream::ByteStream::from_path(local_path).await
+        let body = aws_smithy_types::byte_stream::ByteStream::from_path(local_path)
+            .await
             .with_context(|| format!("Failed to read file: {:?}", local_path))?;
 
         // Upload to S3
@@ -205,7 +235,9 @@ impl S3StorageClient {
             _ => {}
         }
 
-        put_request.send().await
+        put_request
+            .send()
+            .await
             .with_context(|| format!("Failed to upload {} to S3", s3_key))?;
 
         info!("✅ Upload complete: {}", s3_key);
@@ -213,13 +245,19 @@ impl S3StorageClient {
     }
 
     pub async fn download_file(&self, s3_key: &str, local_path: &Path) -> Result<()> {
-        info!("📥 Downloading s3://{}/{} to {}", self.bucket, s3_key, local_path.display());
+        info!(
+            "📥 Downloading s3://{}/{} to {}",
+            self.bucket,
+            s3_key,
+            local_path.display()
+        );
 
         let client = self.client.as_ref().unwrap();
 
         // Create parent directories
         if let Some(parent) = local_path.parent() {
-            fs::create_dir_all(parent).await
+            fs::create_dir_all(parent)
+                .await
                 .with_context(|| format!("Failed to create directory: {:?}", parent))?;
         }
 
@@ -233,11 +271,15 @@ impl S3StorageClient {
             .with_context(|| format!("Failed to download {} from S3", s3_key))?;
 
         // Write to local file
-        let body_bytes = response.body.collect().await
+        let body_bytes = response
+            .body
+            .collect()
+            .await
             .with_context(|| "Failed to read S3 response body")?
             .into_bytes();
 
-        fs::write(local_path, body_bytes).await
+        fs::write(local_path, body_bytes)
+            .await
             .with_context(|| format!("Failed to write file: {:?}", local_path))?;
 
         info!("✅ Download complete: {}", local_path.display());
@@ -256,14 +298,18 @@ impl S3StorageClient {
             debug!("  🔍 Using prefix: {}", prefix);
         }
 
-        let response = list_request.send().await
+        let response = list_request
+            .send()
+            .await
             .with_context(|| "Failed to list S3 objects")?;
 
         let mut objects = Vec::new();
 
         if let Some(contents) = response.contents {
             for object in contents {
-                if let (Some(key), Some(size), Some(last_modified)) = (object.key, object.size, object.last_modified) {
+                if let (Some(key), Some(size), Some(last_modified)) =
+                    (object.key, object.size, object.last_modified)
+                {
                     objects.push(S3ObjectInfo {
                         key,
                         size: size as u64,
@@ -297,7 +343,10 @@ impl S3StorageClient {
     }
 
     pub async fn copy_object(&self, source_key: &str, dest_key: &str) -> Result<()> {
-        info!("📋 Copying s3://{}/{} to s3://{}/{}", self.bucket, source_key, self.bucket, dest_key);
+        info!(
+            "📋 Copying s3://{}/{} to s3://{}/{}",
+            self.bucket, source_key, self.bucket, dest_key
+        );
 
         let client = self.client.as_ref().unwrap();
 
@@ -354,14 +403,22 @@ impl S3StorageClient {
     }
 
     /// Create a presigned URL for temporary access
-    pub async fn create_presigned_url(&self, s3_key: &str, expires_in_seconds: u64) -> Result<String> {
-        info!("🔗 Creating presigned URL for s3://{}/{} (expires in {}s)", self.bucket, s3_key, expires_in_seconds);
+    pub async fn create_presigned_url(
+        &self,
+        s3_key: &str,
+        expires_in_seconds: u64,
+    ) -> Result<String> {
+        info!(
+            "🔗 Creating presigned URL for s3://{}/{} (expires in {}s)",
+            self.bucket, s3_key, expires_in_seconds
+        );
 
         let client = self.client.as_ref().unwrap();
 
         let presigning_config = aws_sdk_s3::presigning::PresigningConfig::expires_in(
-            std::time::Duration::from_secs(expires_in_seconds)
-        ).with_context(|| "Failed to create presigning config")?;
+            std::time::Duration::from_secs(expires_in_seconds),
+        )
+        .with_context(|| "Failed to create presigning config")?;
 
         let presigned_request = client
             .get_object()
@@ -380,7 +437,9 @@ impl S3StorageClient {
     /// Specialized method for Ghostbay integration
     pub async fn ghostbay_cluster_status(&self) -> Result<GhostbayClusterInfo> {
         if !matches!(self.provider, S3Provider::Ghostbay { .. }) {
-            return Err(anyhow::anyhow!("Ghostbay cluster status only available for Ghostbay provider"));
+            return Err(anyhow::anyhow!(
+                "Ghostbay cluster status only available for Ghostbay provider"
+            ));
         }
 
         info!("👻 Getting Ghostbay cluster status");
@@ -432,7 +491,8 @@ impl S3VolumeDriver {
 
         // Create cache directory
         if config.cache_enabled {
-            fs::create_dir_all(&cache_dir).await
+            fs::create_dir_all(&cache_dir)
+                .await
                 .with_context(|| format!("Failed to create cache directory: {:?}", cache_dir))?;
             info!("💾 Local cache enabled at: {:?}", cache_dir);
         }
@@ -445,10 +505,14 @@ impl S3VolumeDriver {
     }
 
     pub async fn mount_volume(&self, volume_name: &str, mount_point: &Path) -> Result<()> {
-        info!("🔗 Mounting S3 volume '{}' at {:?}", volume_name, mount_point);
+        info!(
+            "🔗 Mounting S3 volume '{}' at {:?}",
+            volume_name, mount_point
+        );
 
         // Create mount point
-        fs::create_dir_all(mount_point).await
+        fs::create_dir_all(mount_point)
+            .await
             .with_context(|| format!("Failed to create mount point: {:?}", mount_point))?;
 
         if self.cache_enabled {
@@ -457,7 +521,8 @@ impl S3VolumeDriver {
             fs::create_dir_all(&cache_path).await?;
 
             // Sync from S3 to cache
-            self.sync_from_s3(&format!("volumes/{}/", volume_name), &cache_path).await?;
+            self.sync_from_s3(&format!("volumes/{}/", volume_name), &cache_path)
+                .await?;
 
             info!("✅ S3 volume mounted with cache: {}", volume_name);
         } else {
@@ -474,7 +539,8 @@ impl S3VolumeDriver {
         if self.cache_enabled {
             // Sync cache back to S3
             let cache_path = self.local_cache_dir.join(volume_name);
-            self.sync_to_s3(&cache_path, &format!("volumes/{}/", volume_name)).await?;
+            self.sync_to_s3(&cache_path, &format!("volumes/{}/", volume_name))
+                .await?;
         }
 
         info!("✅ S3 volume unmounted: {}", volume_name);

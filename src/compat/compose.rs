@@ -1,5 +1,5 @@
 use super::*;
-use crate::config::{BoltFile, Service, Auth, Storage};
+use crate::config::{Auth, BoltFile, Service, Storage};
 use crate::error::{BoltError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -74,8 +74,11 @@ pub struct ComposeCompat;
 impl ComposeCompat {
     /// Convert Docker Compose file to Boltfile
     pub fn convert_compose_file(compose_content: &str) -> Result<String> {
-        let compose: ComposeFile = serde_yaml::from_str(compose_content)
-            .map_err(|e| BoltError::Config(format!("Failed to parse compose file: {}", e)))?;
+        let compose: ComposeFile = serde_yaml::from_str(compose_content).map_err(|e| {
+            BoltError::Config(crate::error::ConfigError::InvalidFormat {
+                reason: format!("Failed to parse compose file: {}", e),
+            })
+        })?;
 
         let mut boltfile = BoltFile {
             project: "converted-from-compose".to_string(),
@@ -148,15 +151,17 @@ impl ComposeCompat {
         }
 
         // Resource limits and configuration
-        if compose_service.privileged.unwrap_or(false) ||
-           compose_service.mem_limit.is_some() ||
-           compose_service.cpus.is_some() ||
-           compose_service.user.is_some() {
-
+        if compose_service.privileged.unwrap_or(false)
+            || compose_service.mem_limit.is_some()
+            || compose_service.cpus.is_some()
+            || compose_service.user.is_some()
+        {
             // For complex configurations, suggest using capsules
             if compose_service.image.as_ref().map_or(false, |img| {
-                img.contains("postgres") || img.contains("mysql") ||
-                img.contains("redis") || img.contains("mongo")
+                img.contains("postgres")
+                    || img.contains("mysql")
+                    || img.contains("redis")
+                    || img.contains("mongo")
             }) {
                 // Convert database services to capsules
                 if let Some(image) = &compose_service.image {
@@ -166,11 +171,11 @@ impl ComposeCompat {
 
                         // Set up database auth if environment variables suggest it
                         if let Some(env) = &compose_service.environment {
-                            let user = env.get("POSTGRES_USER")
+                            let user = env
+                                .get("POSTGRES_USER")
                                 .or_else(|| env.get("POSTGRES_DB"))
                                 .unwrap_or("postgres");
-                            let password = env.get("POSTGRES_PASSWORD")
-                                .unwrap_or("password");
+                            let password = env.get("POSTGRES_PASSWORD").map_or("password", |v| v);
 
                             service.auth = Some(Auth {
                                 user: user.to_string(),
@@ -190,11 +195,11 @@ impl ComposeCompat {
                         service.image = None;
 
                         if let Some(env) = &compose_service.environment {
-                            let user = env.get("MYSQL_USER")
-                                .unwrap_or("mysql");
-                            let password = env.get("MYSQL_PASSWORD")
+                            let user = env.get("MYSQL_USER").map_or("mysql", |v| v);
+                            let password = env
+                                .get("MYSQL_PASSWORD")
                                 .or_else(|| env.get("MYSQL_ROOT_PASSWORD"))
-                                .unwrap_or("password");
+                                .map_or("password", |v| v);
 
                             service.auth = Some(Auth {
                                 user: user.to_string(),
@@ -236,8 +241,11 @@ impl ComposeCompat {
 
     /// Generate migration notes and recommendations
     pub fn generate_migration_notes(compose_content: &str) -> Result<String> {
-        let compose: ComposeFile = serde_yaml::from_str(compose_content)
-            .map_err(|e| BoltError::Config(format!("Failed to parse compose file: {}", e)))?;
+        let compose: ComposeFile = serde_yaml::from_str(compose_content).map_err(|e| {
+            BoltError::Config(crate::error::ConfigError::InvalidFormat {
+                reason: format!("Failed to parse compose file: {}", e),
+            })
+        })?;
 
         let mut notes = Vec::new();
         notes.push("# Docker Compose to Bolt Migration Notes".to_string());
@@ -249,17 +257,25 @@ impl ComposeCompat {
             notes.push(format!("### Service: {}", name));
 
             if service.image.is_some() && service.build.is_some() {
-                notes.push("  ⚠️  Both image and build specified - Bolt will prioritize build".to_string());
+                notes.push(
+                    "  ⚠️  Both image and build specified - Bolt will prioritize build".to_string(),
+                );
             }
 
             if let Some(image) = &service.image {
-                if image.contains("postgres") || image.contains("mysql") || image.contains("redis") {
-                    notes.push(format!("  ✨ Recommended: Use Bolt capsule for {} (better isolation)", image));
+                if image.contains("postgres") || image.contains("mysql") || image.contains("redis")
+                {
+                    notes.push(format!(
+                        "  ✨ Recommended: Use Bolt capsule for {} (better isolation)",
+                        image
+                    ));
                 }
             }
 
             if service.privileged.unwrap_or(false) {
-                notes.push("  🔒 Privileged mode detected - Consider capsule security model".to_string());
+                notes.push(
+                    "  🔒 Privileged mode detected - Consider capsule security model".to_string(),
+                );
             }
 
             if let Some(networks) = &service.networks {
@@ -284,8 +300,14 @@ impl ComposeCompat {
                 if let Some(driver) = &network.driver {
                     match driver.as_str() {
                         "bridge" => notes.push("  ✅ Bridge driver supported".to_string()),
-                        "overlay" => notes.push("  🚀 Consider Bolt's QUIC networking for overlay functionality".to_string()),
-                        _ => notes.push(format!("  ⚠️  Driver '{}' - Check Bolt compatibility", driver)),
+                        "overlay" => notes.push(
+                            "  🚀 Consider Bolt's QUIC networking for overlay functionality"
+                                .to_string(),
+                        ),
+                        _ => notes.push(format!(
+                            "  ⚠️  Driver '{}' - Check Bolt compatibility",
+                            driver
+                        )),
                     }
                 }
                 notes.push("".to_string());
@@ -305,7 +327,10 @@ impl ComposeCompat {
                 if let Some(driver) = &volume.driver {
                     match driver.as_str() {
                         "local" => notes.push("  ✅ Local driver supported".to_string()),
-                        _ => notes.push(format!("  💾 Consider Bolt's S3 or GhostBay storage for '{}' driver", driver)),
+                        _ => notes.push(format!(
+                            "  💾 Consider Bolt's S3 or GhostBay storage for '{}' driver",
+                            driver
+                        )),
                     }
                 }
                 notes.push("".to_string());
@@ -315,14 +340,24 @@ impl ComposeCompat {
         // Recommendations
         notes.push("## Migration Recommendations:".to_string());
         notes.push("".to_string());
-        notes.push("1. **Review Generated Boltfile**: Verify all services are correctly converted".to_string());
-        notes.push("2. **Test Incrementally**: Start with individual services before full stack".to_string());
+        notes.push(
+            "1. **Review Generated Boltfile**: Verify all services are correctly converted"
+                .to_string(),
+        );
+        notes.push(
+            "2. **Test Incrementally**: Start with individual services before full stack"
+                .to_string(),
+        );
         notes.push("3. **Leverage Bolt Features**:".to_string());
         notes.push("   - Use capsules for databases and stateful services".to_string());
         notes.push("   - Consider QUIC networking for improved performance".to_string());
         notes.push("   - Utilize gaming optimizations if applicable".to_string());
-        notes.push("4. **Update CI/CD**: Replace `docker-compose` commands with `bolt surge`".to_string());
-        notes.push("5. **Monitor Performance**: Bolt's async runtime may improve performance".to_string());
+        notes.push(
+            "4. **Update CI/CD**: Replace `docker-compose` commands with `bolt surge`".to_string(),
+        );
+        notes.push(
+            "5. **Monitor Performance**: Bolt's async runtime may improve performance".to_string(),
+        );
         notes.push("".to_string());
         notes.push("## Command Mapping:".to_string());
         notes.push("```bash".to_string());
@@ -339,8 +374,11 @@ impl ComposeCompat {
 
     /// Validate compose file for potential conversion issues
     pub fn validate_compose_file(compose_content: &str) -> Result<Vec<String>> {
-        let compose: ComposeFile = serde_yaml::from_str(compose_content)
-            .map_err(|e| BoltError::Config(format!("Failed to parse compose file: {}", e)))?;
+        let compose: ComposeFile = serde_yaml::from_str(compose_content).map_err(|e| {
+            BoltError::Config(crate::error::ConfigError::InvalidFormat {
+                reason: format!("Failed to parse compose file: {}", e),
+            })
+        })?;
 
         let mut warnings = Vec::new();
 
@@ -348,29 +386,47 @@ impl ComposeCompat {
         if let Some(version) = &compose.version {
             let version_num: f32 = version.parse().unwrap_or(2.0);
             if version_num < 2.0 {
-                warnings.push(format!("Compose version {} is quite old, consider updating", version));
+                warnings.push(format!(
+                    "Compose version {} is quite old, consider updating",
+                    version
+                ));
             } else if version_num > 3.8 {
-                warnings.push(format!("Compose version {} is very recent, some features may not convert", version));
+                warnings.push(format!(
+                    "Compose version {} is very recent, some features may not convert",
+                    version
+                ));
             }
         }
 
         // Check for unsupported features
         for (name, service) in &compose.services {
             if let Some(build) = &service.build {
-                if let ComposeBuild::Complex { args: Some(args), .. } = build {
+                if let ComposeBuild::Complex {
+                    args: Some(args), ..
+                } = build
+                {
                     if !args.is_empty() {
-                        warnings.push(format!("Service '{}': Build args may need manual conversion", name));
+                        warnings.push(format!(
+                            "Service '{}': Build args may need manual conversion",
+                            name
+                        ));
                     }
                 }
             }
 
             if service.privileged.unwrap_or(false) {
-                warnings.push(format!("Service '{}': Privileged mode - review security implications", name));
+                warnings.push(format!(
+                    "Service '{}': Privileged mode - review security implications",
+                    name
+                ));
             }
 
             if let Some(networks) = &service.networks {
                 if networks.len() > 1 {
-                    warnings.push(format!("Service '{}': Multiple networks - Bolt supports single network", name));
+                    warnings.push(format!(
+                        "Service '{}': Multiple networks - Bolt supports single network",
+                        name
+                    ));
                 }
             }
         }

@@ -1,4 +1,4 @@
-use bolt::{BoltRuntime, BoltFileBuilder, surge::*, config::*};
+use bolt::{BoltFileBuilder, BoltRuntime, config::*, surge::*};
 use std::collections::HashMap;
 use tempfile::TempDir;
 use tokio;
@@ -10,11 +10,14 @@ async fn test_surge_basic_deployment() {
 
     // Create a simple Boltfile
     let boltfile = BoltFileBuilder::new("test-project")
-        .add_service("web", Service {
-            image: Some("nginx:alpine".to_string()),
-            ports: Some(vec!["8080:80".to_string()]),
-            ..Default::default()
-        })
+        .add_service(
+            "web",
+            Service {
+                image: Some("nginx:alpine".to_string()),
+                ports: Some(vec!["8080:80".to_string()]),
+                ..Default::default()
+            },
+        )
         .build();
 
     // Save Boltfile
@@ -54,31 +57,40 @@ async fn test_surge_multi_service() {
     env.insert("DATABASE_URL".to_string(), "bolt://db:5432".to_string());
 
     let boltfile = BoltFileBuilder::new("multi-service")
-        .add_service("db", Service {
-            capsule: Some("postgres".to_string()),
-            auth: Some(Auth {
-                user: "testuser".to_string(),
-                password: "testpass".to_string(),
-            }),
-            storage: Some(Storage {
-                size: "1Gi".to_string(),
-                driver: None,
-            }),
-            ..Default::default()
-        })
-        .add_service("api", Service {
-            image: Some("node:alpine".to_string()),
-            ports: Some(vec!["3000:3000".to_string()]),
-            env: Some(env),
-            depends_on: Some(vec!["db".to_string()]),
-            ..Default::default()
-        })
-        .add_service("web", Service {
-            image: Some("nginx:alpine".to_string()),
-            ports: Some(vec!["80:80".to_string()]),
-            depends_on: Some(vec!["api".to_string()]),
-            ..Default::default()
-        })
+        .add_service(
+            "db",
+            Service {
+                capsule: Some("postgres".to_string()),
+                auth: Some(Auth {
+                    user: "testuser".to_string(),
+                    password: "testpass".to_string(),
+                }),
+                storage: Some(Storage {
+                    size: "1Gi".to_string(),
+                    driver: None,
+                }),
+                ..Default::default()
+            },
+        )
+        .add_service(
+            "api",
+            Service {
+                image: Some("node:alpine".to_string()),
+                ports: Some(vec!["3000:3000".to_string()]),
+                env: Some(env),
+                depends_on: Some(vec!["db".to_string()]),
+                ..Default::default()
+            },
+        )
+        .add_service(
+            "web",
+            Service {
+                image: Some("nginx:alpine".to_string()),
+                ports: Some(vec!["80:80".to_string()]),
+                depends_on: Some(vec!["api".to_string()]),
+                ..Default::default()
+            },
+        )
         .build();
 
     let config = BoltConfig {
@@ -117,19 +129,28 @@ async fn test_surge_with_dependencies() {
 
     // Create service with dependencies
     let boltfile = BoltFileBuilder::new("dep-test")
-        .add_service("database", Service {
-            capsule: Some("postgres".to_string()),
-            ..Default::default()
-        })
-        .add_service("cache", Service {
-            image: Some("redis:alpine".to_string()),
-            ..Default::default()
-        })
-        .add_service("app", Service {
-            image: Some("alpine:latest".to_string()),
-            depends_on: Some(vec!["database".to_string(), "cache".to_string()]),
-            ..Default::default()
-        })
+        .add_service(
+            "database",
+            Service {
+                capsule: Some("postgres".to_string()),
+                ..Default::default()
+            },
+        )
+        .add_service(
+            "cache",
+            Service {
+                image: Some("redis:alpine".to_string()),
+                ..Default::default()
+            },
+        )
+        .add_service(
+            "app",
+            Service {
+                image: Some("alpine:latest".to_string()),
+                depends_on: Some(vec!["database".to_string(), "cache".to_string()]),
+                ..Default::default()
+            },
+        )
         .build();
 
     let config = BoltConfig {
@@ -160,10 +181,13 @@ async fn test_surge_force_recreate() {
     let temp_dir = TempDir::new().unwrap();
 
     let boltfile = BoltFileBuilder::new("recreate-test")
-        .add_service("web", Service {
-            image: Some("nginx:alpine".to_string()),
-            ..Default::default()
-        })
+        .add_service(
+            "web",
+            Service {
+                image: Some("nginx:alpine".to_string()),
+                ..Default::default()
+            },
+        )
         .build();
 
     let config = BoltConfig {
@@ -203,18 +227,27 @@ async fn test_surge_selective_services() {
     let temp_dir = TempDir::new().unwrap();
 
     let boltfile = BoltFileBuilder::new("selective-test")
-        .add_service("service1", Service {
-            image: Some("alpine:latest".to_string()),
-            ..Default::default()
-        })
-        .add_service("service2", Service {
-            image: Some("alpine:latest".to_string()),
-            ..Default::default()
-        })
-        .add_service("service3", Service {
-            image: Some("alpine:latest".to_string()),
-            ..Default::default()
-        })
+        .add_service(
+            "service1",
+            Service {
+                image: Some("alpine:latest".to_string()),
+                ..Default::default()
+            },
+        )
+        .add_service(
+            "service2",
+            Service {
+                image: Some("alpine:latest".to_string()),
+                ..Default::default()
+            },
+        )
+        .add_service(
+            "service3",
+            Service {
+                image: Some("alpine:latest".to_string()),
+                ..Default::default()
+            },
+        )
         .build();
 
     let config = BoltConfig {
@@ -229,11 +262,13 @@ async fn test_surge_selective_services() {
     let runtime = BoltRuntime::with_config(config);
 
     // Deploy only specific services
-    let deploy_result = runtime.surge_up(
-        &["service1".to_string(), "service3".to_string()],
-        false,
-        false
-    ).await;
+    let deploy_result = runtime
+        .surge_up(
+            &["service1".to_string(), "service3".to_string()],
+            false,
+            false,
+        )
+        .await;
     assert!(deploy_result.is_ok());
 
     // Verify only selected services are running
@@ -253,14 +288,17 @@ async fn test_surge_with_volumes() {
     let temp_dir = TempDir::new().unwrap();
 
     let boltfile = BoltFileBuilder::new("volume-test")
-        .add_service("data-service", Service {
-            image: Some("alpine:latest".to_string()),
-            volumes: Some(vec![
-                "./data:/app/data".to_string(),
-                "named-volume:/app/cache".to_string(),
-            ]),
-            ..Default::default()
-        })
+        .add_service(
+            "data-service",
+            Service {
+                image: Some("alpine:latest".to_string()),
+                volumes: Some(vec![
+                    "./data:/app/data".to_string(),
+                    "named-volume:/app/cache".to_string(),
+                ]),
+                ..Default::default()
+            },
+        )
         .build();
 
     let config = BoltConfig {

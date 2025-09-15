@@ -1,5 +1,5 @@
-use anyhow::{Result, Context};
-use tracing::{info, debug};
+use anyhow::{Context, Result};
+use tracing::{debug, info};
 
 /// Gaming-specific Wayland protocol extensions
 /// These protocols provide low-latency, high-performance interfaces for gaming
@@ -66,7 +66,8 @@ impl ProtocolManager {
         // Presentation timing provides precise frame timing information
         // Essential for smooth gameplay and frame pacing
 
-        self.enabled_protocols.push(GamingProtocol::PresentationTiming);
+        self.enabled_protocols
+            .push(GamingProtocol::PresentationTiming);
         info!("  ✓ Presentation timing protocol enabled");
 
         Ok(())
@@ -78,7 +79,8 @@ impl ProtocolManager {
         // VRR protocol for G-Sync/FreeSync support
         // Eliminates screen tearing and stuttering
 
-        self.enabled_protocols.push(GamingProtocol::VariableRefreshRate);
+        self.enabled_protocols
+            .push(GamingProtocol::VariableRefreshRate);
         info!("  ✓ Variable refresh rate protocol enabled");
 
         Ok(())

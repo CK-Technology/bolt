@@ -1,6 +1,6 @@
 use crate::Result;
 use crate::config::BoltConfig;
-use crate::{SurgeStatus, ServiceInfo};
+use crate::{ServiceInfo, SurgeStatus};
 
 // API-only functions for library usage
 pub async fn status_info(config: &BoltConfig) -> Result<SurgeStatus> {
@@ -11,7 +11,7 @@ pub async fn status_info(config: &BoltConfig) -> Result<SurgeStatus> {
         services.push(ServiceInfo {
             name: name.clone(),
             status: "not running".to_string(), // TODO: Implement actual status
-            replicas: 1, // TODO: Implement actual replica count
+            replicas: 1,                       // TODO: Implement actual replica count
         });
     }
 

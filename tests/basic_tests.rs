@@ -1,4 +1,4 @@
-use bolt::{BoltRuntime, BoltConfig};
+use bolt::{BoltConfig, BoltRuntime};
 
 #[tokio::test]
 async fn test_bolt_library_compiles() {

@@ -1,10 +1,10 @@
 mod cli;
 
-use clap::Parser;
-use cli::{Cli, Commands, SurgeCommands, GamingCommands, NetworkCommands};
-use tracing::info;
 use anyhow::Result;
-use bolt::{BoltConfig, BoltRuntime, surge, gaming, network};
+use bolt::{BoltConfig, BoltRuntime, gaming, network, surge};
+use clap::Parser;
+use cli::{Cli, Commands, GamingCommands, NetworkCommands, SurgeCommands};
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -13,7 +13,9 @@ async fn main() -> Result<()> {
     // Initialize logging
     let level = if cli.verbose { "debug" } else { "info" };
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env().add_directive(level.parse()?))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env().add_directive(level.parse()?),
+        )
         .init();
 
     info!("🚀 Bolt starting up...");
@@ -26,9 +28,18 @@ async fn main() -> Result<()> {
     let runtime = BoltRuntime::new()?;
 
     match cli.command {
-        Commands::Run { image, name, ports, env, volumes, detach } => {
+        Commands::Run {
+            image,
+            name,
+            ports,
+            env,
+            volumes,
+            detach,
+        } => {
             info!("Running container: {}", image);
-            runtime.run_container(&image, name.as_deref(), &ports, &env, &volumes, detach).await?;
+            runtime
+                .run_container(&image, name.as_deref(), &ports, &env, &volumes, detach)
+                .await?;
         }
 
         Commands::Build { path, tag, file } => {
@@ -49,7 +60,10 @@ async fn main() -> Result<()> {
         Commands::Ps { all } => {
             let containers = runtime.list_containers(all).await?;
             for container in containers {
-                println!("{}: {} ({})", container.name, container.image, container.status);
+                println!(
+                    "{}: {} ({})",
+                    container.name, container.image, container.status
+                );
             }
         }
 
@@ -67,93 +81,110 @@ async fn main() -> Result<()> {
             }
         }
 
-        Commands::Surge { command } => {
-            match command {
-                SurgeCommands::Up { services, detach, force_recreate } => {
-                    info!("Starting surge orchestration...");
-                    runtime.surge_up(&services, detach, force_recreate).await?;
-                }
+        Commands::Surge { command } => match command {
+            SurgeCommands::Up {
+                services,
+                detach,
+                force_recreate,
+            } => {
+                info!("Starting surge orchestration...");
+                runtime.surge_up(&services, detach, force_recreate).await?;
+            }
 
-                SurgeCommands::Down { services, volumes } => {
-                    info!("Stopping surge services...");
-                    runtime.surge_down(&services, volumes).await?;
-                }
+            SurgeCommands::Down { services, volumes } => {
+                info!("Stopping surge services...");
+                runtime.surge_down(&services, volumes).await?;
+            }
 
-                SurgeCommands::Status => {
-                    let status = runtime.surge_status().await?;
-                    println!("Services: {}", status.services.len());
-                    for service in status.services {
-                        println!("  {}: {} ({})", service.name, service.status, service.replicas);
-                    }
-                }
-
-                SurgeCommands::Logs { service, follow, tail } => {
-                    surge::logs(&bolt_config, service.as_deref(), follow, tail).await?;
-                }
-
-                SurgeCommands::Scale { services } => {
-                    surge::scale(&bolt_config, &services).await?;
+            SurgeCommands::Status => {
+                let status = runtime.surge_status().await?;
+                println!("Services: {}", status.services.len());
+                for service in status.services {
+                    println!(
+                        "  {}: {} ({})",
+                        service.name, service.status, service.replicas
+                    );
                 }
             }
-        }
 
-        Commands::Gaming { command } => {
-            match command {
-                GamingCommands::Gpu { command } => {
-                    let gaming_command = match command {
-                        cli::GpuCommands::List => gaming::GpuCommands::List,
-                        cli::GpuCommands::Nvidia { device, dlss, raytracing } => gaming::GpuCommands::Nvidia { device, dlss, raytracing },
-                        cli::GpuCommands::Amd { device } => gaming::GpuCommands::Amd { device },
-                    };
-                    gaming::handle_gpu_command(gaming_command).await?;
-                }
-
-                GamingCommands::Wine { proton, winver } => {
-                    gaming::setup_wine(proton.as_deref(), winver.as_deref()).await?;
-                }
-
-                GamingCommands::Audio { system } => {
-                    gaming::setup_audio(&system).await?;
-                }
-
-                GamingCommands::Launch { game, args } => {
-                    gaming::launch_game(&game, &args).await?;
-                }
-
-                GamingCommands::Wayland => {
-                    let session_id = gaming::start_wayland_gaming_session().await?;
-                    info!("Wayland gaming session started: {}", session_id);
-                }
-
-                GamingCommands::Realtime { enable } => {
-                    gaming::apply_realtime_optimizations(enable).await?;
-                }
-
-                GamingCommands::Optimize { pid } => {
-                    gaming::optimize_game_process(pid).await?;
-                }
-
-                GamingCommands::Performance => {
-                    gaming::get_gaming_performance_report().await?;
-                }
+            SurgeCommands::Logs {
+                service,
+                follow,
+                tail,
+            } => {
+                surge::logs(&bolt_config, service.as_deref(), follow, tail).await?;
             }
-        }
 
-        Commands::Network { command } => {
-            match command {
-                NetworkCommands::Create { name, driver, subnet } => {
-                    network::create_network(&name, &driver, subnet.as_deref()).await?;
-                }
-
-                NetworkCommands::List => {
-                    network::list_networks().await?;
-                }
-
-                NetworkCommands::Remove { name } => {
-                    network::remove_network(&name).await?;
-                }
+            SurgeCommands::Scale { services } => {
+                surge::scale(&bolt_config, &services).await?;
             }
-        }
+        },
+
+        Commands::Gaming { command } => match command {
+            GamingCommands::Gpu { command } => {
+                let gaming_command = match command {
+                    cli::GpuCommands::List => gaming::GpuCommands::List,
+                    cli::GpuCommands::Nvidia {
+                        device,
+                        dlss,
+                        raytracing,
+                    } => gaming::GpuCommands::Nvidia {
+                        device,
+                        dlss,
+                        raytracing,
+                    },
+                    cli::GpuCommands::Amd { device } => gaming::GpuCommands::Amd { device },
+                };
+                gaming::handle_gpu_command(gaming_command).await?;
+            }
+
+            GamingCommands::Wine { proton, winver } => {
+                gaming::setup_wine(proton.as_deref(), winver.as_deref()).await?;
+            }
+
+            GamingCommands::Audio { system } => {
+                gaming::setup_audio(&system).await?;
+            }
+
+            GamingCommands::Launch { game, args } => {
+                gaming::launch_game(&game, &args).await?;
+            }
+
+            GamingCommands::Wayland => {
+                let session_id = gaming::start_wayland_gaming_session().await?;
+                info!("Wayland gaming session started: {}", session_id);
+            }
+
+            GamingCommands::Realtime { enable } => {
+                gaming::apply_realtime_optimizations(enable).await?;
+            }
+
+            GamingCommands::Optimize { pid } => {
+                gaming::optimize_game_process(pid).await?;
+            }
+
+            GamingCommands::Performance => {
+                gaming::get_gaming_performance_report().await?;
+            }
+        },
+
+        Commands::Network { command } => match command {
+            NetworkCommands::Create {
+                name,
+                driver,
+                subnet,
+            } => {
+                network::create_network(&name, &driver, subnet.as_deref()).await?;
+            }
+
+            NetworkCommands::List => {
+                network::list_networks().await?;
+            }
+
+            NetworkCommands::Remove { name } => {
+                network::remove_network(&name).await?;
+            }
+        },
     }
 
     Ok(())

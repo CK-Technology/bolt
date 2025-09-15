@@ -1,8 +1,8 @@
-use anyhow::{Result, Context};
-use tracing::{info, debug, warn, error};
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use tracing::{debug, error, info, warn};
 
 /// Real-time gaming optimizations for maximum performance
 /// This module handles CPU scheduling, memory management, and system-level optimizations
@@ -128,7 +128,9 @@ impl RealtimeOptimizer {
         debug!("💾 Saving original system settings");
 
         // Save CPU governor
-        if let Ok(governor) = fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor") {
+        if let Ok(governor) =
+            fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor")
+        {
             self.original_settings.cpu_governor = Some(governor.trim().to_string());
         }
 
@@ -160,8 +162,12 @@ impl RealtimeOptimizer {
         // Disable unnecessary kernel threads on isolated CPUs
         self.disable_kernel_threads_on_isolated_cpus().await?;
 
-        self.optimizations_applied.push(OptimizationType::CpuIsolation);
-        info!("  ✓ CPU isolation configured for cores: {:?}", self.config.isolated_cpus);
+        self.optimizations_applied
+            .push(OptimizationType::CpuIsolation);
+        info!(
+            "  ✓ CPU isolation configured for cores: {:?}",
+            self.config.isolated_cpus
+        );
 
         Ok(())
     }
@@ -177,7 +183,10 @@ impl RealtimeOptimizer {
         }
 
         // Configure CPU set for gaming
-        let cpu_set = self.config.isolated_cpus.iter()
+        let cpu_set = self
+            .config
+            .isolated_cpus
+            .iter()
             .map(|cpu| cpu.to_string())
             .collect::<Vec<_>>()
             .join(",");
@@ -261,7 +270,8 @@ impl RealtimeOptimizer {
             info!("  ✓ NUMA optimization configured for node {}", numa_node);
         }
 
-        self.optimizations_applied.push(OptimizationType::NumaOptimization);
+        self.optimizations_applied
+            .push(OptimizationType::NumaOptimization);
         Ok(())
     }
 
@@ -273,7 +283,8 @@ impl RealtimeOptimizer {
         self.configure_gpu_irq_affinity().await?;
         self.configure_storage_irq_affinity().await?;
 
-        self.optimizations_applied.push(OptimizationType::IrqAffinity);
+        self.optimizations_applied
+            .push(OptimizationType::IrqAffinity);
         Ok(())
     }
 
@@ -338,7 +349,10 @@ impl RealtimeOptimizer {
 
         // Set performance governor for gaming CPUs
         for cpu in &self.config.isolated_cpus {
-            let gov_path = format!("/sys/devices/system/cpu/cpu{}/cpufreq/scaling_governor", cpu);
+            let gov_path = format!(
+                "/sys/devices/system/cpu/cpu{}/cpufreq/scaling_governor",
+                cpu
+            );
 
             if let Err(e) = fs::write(&gov_path, "performance") {
                 warn!("Failed to set governor for CPU {}: {}", cpu, e);
@@ -350,7 +364,8 @@ impl RealtimeOptimizer {
             warn!("Failed to disable CPU idle: {}", e);
         }
 
-        self.optimizations_applied.push(OptimizationType::GamingGovernor);
+        self.optimizations_applied
+            .push(OptimizationType::GamingGovernor);
         info!("  ✓ Performance governor set for gaming CPUs");
 
         Ok(())
@@ -372,7 +387,8 @@ impl RealtimeOptimizer {
             warn!("Failed to set scheduler latency: {}", e);
         }
 
-        self.optimizations_applied.push(OptimizationType::RealtimePriority);
+        self.optimizations_applied
+            .push(OptimizationType::RealtimePriority);
         info!("  ✓ Real-time scheduling configured");
 
         Ok(())
@@ -404,16 +420,25 @@ impl RealtimeOptimizer {
 
         // Use chrt command to set real-time priority
         let output = tokio::process::Command::new("chrt")
-            .args(&["-f", "-p", &self.config.realtime_priority.to_string(), &pid.to_string()])
+            .args(&[
+                "-f",
+                "-p",
+                &self.config.realtime_priority.to_string(),
+                &pid.to_string(),
+            ])
             .output()
             .await?;
 
         if output.status.success() {
-            info!("    ✓ Real-time priority {} set for process {}",
-                  self.config.realtime_priority, pid);
+            info!(
+                "    ✓ Real-time priority {} set for process {}",
+                self.config.realtime_priority, pid
+            );
         } else {
-            warn!("Failed to set real-time priority: {}",
-                  String::from_utf8_lossy(&output.stderr));
+            warn!(
+                "Failed to set real-time priority: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
 
         Ok(())
@@ -422,7 +447,10 @@ impl RealtimeOptimizer {
     async fn set_process_cpu_affinity(&self, pid: u32) -> Result<()> {
         debug!("📌 Setting CPU affinity for process {}", pid);
 
-        let cpu_list = self.config.isolated_cpus.iter()
+        let cpu_list = self
+            .config
+            .isolated_cpus
+            .iter()
             .map(|cpu| cpu.to_string())
             .collect::<Vec<_>>()
             .join(",");
@@ -433,10 +461,15 @@ impl RealtimeOptimizer {
             .await?;
 
         if output.status.success() {
-            info!("    ✓ CPU affinity set to cores {} for process {}", cpu_list, pid);
+            info!(
+                "    ✓ CPU affinity set to cores {} for process {}",
+                cpu_list, pid
+            );
         } else {
-            warn!("Failed to set CPU affinity: {}",
-                  String::from_utf8_lossy(&output.stderr));
+            warn!(
+                "Failed to set CPU affinity: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
 
         Ok(())
@@ -458,7 +491,10 @@ impl RealtimeOptimizer {
         // Restore CPU governor
         if let Some(ref governor) = self.original_settings.cpu_governor {
             for cpu in &self.config.isolated_cpus {
-                let gov_path = format!("/sys/devices/system/cpu/cpu{}/cpufreq/scaling_governor", cpu);
+                let gov_path = format!(
+                    "/sys/devices/system/cpu/cpu{}/cpufreq/scaling_governor",
+                    cpu
+                );
                 if let Err(e) = fs::write(&gov_path, governor) {
                     warn!("Failed to restore governor for CPU {}: {}", cpu, e);
                 }
@@ -500,7 +536,9 @@ impl RealtimeOptimizer {
             memory_usage,
             latency_metrics,
             optimizations_active: self.optimizations_applied.len(),
-            realtime_priority_active: self.optimizations_applied.contains(&OptimizationType::RealtimePriority),
+            realtime_priority_active: self
+                .optimizations_applied
+                .contains(&OptimizationType::RealtimePriority),
         })
     }
 

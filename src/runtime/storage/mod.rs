@@ -1,14 +1,14 @@
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use tracing::{info, debug, warn, error};
-use sha2::{Sha256, Digest};
+use tracing::{debug, info, warn};
 
+pub mod ghostbay;
 pub mod overlay;
 pub mod registry;
 pub mod s3;
-pub mod ghostbay;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageManager {
@@ -65,8 +65,7 @@ impl StorageManager {
     pub fn new(root_path: PathBuf) -> Result<Self> {
         info!("📦 Initializing storage manager at: {:?}", root_path);
 
-        std::fs::create_dir_all(&root_path)
-            .context("Failed to create storage root directory")?;
+        std::fs::create_dir_all(&root_path).context("Failed to create storage root directory")?;
 
         // Create storage subdirectories
         let dirs = ["images", "layers", "tmp", "cache", "content"];
@@ -123,7 +122,10 @@ impl StorageManager {
             let image_ref = format!("{}:{}", name, tag);
             let temp_path = std::env::temp_dir().join(format!("ghostbay-{}-{}.tar", name, tag));
 
-            match ghostbay_client.pull_container_image(&image_ref, &temp_path).await {
+            match ghostbay_client
+                .pull_container_image(&image_ref, &temp_path)
+                .await
+            {
                 Ok(ghostbay_image) => {
                     info!("  ✅ Downloaded from Ghostbay with gaming optimizations");
 
@@ -135,11 +137,18 @@ impl StorageManager {
                         tag: tag.to_string(),
                         digest: ghostbay_image.digest,
                         size: ghostbay_image.size,
-                        layers: ghostbay_image.layers.iter().map(|l| l.digest.clone()).collect(),
+                        layers: ghostbay_image
+                            .layers
+                            .iter()
+                            .map(|l| l.digest.clone())
+                            .collect(),
                         config: ImageConfig {
                             architecture: "amd64".to_string(),
                             os: "linux".to_string(),
-                            env: vec!["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string()],
+                            env: vec![
+                                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                                    .to_string(),
+                            ],
                             cmd: vec!["/bin/bash".to_string()],
                             entrypoint: vec![],
                             working_dir: "/".to_string(),
@@ -159,7 +168,10 @@ impl StorageManager {
                     return Ok(image_id);
                 }
                 Err(e) => {
-                    warn!("  ⚠️  Ghostbay pull failed: {}, falling back to standard pull", e);
+                    warn!(
+                        "  ⚠️  Ghostbay pull failed: {}, falling back to standard pull",
+                        e
+                    );
                 }
             }
         }
@@ -184,7 +196,9 @@ impl StorageManager {
             config: ImageConfig {
                 architecture: "amd64".to_string(),
                 os: "linux".to_string(),
-                env: vec!["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string()],
+                env: vec![
+                    "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string(),
+                ],
                 cmd: vec!["/bin/bash".to_string()],
                 entrypoint: vec![],
                 working_dir: "/".to_string(),
@@ -227,7 +241,10 @@ impl StorageManager {
                     "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string(),
                 ],
                 cmd: match name {
-                    "nginx" => vec!["nginx", "-g", "daemon off;"].iter().map(|s| s.to_string()).collect(),
+                    "nginx" => vec!["nginx", "-g", "daemon off;"]
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect(),
                     "postgres" => vec!["postgres"].iter().map(|s| s.to_string()).collect(),
                     _ => vec!["/bin/bash".to_string()],
                 },
@@ -278,15 +295,20 @@ impl StorageManager {
 
         let dockerfile_path = build_context.join(dockerfile);
         if !dockerfile_path.exists() {
-            return Err(anyhow::anyhow!("Dockerfile not found: {:?}", dockerfile_path));
+            return Err(anyhow::anyhow!(
+                "Dockerfile not found: {:?}",
+                dockerfile_path
+            ));
         }
 
         // Read Dockerfile
-        let dockerfile_content = std::fs::read_to_string(&dockerfile_path)
-            .context("Failed to read Dockerfile")?;
+        let dockerfile_content =
+            std::fs::read_to_string(&dockerfile_path).context("Failed to read Dockerfile")?;
 
         // Parse Dockerfile and execute build steps
-        let image_id = self.execute_dockerfile_build(&dockerfile_content, build_context, tag).await?;
+        let image_id = self
+            .execute_dockerfile_build(&dockerfile_content, build_context, tag)
+            .await?;
 
         info!("✅ Image built successfully: {}", image_id);
         Ok(image_id)
@@ -325,7 +347,9 @@ impl StorageManager {
                 }
                 "RUN" => {
                     info!("🏃 RUN {}", args);
-                    let layer_id = self.execute_run_instruction(args, &current_image_id).await?;
+                    let layer_id = self
+                        .execute_run_instruction(args, &current_image_id)
+                        .await?;
                     layers.push(layer_id);
                 }
                 "COPY" | "ADD" => {
@@ -363,7 +387,9 @@ impl StorageManager {
             config: ImageConfig {
                 architecture: "amd64".to_string(),
                 os: "linux".to_string(),
-                env: vec!["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string()],
+                env: vec![
+                    "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string(),
+                ],
                 cmd: vec!["/bin/bash".to_string()],
                 entrypoint: vec![],
                 working_dir: "/".to_string(),
@@ -469,7 +495,12 @@ impl StorageManager {
     }
 
     // Volume management functionality
-    pub async fn create_volume(&mut self, name: &str, driver: &str, options: &HashMap<String, String>) -> Result<VolumeInfo> {
+    pub async fn create_volume(
+        &mut self,
+        name: &str,
+        driver: &str,
+        options: &HashMap<String, String>,
+    ) -> Result<VolumeInfo> {
         info!("📂 Creating volume: {} (driver: {})", name, driver);
 
         let volume_id = uuid::Uuid::new_v4().to_string();
@@ -521,16 +552,24 @@ impl StorageManager {
         debug!("Creating local volume: {}", volume_info.name);
 
         // For local volumes, just ensure the directory exists
-        std::fs::create_dir_all(&volume_info.mountpoint)
-            .with_context(|| format!("Failed to create local volume directory: {:?}", volume_info.mountpoint))?;
+        std::fs::create_dir_all(&volume_info.mountpoint).with_context(|| {
+            format!(
+                "Failed to create local volume directory: {:?}",
+                volume_info.mountpoint
+            )
+        })?;
 
         // Set appropriate permissions
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let perms = std::fs::Permissions::from_mode(0o755);
-            std::fs::set_permissions(&volume_info.mountpoint, perms)
-                .with_context(|| format!("Failed to set permissions on volume: {:?}", volume_info.mountpoint))?;
+            std::fs::set_permissions(&volume_info.mountpoint, perms).with_context(|| {
+                format!(
+                    "Failed to set permissions on volume: {:?}",
+                    volume_info.mountpoint
+                )
+            })?;
         }
 
         Ok(())
@@ -539,17 +578,25 @@ impl StorageManager {
     async fn create_nfs_volume(&self, volume_info: &VolumeInfo) -> Result<()> {
         debug!("Creating NFS volume: {}", volume_info.name);
 
-        let nfs_server = volume_info.options.get("server")
+        let nfs_server = volume_info
+            .options
+            .get("server")
             .ok_or_else(|| anyhow::anyhow!("NFS volume requires 'server' option"))?;
-        let nfs_path = volume_info.options.get("path")
+        let nfs_path = volume_info
+            .options
+            .get("path")
             .ok_or_else(|| anyhow::anyhow!("NFS volume requires 'path' option"))?;
 
         info!("  📡 NFS server: {}", nfs_server);
         info!("  📁 NFS path: {}", nfs_path);
 
         // Create mount point
-        std::fs::create_dir_all(&volume_info.mountpoint)
-            .with_context(|| format!("Failed to create NFS mount point: {:?}", volume_info.mountpoint))?;
+        std::fs::create_dir_all(&volume_info.mountpoint).with_context(|| {
+            format!(
+                "Failed to create NFS mount point: {:?}",
+                volume_info.mountpoint
+            )
+        })?;
 
         // In a real implementation, we would mount the NFS share here
         info!("✅ NFS volume configuration ready");
@@ -566,8 +613,12 @@ impl StorageManager {
         // 3. Gaming optimizations (low latency, anti-cheat compatibility)
         // 4. Encryption support
 
-        std::fs::create_dir_all(&volume_info.mountpoint)
-            .with_context(|| format!("Failed to create Bolt volume directory: {:?}", volume_info.mountpoint))?;
+        std::fs::create_dir_all(&volume_info.mountpoint).with_context(|| {
+            format!(
+                "Failed to create Bolt volume directory: {:?}",
+                volume_info.mountpoint
+            )
+        })?;
 
         // Create Bolt-specific metadata
         let metadata_dir = volume_info.mountpoint.join(".bolt");
@@ -587,23 +638,36 @@ impl StorageManager {
 
         std::fs::write(
             metadata_dir.join("metadata.json"),
-            serde_json::to_string_pretty(&metadata)?
+            serde_json::to_string_pretty(&metadata)?,
         )?;
 
         info!("✅ Bolt volume created with optimizations");
         Ok(())
     }
 
-    async fn create_s3_volume(&self, volume_info: &VolumeInfo, options: &HashMap<String, String>) -> Result<()> {
+    async fn create_s3_volume(
+        &self,
+        volume_info: &VolumeInfo,
+        options: &HashMap<String, String>,
+    ) -> Result<()> {
         debug!("Creating S3 volume: {}", volume_info.name);
 
-        let endpoint = options.get("endpoint").unwrap_or(&"https://s3.amazonaws.com".to_string()).clone();
-        let region = options.get("region").unwrap_or(&"us-east-1".to_string()).clone();
-        let bucket = options.get("bucket")
+        let endpoint = options
+            .get("endpoint")
+            .unwrap_or(&"https://s3.amazonaws.com".to_string())
+            .clone();
+        let region = options
+            .get("region")
+            .unwrap_or(&"us-east-1".to_string())
+            .clone();
+        let bucket = options
+            .get("bucket")
             .ok_or_else(|| anyhow::anyhow!("S3 volume requires 'bucket' option"))?;
-        let access_key = options.get("access_key")
+        let access_key = options
+            .get("access_key")
             .ok_or_else(|| anyhow::anyhow!("S3 volume requires 'access_key' option"))?;
-        let secret_key = options.get("secret_key")
+        let secret_key = options
+            .get("secret_key")
             .ok_or_else(|| anyhow::anyhow!("S3 volume requires 'secret_key' option"))?;
 
         info!("  ☁️  S3 endpoint: {}", endpoint);
@@ -620,13 +684,20 @@ impl StorageManager {
             access_key: access_key.clone(),
             secret_key: secret_key.clone(),
             encryption: None,
-            compression: options.get("compression").map(|c| c == "true").unwrap_or(false),
+            compression: options
+                .get("compression")
+                .map(|c| c == "true")
+                .unwrap_or(false),
             cache_enabled: options.get("cache").map(|c| c == "true").unwrap_or(true),
-            cache_ttl_seconds: options.get("cache_ttl").and_then(|ttl| ttl.parse().ok()).unwrap_or(3600),
+            cache_ttl_seconds: options
+                .get("cache_ttl")
+                .and_then(|ttl| ttl.parse().ok())
+                .unwrap_or(3600),
         };
 
         // Test S3 connection
-        let _s3_client = crate::runtime::storage::s3::S3StorageClient::new(s3_config.clone()).await
+        let _s3_client = crate::runtime::storage::s3::S3StorageClient::new(s3_config.clone())
+            .await
             .context("Failed to initialize S3 client")?;
 
         // Create volume metadata
@@ -652,23 +723,31 @@ impl StorageManager {
 
         std::fs::write(
             metadata_dir.join("metadata.json"),
-            serde_json::to_string_pretty(&metadata)?
+            serde_json::to_string_pretty(&metadata)?,
         )?;
 
         info!("✅ S3 volume created successfully");
         Ok(())
     }
 
-    async fn create_minio_volume(&self, volume_info: &VolumeInfo, options: &HashMap<String, String>) -> Result<()> {
+    async fn create_minio_volume(
+        &self,
+        volume_info: &VolumeInfo,
+        options: &HashMap<String, String>,
+    ) -> Result<()> {
         debug!("Creating MinIO volume: {}", volume_info.name);
 
-        let endpoint = options.get("endpoint")
+        let endpoint = options
+            .get("endpoint")
             .ok_or_else(|| anyhow::anyhow!("MinIO volume requires 'endpoint' option"))?;
-        let bucket = options.get("bucket")
+        let bucket = options
+            .get("bucket")
             .ok_or_else(|| anyhow::anyhow!("MinIO volume requires 'bucket' option"))?;
-        let access_key = options.get("access_key")
+        let access_key = options
+            .get("access_key")
             .ok_or_else(|| anyhow::anyhow!("MinIO volume requires 'access_key' option"))?;
-        let secret_key = options.get("secret_key")
+        let secret_key = options
+            .get("secret_key")
             .ok_or_else(|| anyhow::anyhow!("MinIO volume requires 'secret_key' option"))?;
         let tls = options.get("tls").map(|t| t == "true").unwrap_or(false);
 
@@ -685,17 +764,23 @@ impl StorageManager {
             prefix: Some(format!("bolt-volumes/{}/", volume_info.name)),
             access_key: access_key.clone(),
             secret_key: secret_key.clone(),
-            encryption: options.get("encryption").map(|_| crate::runtime::storage::s3::S3Encryption {
-                method: "AES256".to_string(),
-                kms_key_id: None,
+            encryption: options.get("encryption").map(|_| {
+                crate::runtime::storage::s3::S3Encryption {
+                    method: "AES256".to_string(),
+                    kms_key_id: None,
+                }
             }),
-            compression: options.get("compression").map(|c| c == "true").unwrap_or(true),
+            compression: options
+                .get("compression")
+                .map(|c| c == "true")
+                .unwrap_or(true),
             cache_enabled: true,
             cache_ttl_seconds: 1800, // 30 minutes
         };
 
         // Initialize MinIO client
-        let minio_client = crate::runtime::storage::s3::S3StorageClient::new(minio_config).await
+        let minio_client = crate::runtime::storage::s3::S3StorageClient::new(minio_config)
+            .await
             .context("Failed to initialize MinIO client")?;
 
         // Create volume structure
@@ -721,23 +806,31 @@ impl StorageManager {
 
         std::fs::write(
             metadata_dir.join("metadata.json"),
-            serde_json::to_string_pretty(&metadata)?
+            serde_json::to_string_pretty(&metadata)?,
         )?;
 
         info!("✅ MinIO volume created with optimizations");
         Ok(())
     }
 
-    async fn create_ghostbay_volume(&self, volume_info: &VolumeInfo, options: &HashMap<String, String>) -> Result<()> {
+    async fn create_ghostbay_volume(
+        &self,
+        volume_info: &VolumeInfo,
+        options: &HashMap<String, String>,
+    ) -> Result<()> {
         debug!("Creating Ghostbay volume: {}", volume_info.name);
 
-        let endpoint = options.get("endpoint")
+        let endpoint = options
+            .get("endpoint")
             .ok_or_else(|| anyhow::anyhow!("Ghostbay volume requires 'endpoint' option"))?;
-        let bucket = options.get("bucket")
+        let bucket = options
+            .get("bucket")
             .ok_or_else(|| anyhow::anyhow!("Ghostbay volume requires 'bucket' option"))?;
-        let access_key = options.get("access_key")
+        let access_key = options
+            .get("access_key")
             .ok_or_else(|| anyhow::anyhow!("Ghostbay volume requires 'access_key' option"))?;
-        let secret_key = options.get("secret_key")
+        let secret_key = options
+            .get("secret_key")
             .ok_or_else(|| anyhow::anyhow!("Ghostbay volume requires 'secret_key' option"))?;
 
         info!("  👻 Ghostbay endpoint: {}", endpoint);
@@ -771,14 +864,18 @@ impl StorageManager {
         };
 
         // Initialize Ghostbay client
-        let _ghostbay_client = crate::runtime::storage::ghostbay::GhostbayClient::new(ghostbay_config.clone()).await
-            .context("Failed to initialize Ghostbay client")?;
+        let _ghostbay_client =
+            crate::runtime::storage::ghostbay::GhostbayClient::new(ghostbay_config.clone())
+                .await
+                .context("Failed to initialize Ghostbay client")?;
 
         // Create volume with Ghostbay-specific features
         crate::runtime::storage::ghostbay::create_ghostbay_volume(
             ghostbay_config,
-            &volume_info.name
-        ).await.context("Failed to create Ghostbay volume")?;
+            &volume_info.name,
+        )
+        .await
+        .context("Failed to create Ghostbay volume")?;
 
         // Create local volume structure
         std::fs::create_dir_all(&volume_info.mountpoint)?;
@@ -805,7 +902,7 @@ impl StorageManager {
 
         std::fs::write(
             metadata_dir.join("metadata.json"),
-            serde_json::to_string_pretty(&metadata)?
+            serde_json::to_string_pretty(&metadata)?,
         )?;
 
         info!("✅ Ghostbay volume created with gaming optimizations");
@@ -877,13 +974,26 @@ impl StorageManager {
 
                 let volume_info = VolumeInfo {
                     id: entry.file_name().to_string_lossy().to_string(),
-                    name: metadata.get("name").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
-                    driver: metadata.get("driver").and_then(|v| v.as_str()).unwrap_or("local").to_string(),
+                    name: metadata
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string(),
+                    driver: metadata
+                        .get("driver")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("local")
+                        .to_string(),
                     mountpoint: entry.path(),
                     options: HashMap::new(), // TODO: Parse from metadata
                     created_at: chrono::DateTime::parse_from_rfc3339(
-                        metadata.get("created_at").and_then(|v| v.as_str()).unwrap_or("1970-01-01T00:00:00Z")
-                    ).unwrap_or_default().with_timezone(&chrono::Utc),
+                        metadata
+                            .get("created_at")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("1970-01-01T00:00:00Z"),
+                    )
+                    .unwrap_or_default()
+                    .with_timezone(&chrono::Utc),
                     size,
                 };
 
@@ -944,7 +1054,11 @@ impl StorageManager {
             // Mock: assume images older than 30 days are unused
             let thirty_days_ago = chrono::Utc::now() - chrono::Duration::days(30);
             if image.created_at < thirty_days_ago {
-                report.items.push(format!("Unused image: {} ({}MB)", image.name, image.size / 1_000_000));
+                report.items.push(format!(
+                    "Unused image: {} ({}MB)",
+                    image.name,
+                    image.size / 1_000_000
+                ));
                 report.space_reclaimed += image.size;
                 report.images_removed += 1;
 
@@ -957,7 +1071,9 @@ impl StorageManager {
 
         // Find unused layers
         // Layers not referenced by any image
-        let referenced_layers: std::collections::HashSet<String> = self.images.values()
+        let referenced_layers: std::collections::HashSet<String> = self
+            .images
+            .values()
             .flat_map(|img| img.layers.iter())
             .cloned()
             .collect();
@@ -974,15 +1090,20 @@ impl StorageManager {
             }
         }
 
-        info!("✅ Cleanup analysis complete: {} items, {}MB reclaimable",
-              report.images_removed + report.layers_removed + report.volumes_removed,
-              report.space_reclaimed / 1_000_000);
+        info!(
+            "✅ Cleanup analysis complete: {} items, {}MB reclaimable",
+            report.images_removed + report.layers_removed + report.volumes_removed,
+            report.space_reclaimed / 1_000_000
+        );
 
         Ok(report)
     }
 
     /// Backup storage to object storage (S3/MinIO/Ghostbay)
-    pub async fn backup_to_object_storage(&self, backup_config: ObjectStorageBackupConfig) -> Result<BackupReport> {
+    pub async fn backup_to_object_storage(
+        &self,
+        backup_config: ObjectStorageBackupConfig,
+    ) -> Result<BackupReport> {
         info!("💾 Starting backup to object storage");
 
         let mut backup_report = BackupReport {
@@ -1013,7 +1134,10 @@ impl StorageManager {
         // Backup images
         if backup_config.include_images {
             for (image_id, image) in &self.images {
-                let backup_key = format!("backups/{}/images/{}.tar.gz", backup_report.backup_id, image_id);
+                let backup_key = format!(
+                    "backups/{}/images/{}.tar.gz",
+                    backup_report.backup_id, image_id
+                );
 
                 // Create temporary tarball of image
                 let temp_path = std::env::temp_dir().join(format!("{}.tar.gz", image_id));
@@ -1025,7 +1149,11 @@ impl StorageManager {
                 let file_size = std::fs::metadata(&temp_path)?.len();
                 backup_report.items_backed_up += 1;
                 backup_report.total_size += file_size;
-                backup_report.items.push(format!("Image: {} ({}MB)", image.name, file_size / 1_000_000));
+                backup_report.items.push(format!(
+                    "Image: {} ({}MB)",
+                    image.name,
+                    file_size / 1_000_000
+                ));
 
                 // Clean up temporary file
                 std::fs::remove_file(&temp_path)?;
@@ -1038,7 +1166,10 @@ impl StorageManager {
         if backup_config.include_volumes {
             let volumes = self.list_volumes().await?;
             for volume in volumes {
-                let backup_key = format!("backups/{}/volumes/{}.tar.gz", backup_report.backup_id, volume.name);
+                let backup_key = format!(
+                    "backups/{}/volumes/{}.tar.gz",
+                    backup_report.backup_id, volume.name
+                );
 
                 // Create tarball of volume
                 let temp_path = std::env::temp_dir().join(format!("volume-{}.tar.gz", volume.name));
@@ -1050,7 +1181,11 @@ impl StorageManager {
                 let file_size = std::fs::metadata(&temp_path)?.len();
                 backup_report.items_backed_up += 1;
                 backup_report.total_size += file_size;
-                backup_report.items.push(format!("Volume: {} ({}MB)", volume.name, file_size / 1_000_000));
+                backup_report.items.push(format!(
+                    "Volume: {} ({}MB)",
+                    volume.name,
+                    file_size / 1_000_000
+                ));
 
                 // Clean up temporary file
                 std::fs::remove_file(&temp_path)?;
@@ -1079,22 +1214,32 @@ impl StorageManager {
         let manifest_path = std::env::temp_dir().join("manifest.json");
         std::fs::write(&manifest_path, manifest_data)?;
 
-        storage_client.upload_file(&manifest_path, &manifest_key).await?;
+        storage_client
+            .upload_file(&manifest_path, &manifest_key)
+            .await?;
         std::fs::remove_file(&manifest_path)?;
 
         backup_report.completed_at = Some(chrono::Utc::now());
         backup_report.status = BackupStatus::Completed;
 
-        info!("✅ Backup completed: {} items, {}MB total",
-              backup_report.items_backed_up,
-              backup_report.total_size / 1_000_000);
+        info!(
+            "✅ Backup completed: {} items, {}MB total",
+            backup_report.items_backed_up,
+            backup_report.total_size / 1_000_000
+        );
 
         Ok(backup_report)
     }
 
     /// Restore storage from object storage backup
-    pub async fn restore_from_object_storage(&mut self, restore_config: ObjectStorageRestoreConfig) -> Result<RestoreReport> {
-        info!("🔄 Starting restore from object storage backup: {}", restore_config.backup_id);
+    pub async fn restore_from_object_storage(
+        &mut self,
+        restore_config: ObjectStorageRestoreConfig,
+    ) -> Result<RestoreReport> {
+        info!(
+            "🔄 Starting restore from object storage backup: {}",
+            restore_config.backup_id
+        );
 
         let mut restore_report = RestoreReport {
             backup_id: restore_config.backup_id.clone(),
@@ -1122,14 +1267,22 @@ impl StorageManager {
         let manifest_key = format!("backups/{}/manifest.json", restore_config.backup_id);
         let manifest_path = std::env::temp_dir().join("restore-manifest.json");
 
-        storage_client.download_file(&manifest_key, &manifest_path).await?;
+        storage_client
+            .download_file(&manifest_key, &manifest_path)
+            .await?;
         let manifest_content = std::fs::read_to_string(&manifest_path)?;
         let manifest: serde_json::Value = serde_json::from_str(&manifest_content)?;
         std::fs::remove_file(&manifest_path)?;
 
         info!("  📋 Backup manifest loaded");
-        info!("  📅 Created: {}", manifest["created_at"].as_str().unwrap_or("unknown"));
-        info!("  📊 Items: {}", manifest["items"].as_array().map(|a| a.len()).unwrap_or(0));
+        info!(
+            "  📅 Created: {}",
+            manifest["created_at"].as_str().unwrap_or("unknown")
+        );
+        info!(
+            "  📊 Items: {}",
+            manifest["items"].as_array().map(|a| a.len()).unwrap_or(0)
+        );
 
         // Restore images
         if restore_config.include_images {
@@ -1138,7 +1291,9 @@ impl StorageManager {
 
             for object in image_objects {
                 let temp_path = std::env::temp_dir().join("restore-image.tar.gz");
-                storage_client.download_file(&object.key, &temp_path).await?;
+                storage_client
+                    .download_file(&object.key, &temp_path)
+                    .await?;
 
                 // Extract and import image
                 self.import_image_from_tarball(&temp_path).await?;
@@ -1158,7 +1313,9 @@ impl StorageManager {
 
             for object in volume_objects {
                 let temp_path = std::env::temp_dir().join("restore-volume.tar.gz");
-                storage_client.download_file(&object.key, &temp_path).await?;
+                storage_client
+                    .download_file(&object.key, &temp_path)
+                    .await?;
 
                 // Extract and restore volume
                 self.restore_volume_from_tarball(&temp_path).await?;
@@ -1174,14 +1331,22 @@ impl StorageManager {
         restore_report.completed_at = Some(chrono::Utc::now());
         restore_report.status = RestoreStatus::Completed;
 
-        info!("✅ Restore completed: {} items restored", restore_report.items_restored);
+        info!(
+            "✅ Restore completed: {} items restored",
+            restore_report.items_restored
+        );
         Ok(restore_report)
     }
 
-    async fn backup_to_ghostbay(&self, backup_config: &ObjectStorageBackupConfig, ghostbay_config: &crate::runtime::storage::ghostbay::GhostbayConfig) -> Result<BackupReport> {
+    async fn backup_to_ghostbay(
+        &self,
+        backup_config: &ObjectStorageBackupConfig,
+        ghostbay_config: &crate::runtime::storage::ghostbay::GhostbayConfig,
+    ) -> Result<BackupReport> {
         info!("👻 Starting Ghostbay backup with gaming optimizations");
 
-        let ghostbay_client = crate::runtime::storage::ghostbay::GhostbayClient::new(ghostbay_config.clone()).await?;
+        let ghostbay_client =
+            crate::runtime::storage::ghostbay::GhostbayClient::new(ghostbay_config.clone()).await?;
 
         let mut backup_report = BackupReport {
             backup_id: uuid::Uuid::new_v4().to_string(),
@@ -1201,10 +1366,14 @@ impl StorageManager {
                 self.create_image_tarball(image, &temp_path).await?;
 
                 // Push to Ghostbay container registry with gaming optimizations
-                let digest = ghostbay_client.push_container_image(&format!("backup/{}", image.name), &temp_path).await?;
+                let digest = ghostbay_client
+                    .push_container_image(&format!("backup/{}", image.name), &temp_path)
+                    .await?;
 
                 backup_report.items_backed_up += 1;
-                backup_report.items.push(format!("Gaming Image: {} (digest: {})", image.name, digest));
+                backup_report
+                    .items
+                    .push(format!("Gaming Image: {} (digest: {})", image.name, digest));
 
                 std::fs::remove_file(&temp_path)?;
             }
@@ -1217,10 +1386,15 @@ impl StorageManager {
         Ok(backup_report)
     }
 
-    async fn restore_from_ghostbay(&mut self, restore_config: &ObjectStorageRestoreConfig, ghostbay_config: &crate::runtime::storage::ghostbay::GhostbayConfig) -> Result<RestoreReport> {
+    async fn restore_from_ghostbay(
+        &mut self,
+        restore_config: &ObjectStorageRestoreConfig,
+        ghostbay_config: &crate::runtime::storage::ghostbay::GhostbayConfig,
+    ) -> Result<RestoreReport> {
         info!("👻 Starting Ghostbay restore with gaming optimizations");
 
-        let ghostbay_client = crate::runtime::storage::ghostbay::GhostbayClient::new(ghostbay_config.clone()).await?;
+        let ghostbay_client =
+            crate::runtime::storage::ghostbay::GhostbayClient::new(ghostbay_config.clone()).await?;
 
         let mut restore_report = RestoreReport {
             backup_id: restore_config.backup_id.clone(),
@@ -1264,7 +1438,10 @@ impl StorageManager {
         // 3. Handle different volume drivers appropriately
 
         // For now, create a mock tarball
-        std::fs::write(output_path, format!("mock volume tarball for {}", volume.name))?;
+        std::fs::write(
+            output_path,
+            format!("mock volume tarball for {}", volume.name),
+        )?;
         Ok(())
     }
 
@@ -1292,7 +1469,9 @@ impl StorageManager {
         Ok(())
     }
 
-    pub async fn get_ghostbay_client(&self) -> Result<crate::runtime::storage::ghostbay::GhostbayClient> {
+    pub async fn get_ghostbay_client(
+        &self,
+    ) -> Result<crate::runtime::storage::ghostbay::GhostbayClient> {
         let endpoint = std::env::var("GHOSTBAY_ENDPOINT")
             .unwrap_or_else(|_| "https://api.ghostbay.io".to_string());
         let cluster_id = std::env::var("GHOSTBAY_CLUSTER_ID").ok();
@@ -1329,22 +1508,36 @@ impl StorageManager {
     }
 
     pub async fn push_to_ghostbay(&self, image_name: &str, image_path: &Path) -> Result<String> {
-        info!("👻 Pushing image {} to Ghostbay with gaming optimizations", image_name);
+        info!(
+            "👻 Pushing image {} to Ghostbay with gaming optimizations",
+            image_name
+        );
 
         let ghostbay_client = self.get_ghostbay_client().await?;
-        let digest = ghostbay_client.push_container_image(image_name, image_path).await?;
+        let digest = ghostbay_client
+            .push_container_image(image_name, image_path)
+            .await?;
 
         info!("✅ Image pushed to Ghostbay with digest: {}", digest);
         Ok(digest)
     }
 
-    pub async fn upload_gaming_assets_to_ghostbay(&self, assets_path: &Path, game_id: &str) -> Result<Vec<String>> {
+    pub async fn upload_gaming_assets_to_ghostbay(
+        &self,
+        assets_path: &Path,
+        game_id: &str,
+    ) -> Result<Vec<String>> {
         info!("🎮 Uploading gaming assets for {} to Ghostbay", game_id);
 
         let ghostbay_client = self.get_ghostbay_client().await?;
-        let upload_results = ghostbay_client.upload_gaming_assets(assets_path, game_id).await?;
+        let upload_results = ghostbay_client
+            .upload_gaming_assets(assets_path, game_id)
+            .await?;
 
-        info!("✅ Gaming assets uploaded to Ghostbay: {} files", upload_results.len());
+        info!(
+            "✅ Gaming assets uploaded to Ghostbay: {} files",
+            upload_results.len()
+        );
         Ok(upload_results)
     }
 }
@@ -1383,9 +1576,15 @@ pub struct CleanupReport {
 // Backup and restore configuration types
 #[derive(Debug, Clone)]
 pub enum ObjectStorageProvider {
-    S3 { config: crate::runtime::storage::s3::S3VolumeConfig },
-    MinIO { config: crate::runtime::storage::s3::S3VolumeConfig },
-    Ghostbay { config: crate::runtime::storage::ghostbay::GhostbayConfig },
+    S3 {
+        config: crate::runtime::storage::s3::S3VolumeConfig,
+    },
+    MinIO {
+        config: crate::runtime::storage::s3::S3VolumeConfig,
+    },
+    Ghostbay {
+        config: crate::runtime::storage::ghostbay::GhostbayConfig,
+    },
 }
 
 #[derive(Debug, Clone)]

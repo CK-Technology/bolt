@@ -1,9 +1,9 @@
-use anyhow::{Result, Context};
-use tracing::{info, debug, warn, error};
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::{debug, error, info, warn};
 
 pub mod compositor;
 pub mod display;
@@ -61,7 +61,10 @@ pub struct WaylandGamingSession {
 
 impl WaylandGamingSession {
     pub async fn new(config: WaylandGamingConfig) -> Result<Self> {
-        info!("🎮 Creating Wayland gaming session: {}", config.display_name);
+        info!(
+            "🎮 Creating Wayland gaming session: {}",
+            config.display_name
+        );
 
         let compositor = Arc::new(Mutex::new(BoltCompositor::new(&config).await?));
         let display_manager = Arc::new(Mutex::new(DisplayManager::new(&config).await?));

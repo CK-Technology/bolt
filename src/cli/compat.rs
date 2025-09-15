@@ -1,4 +1,4 @@
-use crate::compat::{docker::DockerCompat, compose::ComposeCompat, DockerApiCompat};
+use crate::compat::{DockerApiCompat, compose::ComposeCompat, docker::DockerCompat};
 use crate::error::Result;
 use crate::runtime::BoltRuntime;
 use clap::{Args, Subcommand};
@@ -71,18 +71,10 @@ pub enum ComposeCommands {
 
 pub async fn handle_compat_command(args: CompatArgs, runtime: BoltRuntime) -> Result<()> {
     match args.command {
-        CompatCommands::Docker { args } => {
-            handle_docker_command(args, runtime).await
-        }
-        CompatCommands::Compose { command } => {
-            handle_compose_command(command).await
-        }
-        CompatCommands::ApiServer { port, bind } => {
-            handle_api_server(port, bind, runtime).await
-        }
-        CompatCommands::Migrate { compose_file } => {
-            handle_migration_guide(compose_file).await
-        }
+        CompatCommands::Docker { args } => handle_docker_command(args, runtime).await,
+        CompatCommands::Compose { command } => handle_compose_command(command).await,
+        CompatCommands::ApiServer { port, bind } => handle_api_server(port, bind, runtime).await,
+        CompatCommands::Migrate { compose_file } => handle_migration_guide(compose_file).await,
     }
 }
 
@@ -105,7 +97,11 @@ async fn handle_docker_command(args: Vec<String>, runtime: BoltRuntime) -> Resul
 
 async fn handle_compose_command(command: ComposeCommands) -> Result<()> {
     match command {
-        ComposeCommands::Convert { input, output, notes } => {
+        ComposeCommands::Convert {
+            input,
+            output,
+            notes,
+        } => {
             println!("🔄 Converting Docker Compose to Boltfile");
             println!("   Input: {}", input.display());
             println!("   Output: {}", output.display());
@@ -174,8 +170,8 @@ async fn handle_compose_command(command: ComposeCommands) -> Result<()> {
 }
 
 async fn handle_api_server(port: u16, bind: String, runtime: BoltRuntime) -> Result<()> {
-    use tokio::net::TcpListener;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::TcpListener;
 
     println!("🚀 Starting Docker API Compatibility Server");
     println!("   Address: http://{}:{}", bind, port);

@@ -9,10 +9,7 @@ async fn test_capsule_creation() {
     let temp_dir = TempDir::new().unwrap();
 
     // Create a capsule
-    let capsule = Capsule::new(
-        "test-capsule",
-        temp_dir.path().to_str().unwrap()
-    );
+    let capsule = Capsule::new("test-capsule", temp_dir.path().to_str().unwrap());
 
     assert!(capsule.is_ok());
     let capsule = capsule.unwrap();
@@ -25,10 +22,7 @@ async fn test_capsule_lifecycle() {
     let runtime = BoltRuntime::new().unwrap();
     let temp_dir = TempDir::new().unwrap();
 
-    let mut capsule = Capsule::new(
-        "lifecycle-test",
-        temp_dir.path().to_str().unwrap()
-    ).unwrap();
+    let mut capsule = Capsule::new("lifecycle-test", temp_dir.path().to_str().unwrap()).unwrap();
 
     // Start capsule
     let start_result = capsule.start().await;
@@ -50,10 +44,7 @@ async fn test_capsule_with_resources() {
     let runtime = BoltRuntime::new().unwrap();
     let temp_dir = TempDir::new().unwrap();
 
-    let mut capsule = Capsule::new(
-        "resource-test",
-        temp_dir.path().to_str().unwrap()
-    ).unwrap();
+    let mut capsule = Capsule::new("resource-test", temp_dir.path().to_str().unwrap()).unwrap();
 
     // Set resource limits
     capsule.set_memory_limit("512M");
@@ -78,17 +69,16 @@ async fn test_capsule_snapshots() {
     let runtime = BoltRuntime::new().unwrap();
     let temp_dir = TempDir::new().unwrap();
 
-    let mut capsule = Capsule::new(
-        "snapshot-test",
-        temp_dir.path().to_str().unwrap()
-    ).unwrap();
+    let mut capsule = Capsule::new("snapshot-test", temp_dir.path().to_str().unwrap()).unwrap();
 
     // Start capsule
     capsule.start().await.unwrap();
 
     // Create snapshot
     let snapshot_manager = SnapshotManager::new(temp_dir.path().to_str().unwrap());
-    let snapshot_result = snapshot_manager.create_snapshot(&capsule, "test-snapshot").await;
+    let snapshot_result = snapshot_manager
+        .create_snapshot(&capsule, "test-snapshot")
+        .await;
     assert!(snapshot_result.is_ok());
 
     // List snapshots
@@ -98,11 +88,15 @@ async fn test_capsule_snapshots() {
     assert!(snapshots.iter().any(|s| s.name == "test-snapshot"));
 
     // Restore snapshot
-    let restore_result = snapshot_manager.restore_snapshot(&mut capsule, "test-snapshot").await;
+    let restore_result = snapshot_manager
+        .restore_snapshot(&mut capsule, "test-snapshot")
+        .await;
     assert!(restore_result.is_ok());
 
     // Delete snapshot
-    let delete_result = snapshot_manager.delete_snapshot(&capsule, "test-snapshot").await;
+    let delete_result = snapshot_manager
+        .delete_snapshot(&capsule, "test-snapshot")
+        .await;
     assert!(delete_result.is_ok());
 
     // Cleanup
@@ -128,10 +122,7 @@ async fn test_capsule_templates() {
     assert_eq!(template.name(), "postgres-template");
 
     // Create capsule from template
-    let capsule = template.instantiate(
-        "postgres-instance",
-        temp_dir.path().to_str().unwrap()
-    );
+    let capsule = template.instantiate("postgres-instance", temp_dir.path().to_str().unwrap());
 
     assert!(capsule.is_ok());
     let mut capsule = capsule.unwrap();
@@ -151,12 +142,12 @@ async fn test_capsule_networking() {
     let temp_dir = TempDir::new().unwrap();
 
     // Create network
-    runtime.create_network("capsule-net", "bridge", Some("172.31.0.0/16")).await.unwrap();
+    runtime
+        .create_network("capsule-net", "bridge", Some("172.31.0.0/16"))
+        .await
+        .unwrap();
 
-    let mut capsule = Capsule::new(
-        "net-test",
-        temp_dir.path().to_str().unwrap()
-    ).unwrap();
+    let mut capsule = Capsule::new("net-test", temp_dir.path().to_str().unwrap()).unwrap();
 
     // Attach to network
     capsule.attach_network("capsule-net", Some("172.31.0.10"));
@@ -167,7 +158,10 @@ async fn test_capsule_networking() {
 
     // Verify network attachment
     assert!(capsule.networks().contains(&"capsule-net".to_string()));
-    assert_eq!(capsule.ip_address("capsule-net"), Some("172.31.0.10".to_string()));
+    assert_eq!(
+        capsule.ip_address("capsule-net"),
+        Some("172.31.0.10".to_string())
+    );
 
     // Cleanup
     capsule.stop().await.ok();
@@ -183,13 +177,15 @@ async fn test_capsule_isolation() {
     // Create two isolated capsules
     let mut capsule1 = Capsule::new(
         "isolated-1",
-        temp_dir.path().join("capsule1").to_str().unwrap()
-    ).unwrap();
+        temp_dir.path().join("capsule1").to_str().unwrap(),
+    )
+    .unwrap();
 
     let mut capsule2 = Capsule::new(
         "isolated-2",
-        temp_dir.path().join("capsule2").to_str().unwrap()
-    ).unwrap();
+        temp_dir.path().join("capsule2").to_str().unwrap(),
+    )
+    .unwrap();
 
     // Start both capsules
     capsule1.start().await.unwrap();
@@ -214,10 +210,7 @@ async fn test_capsule_migration() {
     let source_path = temp_dir.path().join("source");
     let target_path = temp_dir.path().join("target");
 
-    let mut capsule = Capsule::new(
-        "migration-test",
-        source_path.to_str().unwrap()
-    ).unwrap();
+    let mut capsule = Capsule::new("migration-test", source_path.to_str().unwrap()).unwrap();
 
     // Start capsule
     capsule.start().await.unwrap();
