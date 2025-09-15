@@ -1,7 +1,6 @@
 use clap::{Parser, Subcommand};
 
 pub mod compat;
-pub use compat::CompatArgs as CompatCommands;
 
 #[derive(Parser)]
 #[command(name = "bolt")]
@@ -119,7 +118,7 @@ pub enum Commands {
     /// Docker/Podman compatibility layer
     Compat {
         #[command(subcommand)]
-        command: CompatCommands,
+        command: compat::CompatCommands,
     },
 }
 

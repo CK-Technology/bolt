@@ -7,7 +7,9 @@ use tracing::{debug, error, info, warn};
 
 pub mod compositor;
 pub mod display;
+pub mod gpu_integration;
 pub mod input;
+pub mod kde_optimizations;
 pub mod output;
 pub mod protocols;
 

@@ -3,7 +3,7 @@ mod cli;
 use anyhow::Result;
 use bolt::{BoltConfig, BoltRuntime, gaming, network, surge};
 use clap::Parser;
-use cli::{Cli, Commands, GamingCommands, NetworkCommands, SurgeCommands};
+use cli::{Cli, Commands, GamingCommands, NetworkCommands, SurgeCommands, compat};
 use tracing::info;
 
 #[tokio::main]
@@ -185,6 +185,10 @@ async fn main() -> Result<()> {
                 network::remove_network(&name).await?;
             }
         },
+
+        Commands::Compat { command } => {
+            compat::handle_compat_command(compat::CompatArgs { command }, runtime).await?;
+        }
     }
 
     Ok(())

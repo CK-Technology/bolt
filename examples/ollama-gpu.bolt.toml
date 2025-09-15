@@ -1,0 +1,114 @@
+[metadata]
+name = "ollama-gpu-ai"
+version = "1.0.0"
+description = "High-performance Ollama AI container with GPU acceleration, optimized networking, and Velocity runtime"
+
+[services.ollama]
+# Use official Ollama image with GPU support
+image = "ollama/ollama:latest"
+workload_type = "ai"
+
+# AI-specific configuration
+[services.ollama.ai_config]
+backend = "ollama"
+model_name = "llama3.1"
+model_path = "/app/models"
+context_length = 8192
+batch_size = 4
+quantization = "fp16"
+multi_gpu = false
+enable_flash_attention = true
+enable_kv_cache = true
+
+# GPU configuration with NVIDIA Open preference
+[services.ollama.gpu]
+nvidia = { device = 0, dlss = false, raytracing = false, cuda = true }
+runtime_preference = "velocity" # Use bolt's native GPU runtime
+passthrough = false # Use integrated approach for better container isolation
+
+# Network configuration with QUIC optimization
+[services.ollama.network]
+enable_quic = true
+low_latency = true
+bandwidth_optimization = true
+# API endpoint
+ports = ["11434:11434"]
+
+# Storage configuration
+[services.ollama.storage]
+# Persistent model storage
+volumes = [
+    "/var/lib/ollama:/root/.ollama:rw",
+    "./models:/app/models:rw"
+]
+storage_driver = "bolt-native" # Use Bolt's optimized storage
+
+# Performance optimizations
+[services.ollama.runtime]
+# Use Bolt's Velocity container runtime for optimal performance
+runtime = "velocity"
+# Environment optimizations will be handled by safe environment manager
+memory_limit = "16G" # Adjust based on your GPU memory
+cpu_limit = 8
+# Enable rootless containers for security
+rootless = true
+
+# Bolt-specific optimizations
+[services.ollama.bolt]
+# Enable AI workload optimizations
+ai_optimizations = true
+# Enable zero-copy GPU memory sharing (upcoming feature)
+zero_copy_gpu = false
+# Use optimized networking stack
+bolt_networking = true
+
+# Health check for AI service
+[services.ollama.health]
+test = ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
+interval = 30
+timeout = 10
+retries = 3
+
+# Development and debugging
+[services.ollama.environment]
+# Logging level
+OLLAMA_DEBUG = "1"
+RUST_LOG = "info"
+# Host binding
+OLLAMA_HOST = "0.0.0.0:11434"
+# Performance tuning
+OLLAMA_NUM_PARALLEL = "4"
+OLLAMA_MAX_LOADED_MODELS = "2"
+OLLAMA_FLASH_ATTENTION = "1"
+
+# Optional: Web UI service
+[services.ollama-webui]
+image = "ghcr.io/open-webui/open-webui:main"
+depends_on = ["ollama"]
+
+[services.ollama-webui.network]
+ports = ["3000:8080"]
+enable_quic = true
+
+[services.ollama-webui.environment]
+OLLAMA_BASE_URL = "http://ollama:11434"
+WEBUI_AUTH = "False" # Set to True for production
+
+[services.ollama-webui.storage]
+volumes = ["./webui-data:/app/backend/data:rw"]
+
+# Network configuration
+[networks.ai-network]
+driver = "bolt-bridge"
+enable_quic = true
+enable_ebpf = true # eBPF acceleration if available
+ipv6 = true
+
+# Storage volumes
+[volumes.ollama-models]
+driver = "bolt-native"
+path = "./models"
+
+[volumes.webui-data]
+driver = "bolt-native"
+path = "./webui-data"

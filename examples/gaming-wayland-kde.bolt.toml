@@ -1,0 +1,81 @@
+[metadata]
+name = "gaming-container-wayland-kde"
+version = "1.0.0"
+description = "High-performance gaming container with Wayland, KDE optimizations, and NVIDIA Open support"
+
+[services.gaming-desktop]
+# Gaming-optimized Ubuntu with KDE
+image = "ubuntu:24.04"
+workload_type = "gaming"
+
+# Gaming configuration
+[services.gaming-desktop.gaming_config]
+game_type = "native"
+gamemode_enabled = true
+dxvk_enabled = false # For Windows games via Wine/Proton
+vkd3d_enabled = false
+vr_enabled = false
+performance_profile = "performance"
+
+# GPU configuration with NVIDIA Open preference
+[services.gaming-desktop.gpu]
+nvidia = { device = 0, dlss = true, raytracing = true, cuda = false }
+runtime_preference = "velocity"
+passthrough = false
+
+# Wayland gaming optimizations
+[services.gaming-desktop.wayland]
+desktop_environment = "kde"
+enable_vrr = true # Variable Refresh Rate
+enable_hdr = true
+enable_low_latency = true
+multi_monitor = true
+
+# Network for game downloads/multiplayer
+[services.gaming-desktop.network]
+enable_quic = true
+low_latency = true
+bandwidth_optimization = true
+
+# Storage for games and saves
+[services.gaming-desktop.storage]
+volumes = [
+    "./games:/home/gamer/Games:rw",
+    "./saves:/home/gamer/.local/share:rw",
+    "/tmp/.X11-unix:/tmp/.X11-unix:rw"
+]
+
+# Runtime optimizations
+[services.gaming-desktop.runtime]
+runtime = "velocity"
+memory_limit = "32G"
+cpu_limit = 16
+rootless = false # Gaming often requires more privileges
+privileged = true # For GPU access
+
+# Gaming-specific environment
+[services.gaming-desktop.environment]
+# Display
+DISPLAY = ":0"
+WAYLAND_DISPLAY = "wayland-0"
+XDG_SESSION_TYPE = "wayland"
+XDG_CURRENT_DESKTOP = "KDE"
+
+# Gaming optimizations (managed by safe environment manager)
+GAMEMODE = "1"
+GAMING_OPTIMIZATIONS = "1"
+
+# Audio
+PULSE_RUNTIME_PATH = "/run/user/1000/pulse"
+
+# User setup
+USER = "gamer"
+HOME = "/home/gamer"
+
+# Commands to set up gaming environment
+[services.gaming-desktop.init]
+commands = [
+    "apt update && apt install -y kde-plasma-desktop gamemode vulkan-tools",
+    "useradd -m -G audio,video,input gamer",
+    "su - gamer"
+]

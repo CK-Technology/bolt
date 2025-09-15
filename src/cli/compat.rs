@@ -1,6 +1,7 @@
-use crate::compat::{DockerApiCompat, compose::ComposeCompat, docker::DockerCompat};
-use crate::error::Result;
-use crate::runtime::BoltRuntime;
+use bolt::compat::DockerApiCompat;
+use bolt::compat::compose::ComposeCompat;
+use bolt::compat::docker::DockerCompat;
+use bolt::{BoltRuntime, Result};
 use clap::{Args, Subcommand};
 use std::fs;
 use std::path::PathBuf;

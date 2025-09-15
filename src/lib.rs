@@ -12,6 +12,7 @@ pub mod config;
 pub mod error;
 pub mod gaming;
 pub mod network;
+pub mod networking;
 pub mod runtime;
 pub mod surge;
 pub mod types;

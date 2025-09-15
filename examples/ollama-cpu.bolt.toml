@@ -1,0 +1,58 @@
+[metadata]
+name = "ollama-cpu-ai"
+version = "1.0.0"
+description = "CPU-optimized Ollama AI container with Velocity runtime"
+
+[services.ollama]
+image = "ollama/ollama:latest"
+workload_type = "ai"
+
+# AI configuration for CPU inference
+[services.ollama.ai_config]
+backend = "ollama"
+model_name = "llama3.1:8b" # Smaller model for CPU
+context_length = 4096
+batch_size = 1
+quantization = "int4" # More aggressive quantization for CPU
+multi_gpu = false
+enable_flash_attention = false # Not beneficial for CPU
+enable_kv_cache = true
+
+# Network configuration
+[services.ollama.network]
+ports = ["11434:11434"]
+enable_quic = true
+low_latency = true
+
+# Storage
+[services.ollama.storage]
+volumes = [
+    "/var/lib/ollama:/root/.ollama:rw",
+    "./models:/app/models:rw"
+]
+
+# CPU-optimized runtime
+[services.ollama.runtime]
+runtime = "velocity"
+memory_limit = "8G"
+cpu_limit = 16 # Use all available CPU cores
+rootless = true
+
+# Environment
+[services.ollama.environment]
+OLLAMA_HOST = "0.0.0.0:11434"
+OLLAMA_NUM_PARALLEL = "2" # Reduced for CPU
+OLLAMA_MAX_LOADED_MODELS = "1"
+# CPU optimizations
+OMP_NUM_THREADS = "16"
+
+# Web UI
+[services.ollama-webui]
+image = "ghcr.io/open-webui/open-webui:main"
+depends_on = ["ollama"]
+
+[services.ollama-webui.network]
+ports = ["3000:8080"]
+
+[services.ollama-webui.environment]
+OLLAMA_BASE_URL = "http://ollama:11434"

@@ -60,7 +60,9 @@ memmap2 = "0.9"
 # === PHASE 3: QUIC NETWORKING ===
 # QUIC implementation
 quinn = { version = "0.10", optional = true }
-rustls = { version = "0.21", features = ["dangerous_configuration"], optional = true }
+rustls = { version = "0.20", features = ["dangerous_configuration"], optional = true }
+rcgen = { version = "0.12", optional = true }
+ipnet = { version = "2.9", optional = true }
 # DNS and service discovery
 # trust-dns-client = "0.23"  # Use hickory-dns instead
 # trust-dns-server = "0.23"   # Use hickory-dns instead
@@ -83,7 +85,7 @@ flate2 = "1.0"
 
 # === GAMING INFRASTRUCTURE ===
 # GPU management
-# nvml-wrapper = "0.9"  # NVIDIA-specific, optional
+nvml-wrapper = { version = "0.9", optional = true }  # NVIDIA-specific, optional
 # Wayland support
 wayland-client = { version = "0.31", optional = true }
 smithay-client-toolkit = { version = "0.18", optional = true }
@@ -120,7 +122,7 @@ serde_json = "1.0"
 # Regular expressions
 regex = "1.10"
 # TLS certificate generation
-rcgen = "0.12"
+# rcgen moved to QUIC networking section
 # Random number generation
 rand = "0.8"
 # Directory utilities
@@ -131,6 +133,8 @@ aws-sdk-s3 = "1.14"
 aws-smithy-types = "1.1"
 # YAML parsing for compose files
 serde_yaml = "0.9"
+# CPU detection for container resource management
+num_cpus = "1.16"
 
 [dev-dependencies]
 tempfile = "3.8"
@@ -154,11 +158,11 @@ default = ["gaming", "quic-networking", "oci-runtime"]
 
 # Core features
 gaming = ["wayland-client", "smithay-client-toolkit"]
-quic-networking = ["quinn", "rustls"]
+quic-networking = ["quinn", "rustls", "rcgen", "ipnet"]
 oci-runtime = ["oci-spec", "nix"]
 
 # Optional GPU support
-nvidia-support = []  # Enable with nvidia-ml crate when available
+nvidia-support = ["nvml-wrapper"]  # Enable NVIDIA ML management
 amd-support = []     # Enable with ROCm support
 
 # Development features
