@@ -626,7 +626,7 @@ impl StorageManager {
         };
 
         // Test S3 connection
-        let s3_client = crate::runtime::storage::s3::S3StorageClient::new(s3_config).await
+        let _s3_client = crate::runtime::storage::s3::S3StorageClient::new(s3_config.clone()).await
             .context("Failed to initialize S3 client")?;
 
         // Create volume metadata
@@ -771,12 +771,12 @@ impl StorageManager {
         };
 
         // Initialize Ghostbay client
-        let ghostbay_client = crate::runtime::storage::ghostbay::GhostbayClient::new(ghostbay_config).await
+        let _ghostbay_client = crate::runtime::storage::ghostbay::GhostbayClient::new(ghostbay_config.clone()).await
             .context("Failed to initialize Ghostbay client")?;
 
         // Create volume with Ghostbay-specific features
         crate::runtime::storage::ghostbay::create_ghostbay_volume(
-            ghostbay_client.into(), // This would need proper conversion
+            ghostbay_config,
             &volume_info.name
         ).await.context("Failed to create Ghostbay volume")?;
 
@@ -908,6 +908,7 @@ impl StorageManager {
 
         // Calculate volumes size
         let volumes = self.list_volumes().await?;
+        let volumes_count = volumes.len() as u32;
         for volume in volumes {
             total_volumes_size += volume.size;
         }
@@ -921,7 +922,7 @@ impl StorageManager {
             volumes_size: total_volumes_size,
             layers_size: total_layers_size,
             images_count: self.images.len() as u32,
-            volumes_count: volumes.len() as u32,
+            volumes_count,
             layers_count: self.layers.len() as u32,
         })
     }
@@ -1305,9 +1306,23 @@ impl StorageManager {
             cluster_id,
             access_key,
             secret_key,
-            gaming_optimizations: true,
-            cache_enabled: true,
-            cdn_acceleration: true,
+            bucket: "default".to_string(),
+            region: Some("us-east-1".to_string()),
+            features: crate::runtime::storage::ghostbay::GhostbayFeatures {
+                container_registry: true,
+                gaming_assets: true,
+                distributed_cache: true,
+                content_deduplication: true,
+                encryption_at_rest: true,
+                multi_region: true,
+            },
+            gaming_optimizations: crate::runtime::storage::ghostbay::GhostbayGamingConfig {
+                enable_fast_downloads: true,
+                cdn_acceleration: true,
+                asset_preloading: true,
+                compression_level: 6,
+                chunk_size_mb: 64,
+            },
         };
 
         crate::runtime::storage::ghostbay::GhostbayClient::new(config).await

@@ -11,9 +11,13 @@ pub mod gaming;
 pub mod capsules;
 pub mod builds;
 pub mod error;
+pub mod types;
 
 pub use config::*;
 pub use error::{BoltError, Result};
+
+// Export main types at root level
+pub use types::{ContainerInfo, SurgeStatus, ServiceInfo, NetworkInfo};
 
 // Re-export anyhow for compatibility
 pub use anyhow;
@@ -201,35 +205,4 @@ impl Default for BoltRuntime {
     }
 }
 
-/// Container information
-#[derive(Debug, Clone)]
-pub struct ContainerInfo {
-    pub id: String,
-    pub name: String,
-    pub image: String,
-    pub status: String,
-    pub ports: Vec<String>,
-}
-
-/// Surge orchestration status
-#[derive(Debug, Clone)]
-pub struct SurgeStatus {
-    pub services: Vec<ServiceInfo>,
-    pub networks: Vec<NetworkInfo>,
-}
-
-/// Service information
-#[derive(Debug, Clone)]
-pub struct ServiceInfo {
-    pub name: String,
-    pub status: String,
-    pub replicas: u32,
-}
-
-/// Network information
-#[derive(Debug, Clone)]
-pub struct NetworkInfo {
-    pub name: String,
-    pub driver: String,
-    pub subnet: Option<String>,
-}
+// Types moved to types.rs module

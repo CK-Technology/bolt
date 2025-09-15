@@ -227,12 +227,18 @@ impl GhostbayClient {
         let gaming_optimized = self.analyze_gaming_content(local_path).await?;
 
         // Create multipart upload
+        let file_content = tokio::fs::read(local_path).await
+            .context("Failed to read image file")?;
+        let file_part = reqwest::multipart::Part::bytes(file_content)
+            .file_name(tag.clone())
+            .mime_str("application/octet-stream")
+            .context("Failed to create file part")?;
+
         let form = reqwest::multipart::Form::new()
             .text("tag", tag.clone())
             .text("gaming_optimized", gaming_optimized.to_string())
             .text("bolt_runtime", "true")
-            .file("image", local_path).await
-            .context("Failed to create multipart form")?;
+            .part("image", file_part);
 
         let response = self.client
             .post(&push_url)
@@ -381,11 +387,16 @@ impl GhostbayClient {
 
         let upload_url = format!("{}/api/v1/gaming/assets/upload", self.endpoint);
 
+        let file_content = tokio::fs::read(local_path).await?;
+        let file_part = reqwest::multipart::Part::bytes(file_content)
+            .file_name(asset_key.to_string())
+            .mime_str("application/octet-stream")?;
+
         let form = reqwest::multipart::Form::new()
             .text("key", asset_key.to_string())
             .text("gaming_optimized", "true")
             .text("compression", "true")
-            .file("asset", local_path).await?;
+            .part("asset", file_part);
 
         let response = self.client
             .post(&upload_url)

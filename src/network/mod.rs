@@ -1,4 +1,5 @@
 use crate::{Result, BoltError};
+use crate::error::RuntimeError;
 use anyhow::anyhow;
 use tracing::{info, warn, debug};
 use crate::NetworkInfo;
@@ -67,7 +68,7 @@ async fn create_bolt_network(name: &str, subnet: Option<&str>) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(BoltError::Runtime(format!("Failed to create Bolt network: {}", stderr)));
+        return Err(BoltError::Runtime(RuntimeError::StartFailed { reason: format!("Failed to create Bolt network: {}", stderr) }));
     }
 
     info!("✅ Bolt QUIC network created: {}", name);
@@ -100,7 +101,7 @@ async fn create_bridge_network(name: &str, subnet: Option<&str>) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(BoltError::Runtime(format!("Failed to create network: {}", stderr)));
+        return Err(BoltError::Runtime(RuntimeError::StartFailed { reason: format!("Failed to create network: {}", stderr) }));
     }
 
     info!("✅ Bridge network created: {}", name);
@@ -120,7 +121,7 @@ async fn create_host_network(name: &str) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(BoltError::Runtime(format!("Failed to create host network: {}", stderr)));
+        return Err(BoltError::Runtime(RuntimeError::StartFailed { reason: format!("Failed to create host network: {}", stderr) }));
     }
 
     info!("✅ Host network created: {}", name);

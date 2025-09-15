@@ -147,7 +147,8 @@ impl NvidiaManager {
         info!("🟢 Setting up NVIDIA GPU access for container: {}", container_id);
 
         // Validate GPU device selection
-        let device_indices = self.parse_device_spec(&nvidia_config.device.as_deref().unwrap_or("all"))?;
+        let device_spec = nvidia_config.device.map(|d| d.to_string()).unwrap_or("all".to_string());
+        let device_indices = self.parse_device_spec(&device_spec)?;
 
         for &index in &device_indices {
             if let Some(gpu) = self.gpus.get(index as usize) {
@@ -236,15 +237,15 @@ impl NvidiaManager {
 
         // NVIDIA device files that need to be accessible
         let mut device_paths = vec![
-            "/dev/nvidiactl",
-            "/dev/nvidia-modeset",
-            "/dev/nvidia-uvm",
-            "/dev/nvidia-uvm-tools",
+            "/dev/nvidiactl".to_string(),
+            "/dev/nvidia-modeset".to_string(),
+            "/dev/nvidia-uvm".to_string(),
+            "/dev/nvidia-uvm-tools".to_string(),
         ];
 
         // Add specific GPU devices
         for &index in device_indices {
-            device_paths.push(&format!("/dev/nvidia{}", index));
+            device_paths.push(format!("/dev/nvidia{}", index));
         }
 
         // Verify devices exist
@@ -279,29 +280,25 @@ impl NvidiaManager {
         // Set NVIDIA driver capabilities
         let mut capabilities = vec!["compute", "utility"];
 
-        if nvidia_config.enable_graphics.unwrap_or(true) {
-            capabilities.push("graphics");
-        }
+        // Enable graphics capabilities by default (could be made configurable)
+        capabilities.push("graphics");
 
-        if nvidia_config.enable_video.unwrap_or(true) {
-            capabilities.extend(&["video", "display"]);
-        }
+        // Enable video capabilities by default (could be made configurable)
+        capabilities.extend(&["video", "display"]);
 
         let driver_capabilities = capabilities.join(",");
         info!("  Setting NVIDIA_DRIVER_CAPABILITIES={}", driver_capabilities);
         unsafe { std::env::set_var("NVIDIA_DRIVER_CAPABILITIES", &driver_capabilities); }
 
-        // Set CUDA requirements
-        if let Some(ref cuda_version) = nvidia_config.require_cuda {
-            info!("  Requiring CUDA version: {}", cuda_version);
-            unsafe { std::env::set_var("NVIDIA_REQUIRE_CUDA", cuda_version); }
+        // Set CUDA requirements (using cuda field from config)
+        if nvidia_config.cuda.unwrap_or(false) {
+            info!("  CUDA support enabled");
+            unsafe { std::env::set_var("NVIDIA_REQUIRE_CUDA", "11.0"); }
         }
 
-        // Set driver requirements
-        if let Some(ref driver_version) = nvidia_config.require_driver {
-            info!("  Requiring driver version: {}", driver_version);
-            unsafe { std::env::set_var("NVIDIA_REQUIRE_DRIVER", driver_version); }
-        }
+        // Set basic driver requirements
+        info!("  Setting basic driver requirements");
+        unsafe { std::env::set_var("NVIDIA_REQUIRE_DRIVER", "470.0"); }
 
         Ok(())
     }

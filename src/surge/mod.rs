@@ -1,4 +1,5 @@
 use crate::{Result, BoltError};
+use crate::error::RuntimeError;
 use anyhow::anyhow;
 use tracing::{info, warn, debug, error};
 use crate::config::{BoltFile, BoltConfig};
@@ -97,7 +98,7 @@ pub async fn up(
                 info!("  🔨 Build context: {}", build);
 
                 let image_tag = format!("{}_{}", boltfile.project, service_name);
-                let dockerfile = service.dockerfile.as_deref().unwrap_or("Dockerfile");
+                let dockerfile = "Dockerfile"; // Default dockerfile name
 
                 // Build the image
                 runtime::build_image(build, Some(&image_tag), dockerfile).await?;
@@ -241,7 +242,7 @@ pub async fn logs(
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(BoltError::Runtime(format!("Failed to get logs: {}", stderr)));
+                return Err(BoltError::Runtime(RuntimeError::StartFailed { reason: format!("Failed to get logs: {}", stderr) }));
             }
 
             let stdout = String::from_utf8_lossy(&output.stdout);

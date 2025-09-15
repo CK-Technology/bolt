@@ -229,7 +229,7 @@ pub async fn list_containers(all: bool) -> Result<()> {
 }
 
 // API-only functions for library usage
-use crate::ContainerInfo;
+use crate::{ContainerInfo};
 
 pub async fn list_containers_info(all: bool) -> Result<Vec<ContainerInfo>> {
     info!("📋 Listing containers (all: {})", all);

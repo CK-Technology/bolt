@@ -178,9 +178,9 @@ impl AmdManager {
         info!("⚡ Setting up ROCm access");
 
         // Set ROCm environment variables
-        if let Some(ref devices) = amd_config.rocm_visible_devices {
-            info!("  Setting ROCM_VISIBLE_DEVICES={}", devices);
-            unsafe { std::env::set_var("ROCM_VISIBLE_DEVICES", devices); }
+        if let Some(device_id) = amd_config.device {
+            info!("  Setting ROCM_VISIBLE_DEVICES={}", device_id);
+            unsafe { std::env::set_var("ROCM_VISIBLE_DEVICES", device_id.to_string()); }
         }
 
         unsafe {

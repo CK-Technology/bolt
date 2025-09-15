@@ -1,7 +1,6 @@
 use crate::Result;
 use crate::config::BoltConfig;
-use crate::SurgeStatus;
-use crate::ServiceInfo;
+use crate::{SurgeStatus, ServiceInfo};
 
 // API-only functions for library usage
 pub async fn status_info(config: &BoltConfig) -> Result<SurgeStatus> {

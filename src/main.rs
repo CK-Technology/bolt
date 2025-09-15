@@ -1,17 +1,10 @@
 mod cli;
-mod config;
-mod runtime;
-mod surge;
-mod network;
-mod gaming;
-mod capsules;
-mod builds;
 
 use clap::Parser;
 use cli::{Cli, Commands, SurgeCommands, GamingCommands, NetworkCommands};
 use tracing::info;
 use anyhow::Result;
-use config::BoltConfig;
+use bolt::{BoltConfig, BoltRuntime, surge, gaming, network};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -30,42 +23,47 @@ async fn main() -> Result<()> {
     bolt_config.boltfile_path = std::path::PathBuf::from(&cli.config);
     bolt_config.verbose = cli.verbose;
 
+    let runtime = BoltRuntime::new()?;
+
     match cli.command {
         Commands::Run { image, name, ports, env, volumes, detach } => {
             info!("Running container: {}", image);
-            runtime::run_container(&image, name.as_deref(), &ports, &env, &volumes, detach).await?;
+            runtime.run_container(&image, name.as_deref(), &ports, &env, &volumes, detach).await?;
         }
 
         Commands::Build { path, tag, file } => {
             info!("Building image from: {}", path);
-            runtime::build_image(&path, tag.as_deref(), &file).await?;
+            runtime.build_image(&path, tag.as_deref(), &file).await?;
         }
 
         Commands::Pull { image } => {
             info!("Pulling image: {}", image);
-            runtime::pull_image(&image).await?;
+            runtime.pull_image(&image).await?;
         }
 
         Commands::Push { image } => {
             info!("Pushing image: {}", image);
-            runtime::push_image(&image).await?;
+            runtime.push_image(&image).await?;
         }
 
         Commands::Ps { all } => {
-            runtime::list_containers(all).await?;
+            let containers = runtime.list_containers(all).await?;
+            for container in containers {
+                println!("{}: {} ({})", container.name, container.image, container.status);
+            }
         }
 
         Commands::Stop { containers } => {
             for container in containers {
                 info!("Stopping container: {}", container);
-                runtime::stop_container(&container).await?;
+                runtime.stop_container(&container).await?;
             }
         }
 
         Commands::Rm { containers, force } => {
             for container in containers {
                 info!("Removing container: {}", container);
-                runtime::remove_container(&container, force).await?;
+                runtime.remove_container(&container, force).await?;
             }
         }
 
@@ -73,16 +71,20 @@ async fn main() -> Result<()> {
             match command {
                 SurgeCommands::Up { services, detach, force_recreate } => {
                     info!("Starting surge orchestration...");
-                    surge::up(&bolt_config, &services, detach, force_recreate).await?;
+                    runtime.surge_up(&services, detach, force_recreate).await?;
                 }
 
                 SurgeCommands::Down { services, volumes } => {
                     info!("Stopping surge services...");
-                    surge::down(&bolt_config, &services, volumes).await?;
+                    runtime.surge_down(&services, volumes).await?;
                 }
 
                 SurgeCommands::Status => {
-                    surge::status(&bolt_config).await?;
+                    let status = runtime.surge_status().await?;
+                    println!("Services: {}", status.services.len());
+                    for service in status.services {
+                        println!("  {}: {} ({})", service.name, service.status, service.replicas);
+                    }
                 }
 
                 SurgeCommands::Logs { service, follow, tail } => {
