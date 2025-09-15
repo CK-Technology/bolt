@@ -12,6 +12,7 @@ pub mod capsules;
 pub mod builds;
 pub mod error;
 pub mod types;
+pub mod compat;
 
 pub use config::*;
 pub use error::{BoltError, Result};
@@ -72,6 +73,7 @@ impl BoltFileBuilder {
 }
 
 /// Core Bolt API for container management
+#[derive(Clone)]
 pub struct BoltRuntime {
     config: BoltConfig,
 }
@@ -194,6 +196,11 @@ impl BoltRuntime {
     /// Remove a network
     pub async fn remove_network(&self, name: &str) -> Result<()> {
         network::remove_network(name).await
+    }
+
+    /// Get the runtime configuration
+    pub fn config(&self) -> &BoltConfig {
+        &self.config
     }
 }
 

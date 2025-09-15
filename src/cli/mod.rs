@@ -1,5 +1,8 @@
 use clap::{Parser, Subcommand};
 
+pub mod compat;
+pub use compat::{CompatArgs as CompatCommands};
+
 #[derive(Parser)]
 #[command(name = "bolt")]
 #[command(about = "Next-generation container runtime for Linux gaming and development")]
@@ -111,6 +114,12 @@ pub enum Commands {
     Network {
         #[command(subcommand)]
         command: NetworkCommands,
+    },
+
+    /// Docker/Podman compatibility layer
+    Compat {
+        #[command(subcommand)]
+        command: CompatCommands,
     },
 }
 

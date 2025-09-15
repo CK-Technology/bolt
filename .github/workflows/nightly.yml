@@ -1,0 +1,342 @@
+name: Nightly Build and Test
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # Run at 2 AM UTC daily
+  workflow_dispatch:
+    inputs:
+      test_gaming:
+        description: 'Run gaming tests'
+        required: false
+        default: 'true'
+      test_distributed:
+        description: 'Run distributed tests'
+        required: false
+        default: 'true'
+
+env:
+  RUST_VERSION: "nightly"
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: full
+
+jobs:
+  # Extensive testing with nightly Rust
+  nightly-test:
+    name: Nightly Rust Tests
+    runs-on: [self-hosted, linux, x64, nv-prometheus]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy, miri
+
+      - name: Run tests with all features
+        run: |
+          cargo +nightly test --all-features --release
+
+      - name: Run miri for undefined behavior detection
+        run: |
+          cargo +nightly miri setup
+          cargo +nightly miri test --lib
+
+      - name: Test with address sanitizer
+        run: |
+          RUSTFLAGS="-Z sanitizer=address" \
+          cargo +nightly test --lib --target x86_64-unknown-linux-gnu
+
+      - name: Test with thread sanitizer
+        run: |
+          RUSTFLAGS="-Z sanitizer=thread" \
+          cargo +nightly test --lib --target x86_64-unknown-linux-gnu
+
+  # Gaming and GPU stress tests
+  gaming-stress-test:
+    name: Gaming Stress Tests
+    runs-on: [self-hosted, linux, x64, nv-prometheus, gpu]
+    if: github.event.inputs.test_gaming != 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85.0"
+
+      - name: GPU stress test setup
+        run: |
+          nvidia-smi
+          # Install GPU stress testing tools
+          sudo apt-get update
+          sudo apt-get install -y mesa-utils vulkan-tools
+
+      - name: Run GPU passthrough tests
+        run: |
+          cargo test --release --features "gaming,nvidia-support" \
+            --test gpu_stress_tests -- --test-threads=1 --nocapture
+
+      - name: Test Wine/Proton integration
+        run: |
+          cargo test --release --features "gaming" \
+            --test wine_integration -- --nocapture
+
+      - name: DLSS performance test
+        run: |
+          cargo test --release --features "gaming,nvidia-support" \
+            test_dlss_performance -- --nocapture
+
+      - name: Multi-GPU test (if available)
+        run: |
+          GPU_COUNT=$(nvidia-smi --query-gpu=count --format=csv,noheader | head -n1)
+          if [ "$GPU_COUNT" -gt 1 ]; then
+            cargo test --release --features "gaming,nvidia-support" \
+              test_multi_gpu -- --nocapture
+          fi
+
+  # QUIC networking performance tests
+  quic-performance:
+    name: QUIC Performance Tests
+    runs-on: [self-hosted, linux, x64, nv-prometheus]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85.0"
+
+      - name: Install network testing tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iperf3 netperf tcpdump
+
+      - name: Run QUIC benchmarks
+        run: |
+          cargo bench --features "quic-networking" \
+            --bench quic_benchmarks -- --save-baseline nightly
+
+      - name: Latency tests
+        run: |
+          cargo test --release --features "quic-networking" \
+            --test network_latency -- --nocapture
+
+      - name: Throughput tests
+        run: |
+          cargo test --release --features "quic-networking" \
+            --test network_throughput -- --nocapture
+
+      - name: Compare with TCP performance
+        run: |
+          cargo test --release --features "quic-networking" \
+            --test quic_vs_tcp -- --nocapture
+
+  # Distributed orchestration tests
+  distributed-tests:
+    name: Distributed Orchestration Tests
+    runs-on: [self-hosted, linux, x64, nv-prometheus]
+    if: github.event.inputs.test_distributed != 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85.0"
+
+      - name: Setup multi-node test environment
+        run: |
+          # Create virtual network for testing
+          docker network create bolt-test-net || true
+
+          # Start test nodes
+          for i in {1..3}; do
+            docker run -d --name bolt-node-$i \
+              --network bolt-test-net \
+              -v $PWD:/workspace \
+              ubuntu:22.04 sleep infinity
+          done
+
+      - name: Run distributed tests
+        run: |
+          cargo test --release --features "oci-runtime,quic-networking" \
+            --test distributed_tests -- --test-threads=1 --nocapture
+
+      - name: Test node failure recovery
+        run: |
+          cargo test --release --test failover_tests -- --nocapture
+
+      - name: Cleanup test environment
+        if: always()
+        run: |
+          for i in {1..3}; do
+            docker stop bolt-node-$i || true
+            docker rm bolt-node-$i || true
+          done
+          docker network rm bolt-test-net || true
+
+  # Memory and resource leak detection
+  memory-leak-test:
+    name: Memory Leak Detection
+    runs-on: [self-hosted, linux, x64, nv-prometheus]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85.0"
+
+      - name: Install valgrind
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y valgrind
+
+      - name: Build debug binary
+        run: |
+          cargo build --features "oci-runtime,quic-networking,gaming"
+
+      - name: Run valgrind memory check
+        run: |
+          valgrind --leak-check=full \
+                   --show-leak-kinds=all \
+                   --track-origins=yes \
+                   --verbose \
+                   --log-file=valgrind-report.txt \
+                   target/debug/bolt --help
+
+      - name: Check for memory leaks
+        run: |
+          if grep -q "definitely lost" valgrind-report.txt; then
+            echo "Memory leaks detected!"
+            cat valgrind-report.txt
+            exit 1
+          fi
+
+      - name: Upload valgrind report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: valgrind-report
+          path: valgrind-report.txt
+
+  # Fuzzing tests
+  fuzz-testing:
+    name: Fuzz Testing
+    runs-on: [self-hosted, linux, x64, nv-prometheus]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Run fuzz tests
+        run: |
+          cd fuzz
+          cargo +nightly fuzz run parser -- -max_total_time=300
+          cargo +nightly fuzz run network -- -max_total_time=300
+          cargo +nightly fuzz run config -- -max_total_time=300
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: fuzz-crashes
+          path: fuzz/artifacts
+
+  # Long-running stability test
+  stability-test:
+    name: 24-Hour Stability Test
+    runs-on: [self-hosted, linux, x64, nv-prometheus]
+    if: github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85.0"
+
+      - name: Build release binary
+        run: |
+          cargo build --release --features "oci-runtime,quic-networking,gaming,nvidia-support"
+
+      - name: Start long-running test
+        run: |
+          # Start Bolt with test workload
+          ./scripts/stability-test.sh &
+          TEST_PID=$!
+
+          # Monitor for 24 hours
+          for i in {1..1440}; do
+            if ! kill -0 $TEST_PID 2>/dev/null; then
+              echo "Process crashed after $i minutes"
+              exit 1
+            fi
+
+            # Check memory usage
+            RSS=$(ps -o rss= -p $TEST_PID)
+            echo "Minute $i: RSS=${RSS}KB"
+
+            # Check for goroutine/thread leaks
+            THREADS=$(ls /proc/$TEST_PID/task | wc -l)
+            echo "Threads: $THREADS"
+
+            if [ "$THREADS" -gt 1000 ]; then
+              echo "Thread leak detected!"
+              exit 1
+            fi
+
+            sleep 60
+          done
+
+          # Stop test
+          kill $TEST_PID
+
+      - name: Analyze results
+        run: |
+          ./scripts/analyze-stability-test.sh
+
+  # Report generation
+  generate-report:
+    name: Generate Nightly Report
+    needs: [nightly-test, gaming-stress-test, quic-performance, distributed-tests, memory-leak-test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+
+      - name: Generate report
+        run: |
+          echo "# Nightly Build Report" > nightly-report.md
+          echo "Date: $(date)" >> nightly-report.md
+          echo "Commit: ${{ github.sha }}" >> nightly-report.md
+          echo "" >> nightly-report.md
+
+          # Add test results
+          for artifact in */; do
+            echo "## ${artifact%/}" >> nightly-report.md
+            if [ -f "$artifact/test-report.html" ]; then
+              echo "✅ Tests passed" >> nightly-report.md
+            fi
+          done
+
+      - name: Upload report
+        uses: actions/upload-artifact@v3
+        with:
+          name: nightly-report
+          path: nightly-report.md
+
+      - name: Send notification
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          text: 'Nightly build failed! Check the report for details.'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}

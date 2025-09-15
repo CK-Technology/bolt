@@ -1,0 +1,354 @@
+name: Bolt CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 0 * * *'  # Daily builds
+
+env:
+  RUST_VERSION: "1.85.0"
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Basic checks that run on GitHub-hosted runners
+  lint-and-format:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Check documentation
+        run: cargo doc --no-deps --all-features
+
+  # Unit tests on GitHub-hosted runners
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust: [stable, beta, nightly]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.rust }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libssl-dev \
+            pkg-config \
+            libsystemd-dev \
+            libudev-dev
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run unit tests
+        run: |
+          cargo test --lib --bins --features "oci-runtime"
+          cargo test --doc
+
+      - name: Generate test report
+        if: always()
+        run: |
+          cargo install cargo-test-report
+          cargo test --lib --bins --message-format=json | cargo-test-report > test-report.html
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-report-${{ matrix.rust }}
+          path: test-report.html
+
+  # Integration tests on self-hosted runner
+  integration-tests:
+    name: Integration Tests
+    runs-on: [self-hosted, linux, x64, nv-prometheus]
+    needs: [lint-and-format, unit-tests]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Setup test environment
+        run: |
+          # Create test directories
+          mkdir -p /tmp/bolt-test/{data,config,capsules}
+
+          # Check GPU availability
+          nvidia-smi || echo "No NVIDIA GPU detected"
+
+      - name: Run integration tests
+        run: |
+          cargo test --test '*' --features "oci-runtime,quic-networking"
+
+      - name: Run Surge orchestration tests
+        run: |
+          cargo test --test surge_tests --features "oci-runtime"
+
+      - name: Run capsule tests
+        run: |
+          cargo test --test capsule_tests --features "oci-runtime"
+
+      - name: Cleanup test environment
+        if: always()
+        run: |
+          rm -rf /tmp/bolt-test
+          docker system prune -f || true
+
+  # GPU tests on self-hosted runner with RTX 3070
+  gpu-tests:
+    name: GPU and Gaming Tests
+    runs-on: [self-hosted, linux, x64, nv-prometheus, gpu]
+    needs: [lint-and-format, unit-tests]
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Verify GPU
+        run: |
+          nvidia-smi
+          echo "CUDA Version: $(nvidia-smi | grep "CUDA Version" | awk '{print $9}')"
+          echo "Driver Version: $(nvidia-smi | grep "Driver Version" | awk '{print $3}')"
+
+      - name: Run GPU tests
+        run: |
+          cargo test --test '*' --features "gaming,nvidia-support" -- --nocapture
+
+      - name: Test GPU passthrough
+        run: |
+          cargo test test_gaming_setup --features "gaming,nvidia-support"
+
+      - name: Test DLSS and Raytracing configs
+        run: |
+          cargo test test_gaming_config --features "gaming,nvidia-support"
+
+      - name: Benchmark GPU operations
+        run: |
+          cargo bench --features "gaming,nvidia-support" -- --save-baseline gpu-baseline
+
+  # Performance benchmarks on self-hosted runner
+  benchmarks:
+    name: Performance Benchmarks
+    runs-on: [self-hosted, linux, x64, nv-prometheus]
+    needs: [integration-tests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Install benchmark tools
+        run: |
+          cargo install cargo-criterion
+          cargo install cargo-flamegraph
+
+      - name: Run benchmarks
+        run: |
+          cargo bench --features "oci-runtime,quic-networking,gaming" -- --save-baseline main
+
+      - name: Generate flamegraph
+        run: |
+          sudo cargo flamegraph --bench '*' --features "oci-runtime,quic-networking" -- --bench
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v3
+        with:
+          name: benchmark-results
+          path: |
+            target/criterion
+            flamegraph.svg
+
+  # Security audit
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run security audit
+        run: cargo audit
+
+      - name: Check for known vulnerabilities
+        run: cargo audit --deny warnings
+
+  # Build release artifacts
+  build-release:
+    name: Build Release Artifacts
+    needs: [integration-tests, gpu-tests, security-audit]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, x64, nv-prometheus]
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: ${{ matrix.target }}
+
+      - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Build release binary
+        run: |
+          cargo build --release --target ${{ matrix.target }} \
+            --features "oci-runtime,quic-networking,gaming,nvidia-support,amd-support"
+
+      - name: Strip binary
+        run: |
+          strip target/${{ matrix.target }}/release/bolt
+
+      - name: Create archive
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf bolt-${{ matrix.target }}.tar.gz bolt
+          sha256sum bolt-${{ matrix.target }}.tar.gz > bolt-${{ matrix.target }}.tar.gz.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: bolt-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/bolt-${{ matrix.target }}.tar.gz
+            target/${{ matrix.target }}/release/bolt-${{ matrix.target }}.tar.gz.sha256
+
+  # Container image build
+  container-build:
+    name: Build Container Image
+    needs: [build-release]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, x64, nv-prometheus]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push container image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache,mode=max
+
+  # Deploy documentation
+  deploy-docs:
+    name: Deploy Documentation
+    needs: [build-release]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Build documentation
+        run: |
+          cargo doc --no-deps --all-features
+          echo '<meta http-equiv="refresh" content="0; url=bolt/index.html">' > target/doc/index.html
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        if: github.ref == 'refs/heads/main'
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./target/doc
+
+  # Notification on completion
+  notify:
+    name: Notify Build Status
+    needs: [build-release, container-build, deploy-docs]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send notification
+        uses: 8398a7/action-slack@v3
+        if: always()
+        with:
+          status: ${{ job.status }}
+          text: |
+            Bolt CI/CD Pipeline ${{ job.status }}
+            Commit: ${{ github.sha }}
+            Author: ${{ github.actor }}
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
