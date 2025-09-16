@@ -37,6 +37,14 @@ Together, they deliver a **fast, secure, and declarative alternative** to Docker
 
 ---
 
+## Install
+
+```bash
+curl -fsSL https://bolt.cktech.org | bash
+```
+
+---
+
 ## Why Bolt?
 
 Containers today are fragmented:  
