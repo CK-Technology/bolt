@@ -5,6 +5,7 @@
 
 #![recursion_limit = "512"]
 
+pub mod ai;
 pub mod builds;
 pub mod capsules;
 pub mod compat;
@@ -13,6 +14,10 @@ pub mod error;
 pub mod gaming;
 pub mod network;
 pub mod networking;
+pub mod optimizations;
+pub mod plugins;
+pub mod profiles;
+pub mod registry;
 pub mod runtime;
 pub mod surge;
 pub mod types;

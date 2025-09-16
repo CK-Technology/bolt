@@ -87,8 +87,12 @@ pub struct GpuConfig {
 pub struct NvidiaConfig {
     pub device: Option<u32>,
     pub dlss: Option<bool>,
+    pub reflex: Option<bool>,
     pub raytracing: Option<bool>,
     pub cuda: Option<bool>,
+    pub power_limit: Option<u32>,
+    pub memory_clock_offset: Option<i32>,
+    pub core_clock_offset: Option<i32>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -462,6 +466,38 @@ impl BoltFile {
                         service_name,
                         nvidia.device.unwrap()
                     );
+                }
+
+                // Validate power limit
+                if let Some(power_limit) = nvidia.power_limit {
+                    if power_limit > 150 {
+                        return Err(anyhow!(
+                            "Service '{}': NVIDIA power limit {}% exceeds maximum (150%)",
+                            service_name,
+                            power_limit
+                        ));
+                    }
+                }
+
+                // Validate clock offsets
+                if let Some(memory_offset) = nvidia.memory_clock_offset {
+                    if memory_offset.abs() > 2000 {
+                        return Err(anyhow!(
+                            "Service '{}': NVIDIA memory clock offset {} MHz is too extreme (max ±2000 MHz)",
+                            service_name,
+                            memory_offset
+                        ));
+                    }
+                }
+
+                if let Some(core_offset) = nvidia.core_clock_offset {
+                    if core_offset.abs() > 1000 {
+                        return Err(anyhow!(
+                            "Service '{}': NVIDIA core clock offset {} MHz is too extreme (max ±1000 MHz)",
+                            service_name,
+                            core_offset
+                        ));
+                    }
                 }
             }
 
@@ -867,8 +903,12 @@ pub fn create_example_boltfile() -> BoltFile {
                     nvidia: Some(NvidiaConfig {
                         device: Some(0),
                         dlss: Some(true),
+                        reflex: Some(false),
                         raytracing: Some(true),
                         cuda: Some(false),
+                        power_limit: Some(100),
+                        memory_clock_offset: Some(0),
+                        core_clock_offset: Some(0),
                     }),
                     amd: None,
                     passthrough: Some(true),

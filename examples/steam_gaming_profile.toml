@@ -1,0 +1,56 @@
+# Steam Gaming Profile Example
+# Optimized for Steam gaming with NVIDIA GPU, DLSS, and Reflex support
+
+project = "steam-gaming-demo"
+
+[profiles.steam-gaming]
+gpu.nvidia.dlss = true
+gpu.nvidia.reflex = true
+network.priority = "gaming"
+
+[services.steam]
+image = "bolt://steam:latest"
+ports = ["27015:27015/udp"]  # Steam client port
+
+[services.steam.gaming]
+[services.steam.gaming.gpu]
+passthrough = true
+
+[services.steam.gaming.gpu.nvidia]
+device = 0
+dlss = true
+reflex = true
+raytracing = true
+power_limit = 100
+memory_clock_offset = 500
+core_clock_offset = 100
+
+[services.steam.gaming.audio]
+system = "pipewire"
+latency = "low"
+
+[services.steam.gaming.performance]
+cpu_governor = "performance"
+nice_level = -10
+rt_priority = 10
+
+[services.game-launcher]
+image = "bolt://ghostforge:latest"
+volumes = [
+    "~/.local/share/Steam:/home/user/.steam",
+    "/dev/dri:/dev/dri"
+]
+environment = { "DISPLAY" = ":0" }
+
+[services.game-launcher.gaming]
+[services.game-launcher.gaming.gpu]
+passthrough = true
+
+[services.game-launcher.gaming.gpu.nvidia]
+device = 0
+dlss = true
+reflex = true
+
+[networks.gaming]
+driver = "bolt"
+subnet = "10.5.0.0/16"

@@ -135,6 +135,14 @@ aws-smithy-types = "1.1"
 serde_yaml = "0.9"
 # CPU detection for container resource management
 num_cpus = "1.16"
+# Plugin system
+libloading = "0.8"
+# Hash computation for plugin verification
+hex = "0.4"
+# Async trait support for plugins
+async-trait = "0.1"
+# UUID generation for examples
+uuid = { version = "1.8", features = ["v4"] }
 
 [dev-dependencies]
 tempfile = "3.8"
