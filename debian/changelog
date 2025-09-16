@@ -1,0 +1,14 @@
+bolt (0.1.0-1) unstable; urgency=medium
+
+  * Initial release of Bolt container runtime
+  * Gaming optimizations with GPU passthrough support
+  * QUIC networking for faster container communication
+  * Native Wayland support for GUI applications
+  * OCI compatibility for existing container workflows
+  * Memory safety and performance through Rust
+  * Systemd integration with proper service management
+  * Comprehensive configuration system
+  * Support for NVIDIA and AMD GPU acceleration
+  * Rootless and rootful container execution modes
+
+ -- CK Technology <ghostkellz@proton.me>  Mon, 16 Sep 2024 12:00:00 +0000

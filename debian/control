@@ -1,0 +1,53 @@
+Source: bolt
+Section: utils
+Priority: optional
+Maintainer: CK Technology <ghostkellz@proton.me>
+Build-Depends: debhelper-compat (= 13),
+               cargo,
+               rustc (>= 1.85),
+               pkg-config,
+               libwayland-dev,
+               libxkbcommon-dev,
+               libxcb1-dev,
+               git
+Standards-Version: 4.6.2
+Homepage: https://github.com/CK-Technology/bolt
+Vcs-Git: https://github.com/CK-Technology/bolt.git
+Vcs-Browser: https://github.com/CK-Technology/bolt
+Rules-Requires-Root: no
+
+Package: bolt
+Architecture: amd64 arm64
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         systemd,
+         libwayland-client0,
+         libxkbcommon0,
+         libxcb1
+Recommends: nvidia-utils,
+            vulkan-tools
+Suggests: docker.io,
+          podman
+Provides: container-runtime
+Description: Next-generation Rust container runtime with gaming optimizations
+ Bolt is a modern container runtime written in Rust that provides:
+ .
+  * Gaming optimizations with GPU passthrough support
+  * QUIC networking for faster container communication
+  * Native Wayland support for GUI applications
+  * OCI compatibility for existing container workflows
+  * Memory safety and performance through Rust
+ .
+ Designed for both traditional server workloads and gaming/desktop
+ applications requiring hardware acceleration and low-latency networking.
+
+Package: bolt-dev
+Architecture: amd64 arm64
+Depends: bolt (= ${binary:Version}),
+         ${misc:Depends}
+Description: Development files for Bolt container runtime
+ Development headers and libraries for building applications
+ that integrate with the Bolt container runtime.
+ .
+ This package contains static libraries and header files needed
+ for developing plugins and extensions for Bolt.

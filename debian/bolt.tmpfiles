@@ -1,0 +1,6 @@
+#Type Path Mode UID GID Age Argument
+d /var/lib/bolt 0755 bolt bolt -
+d /run/bolt 0755 bolt bolt -
+d /tmp/bolt 0755 bolt bolt -
+d /etc/bolt/certs 0700 bolt bolt -
+f /var/log/bolt.log 0644 bolt bolt -

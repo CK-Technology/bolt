@@ -1,0 +1,28 @@
+pkgbase = bolt
+	pkgdesc = Next-generation Rust container runtime with gaming optimizations, GPU passthrough, and QUIC networking
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/CK-Technology/bolt
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = rust
+	makedepends = cargo
+	makedepends = git
+	depends = glibc
+	depends = gcc-libs
+	depends = systemd
+	depends = wayland
+	depends = libxkbcommon
+	depends = libxcb
+	optdepends = nvidia-utils: NVIDIA GPU support
+	optdepends = vulkan-driver: Vulkan graphics support
+	optdepends = docker: Docker compatibility layer
+	optdepends = podman: Podman compatibility
+	provides = container-runtime
+	conflicts = bolt-git
+	backup = etc/bolt/bolt.toml
+	source = git+https://github.com/CK-Technology/bolt.git#tag=v0.1.0
+	sha256sums = SKIP
+
+pkgname = bolt

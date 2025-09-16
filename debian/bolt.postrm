@@ -1,0 +1,33 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    purge)
+        # Remove system user and group
+        if getent passwd bolt >/dev/null; then
+            userdel bolt || true
+        fi
+
+        if getent group bolt >/dev/null; then
+            groupdel bolt || true
+        fi
+
+        # Remove data directories (ask user first in maintainer scripts)
+        echo "Bolt has been removed."
+        echo ""
+        echo "To completely clean up (WARNING: This will delete all container data):"
+        echo "  sudo rm -rf /var/lib/bolt"
+        echo "  sudo rm -rf /etc/bolt"
+        echo ""
+        echo "Note: Your container data is preserved in /var/lib/bolt"
+        ;;
+
+    remove)
+        # Reload systemd after removing service files
+        systemctl --system daemon-reload >/dev/null || true
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

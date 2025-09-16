@@ -1,0 +1,23 @@
+{
+  "name": "bolt-deployment",
+  "version": "0.1.0",
+  "description": "Deployment scripts for Bolt container runtime",
+  "private": true,
+  "scripts": {
+    "deploy": "node surge-deploy.js",
+    "deploy:build": "node surge-deploy.js --build",
+    "deploy:surge": "node surge-deploy.js --deploy",
+    "setup": "npm install -g surge"
+  },
+  "keywords": [
+    "bolt",
+    "container",
+    "deployment",
+    "surge"
+  ],
+  "author": "CK Technology",
+  "license": "MIT",
+  "devDependencies": {
+    "surge": "^0.23.1"
+  }
+}

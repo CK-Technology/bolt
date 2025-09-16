@@ -1,0 +1,84 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+
+# Rust build configuration
+export CARGO_HOME = $(CURDIR)/debian/cargo_home
+export RUSTUP_TOOLCHAIN = stable
+
+# Build flags
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+export DEB_LDFLAGS_MAINT_APPEND = -Wl,--as-needed
+
+# Enable all Bolt features for Debian package
+BOLT_FEATURES = gaming,quic-networking,oci-runtime,nvidia-support
+
+%:
+	dh $@
+
+override_dh_auto_clean:
+	cargo clean || true
+	rm -rf $(CARGO_HOME)
+	dh_auto_clean
+
+override_dh_auto_configure:
+	# Create cargo home directory
+	mkdir -p $(CARGO_HOME)
+
+	# Configure Rust toolchain
+	rustup default stable
+
+	# Update dependencies
+	cargo fetch --locked
+
+override_dh_auto_build:
+	# Build the binary with release optimizations
+	cargo build \
+		--release \
+		--frozen \
+		--features "$(BOLT_FEATURES)"
+
+override_dh_auto_test:
+	# Run unit tests (skip integration tests that need root)
+	cargo test \
+		--frozen \
+		--release \
+		--features "$(BOLT_FEATURES)" \
+		--lib
+
+override_dh_auto_install:
+	# Install the main binary
+	install -D -m755 target/release/bolt \
+		$(CURDIR)/debian/bolt/usr/bin/bolt
+
+	# Install systemd service file
+	install -D -m644 debian/bolt.service \
+		$(CURDIR)/debian/bolt/lib/systemd/system/bolt.service
+
+	# Install default configuration
+	install -D -m644 debian/bolt.toml \
+		$(CURDIR)/debian/bolt/etc/bolt/bolt.toml
+
+	# Install sysusers configuration
+	install -D -m644 debian/bolt.sysusers \
+		$(CURDIR)/debian/bolt/usr/lib/sysusers.d/bolt.conf
+
+	# Install tmpfiles configuration
+	install -D -m644 debian/bolt.tmpfiles \
+		$(CURDIR)/debian/bolt/usr/lib/tmpfiles.d/bolt.conf
+
+	# Install documentation
+	install -D -m644 README.md \
+		$(CURDIR)/debian/bolt/usr/share/doc/bolt/README.md
+
+	# Install examples if they exist
+	if [ -d examples ]; then \
+		cp -r examples $(CURDIR)/debian/bolt/usr/share/doc/bolt/; \
+	fi
+
+override_dh_installsystemd:
+	dh_installsystemd --name=bolt --no-start --no-enable
+
+override_dh_strip:
+	# Strip debug symbols but keep some for debugging packages
+	dh_strip --dbg-package=bolt-dbg

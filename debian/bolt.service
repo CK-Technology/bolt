@@ -1,0 +1,28 @@
+[Unit]
+Description=Bolt Container Runtime
+Documentation=https://github.com/CK-Technology/bolt
+After=network.target
+Wants=network.target
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/bolt daemon
+ExecReload=/bin/kill -s HUP $MAINPID
+TimeoutStopSec=0
+KillMode=process
+Restart=on-failure
+RestartSec=5
+Delegate=yes
+LimitNOFILE=1048576
+LimitNPROC=1048576
+LimitCORE=infinity
+TasksMax=infinity
+
+# Security settings
+NoNewPrivileges=false
+PrivateTmp=false
+ProtectHome=false
+ProtectSystem=false
+
+[Install]
+WantedBy=multi-user.target

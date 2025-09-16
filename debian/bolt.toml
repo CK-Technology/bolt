@@ -1,0 +1,29 @@
+# Bolt Container Runtime Configuration
+
+[runtime]
+# Container runtime settings
+root = "/var/lib/bolt"
+state = "/run/bolt"
+temp = "/tmp/bolt"
+
+[networking]
+# QUIC networking configuration
+enable_quic = true
+bind_address = "0.0.0.0:7878"
+certificate_path = "/etc/bolt/certs"
+
+[gaming]
+# Gaming optimizations
+gpu_passthrough = true
+wayland_support = true
+audio_passthrough = true
+
+[security]
+# Security settings
+enable_seccomp = true
+enable_selinux = true
+rootless_mode = false
+
+[logging]
+level = "info"
+file = "/var/log/bolt.log"

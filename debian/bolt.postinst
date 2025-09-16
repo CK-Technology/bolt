@@ -1,0 +1,45 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        # Create system user and group
+        systemctl --system daemon-reload >/dev/null || true
+        systemd-sysusers bolt.conf >/dev/null 2>&1 || true
+        systemd-tmpfiles --create bolt.conf >/dev/null 2>&1 || true
+
+        # Set up directory permissions
+        if [ -d /var/lib/bolt ]; then
+            chown bolt:bolt /var/lib/bolt
+            chmod 755 /var/lib/bolt
+        fi
+
+        if [ -d /etc/bolt ]; then
+            chown root:bolt /etc/bolt
+            chmod 755 /etc/bolt
+        fi
+
+        if [ -d /etc/bolt/certs ]; then
+            chown bolt:bolt /etc/bolt/certs
+            chmod 700 /etc/bolt/certs
+        fi
+
+        echo "Bolt container runtime has been installed."
+        echo ""
+        echo "To start using Bolt:"
+        echo "  1. Enable and start the service:"
+        echo "     sudo systemctl enable --now bolt"
+        echo ""
+        echo "  2. Add your user to the bolt group (optional, for rootless mode):"
+        echo "     sudo usermod -aG bolt \$USER"
+        echo ""
+        echo "  3. Configure bolt in /etc/bolt/bolt.toml"
+        echo ""
+        echo "For GPU support, ensure you have the appropriate drivers installed."
+        echo "Documentation: https://github.com/CK-Technology/bolt"
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0
