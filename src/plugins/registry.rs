@@ -50,7 +50,8 @@ impl PluginRegistry {
     }
 
     pub async fn sync(&mut self) -> Result<()> {
-        for source in &self.sources {
+        let sources = self.sources.clone();
+        for source in &sources {
             self.sync_source(source).await?;
         }
         Ok(())
@@ -126,7 +127,10 @@ impl PluginRegistry {
         let archive_path = plugin_dir.join("plugin.tar.gz");
 
         let file_bytes = tokio::fs::read(&archive_path).await?;
-        let calculated_checksum = sha2::Sha256::digest(&file_bytes);
+        use sha2::Digest;
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(&file_bytes);
+        let calculated_checksum = hasher.finalize();
         let calculated_hex = hex::encode(calculated_checksum);
 
         if calculated_hex != entry.checksum {

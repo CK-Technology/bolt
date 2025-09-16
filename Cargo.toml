@@ -141,8 +141,7 @@ libloading = "0.8"
 hex = "0.4"
 # Async trait support for plugins
 async-trait = "0.1"
-# UUID generation for examples
-uuid = { version = "1.8", features = ["v4"] }
+# UUID generation for examples - removed duplicate, already defined above
 
 [dev-dependencies]
 tempfile = "3.8"

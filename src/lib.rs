@@ -21,6 +21,8 @@ pub mod registry;
 pub mod runtime;
 pub mod surge;
 pub mod types;
+pub mod nova_api;
+pub mod nova_bridge;
 
 pub use config::*;
 pub use error::{BoltError, Result};
@@ -35,6 +37,8 @@ pub use anyhow;
 pub mod api {
     pub use crate::config::{BoltConfig, BoltFile, GamingConfig, Service, create_example_boltfile};
     pub use crate::{BoltRuntime, ContainerInfo, NetworkInfo, ServiceInfo, SurgeStatus};
+    pub use crate::nova_api::{BoltNovaRuntime, NovaContainerConfig, NovaStatus, CapsuleMetrics, CapsuleHandle};
+    pub use crate::nova_bridge::{NovaBridgeManager, NovaBridgeConfig, NovaServiceDiscovery, ServiceEntry};
 }
 
 /// Builder for creating Boltfiles programmatically
