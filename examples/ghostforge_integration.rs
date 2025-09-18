@@ -1,11 +1,11 @@
 use anyhow::Result;
 use bolt::{
     BoltRuntime,
+    ai::{AiOptimizer, ModelSize},
     config::{GamingConfig, GpuConfig, NvidiaConfig},
     gaming::GameLauncher,
     optimizations::{OptimizationManager, OptimizationProfile},
     plugins::PluginManager,
-    ai::{AiOptimizer, ModelSize},
 };
 use std::sync::Arc;
 
@@ -98,26 +98,30 @@ async fn launch_steam_game(
         },
     };
 
-    optimization_manager.apply_profile("competitive-gaming", &context).await?;
+    optimization_manager
+        .apply_profile("competitive-gaming", &context)
+        .await?;
 
     // Launch Steam container with optimizations
-    runtime.run_container(
-        "steam:latest",
-        Some("steam-cs2"),
-        &["27015:27015/udp"], // Steam client port
-        &[
-            "DISPLAY=:0",
-            "NVIDIA_VISIBLE_DEVICES=all",
-            "NVIDIA_DRIVER_CAPABILITIES=all",
-            "__GL_YIELD=USLEEP", // NVIDIA Reflex
-        ],
-        &[
-            "~/.local/share/Steam:/home/steam/.steam",
-            "/tmp/.X11-unix:/tmp/.X11-unix",
-            "/dev/dri:/dev/dri",
-        ],
-        false,
-    ).await?;
+    runtime
+        .run_container(
+            "steam:latest",
+            Some("steam-cs2"),
+            &["27015:27015/udp"], // Steam client port
+            &[
+                "DISPLAY=:0",
+                "NVIDIA_VISIBLE_DEVICES=all",
+                "NVIDIA_DRIVER_CAPABILITIES=all",
+                "__GL_YIELD=USLEEP", // NVIDIA Reflex
+            ],
+            &[
+                "~/.local/share/Steam:/home/steam/.steam",
+                "/tmp/.X11-unix:/tmp/.X11-unix",
+                "/dev/dri:/dev/dri",
+            ],
+            false,
+        )
+        .await?;
 
     println!("   ✅ Counter-Strike 2 launched with competitive optimizations");
     Ok(())
@@ -175,27 +179,31 @@ async fn launch_battlenet_game(
         },
     };
 
-    optimization_manager.apply_profile("steam-gaming", &context).await?;
+    optimization_manager
+        .apply_profile("steam-gaming", &context)
+        .await?;
 
     // Launch Battle.net container with Wine
-    runtime.run_container(
-        "bolt://battlenet:wine-8.0",
-        Some("battlenet-diablo4"),
-        &["1119:1119", "6881-6999:6881-6999"], // Battle.net ports
-        &[
-            "DISPLAY=:0",
-            "NVIDIA_VISIBLE_DEVICES=all",
-            "WINEPREFIX=/home/user/.wine-diablo4",
-            "WINEARCH=win64",
-            "WINE_CPU_TOPOLOGY=4:2", // Optimize CPU topology for game
-        ],
-        &[
-            "~/.wine-diablo4:/home/user/.wine-diablo4",
-            "/tmp/.X11-unix:/tmp/.X11-unix",
-            "/dev/dri:/dev/dri",
-        ],
-        false,
-    ).await?;
+    runtime
+        .run_container(
+            "bolt://battlenet:wine-8.0",
+            Some("battlenet-diablo4"),
+            &["1119:1119", "6881-6999:6881-6999"], // Battle.net ports
+            &[
+                "DISPLAY=:0",
+                "NVIDIA_VISIBLE_DEVICES=all",
+                "WINEPREFIX=/home/user/.wine-diablo4",
+                "WINEARCH=win64",
+                "WINE_CPU_TOPOLOGY=4:2", // Optimize CPU topology for game
+            ],
+            &[
+                "~/.wine-diablo4:/home/user/.wine-diablo4",
+                "/tmp/.X11-unix:/tmp/.X11-unix",
+                "/dev/dri:/dev/dri",
+            ],
+            false,
+        )
+        .await?;
 
     println!("   ✅ Diablo 4 launched with DLSS and Reflex enabled");
     Ok(())
@@ -220,48 +228,53 @@ async fn launch_ollama_workload(runtime: &BoltRuntime) -> Result<()> {
     let env_refs: Vec<&str> = env_vec.iter().map(|s| s.as_str()).collect();
 
     // Launch Ollama container with AI optimizations
-    runtime.run_container(
-        "ollama/ollama:latest",
-        Some("ollama-llama3-70b"),
-        &["11434:11434"],
-        &env_refs,
-        &[
-            "ollama_models:/root/.ollama",
-            "/dev/nvidia0:/dev/nvidia0",
-            "/dev/nvidiactl:/dev/nvidiactl",
-            "/dev/nvidia-uvm:/dev/nvidia-uvm",
-        ],
-        false,
-    ).await?;
+    runtime
+        .run_container(
+            "ollama/ollama:latest",
+            Some("ollama-llama3-70b"),
+            &["11434:11434"],
+            &env_refs,
+            &[
+                "ollama_models:/root/.ollama",
+                "/dev/nvidia0:/dev/nvidia0",
+                "/dev/nvidiactl:/dev/nvidiactl",
+                "/dev/nvidia-uvm:/dev/nvidia-uvm",
+            ],
+            false,
+        )
+        .await?;
 
     println!("   ✅ Ollama launched with optimizations for Llama 3 70B");
 
     // Demonstrate model pulling and optimization
     println!("   📥 Pulling Llama 3 model...");
     let ollama_manager = bolt::ai::ollama::OllamaManager::new(None);
-    let optimization_profile = ollama_manager.create_optimization_profile("llama3:70b").await?;
+    let optimization_profile = ollama_manager
+        .create_optimization_profile("llama3:70b")
+        .await?;
 
     println!("   📊 Optimization Profile:");
     println!("       GPU Layers: {}", optimization_profile.gpu_layers);
-    println!("       Context Length: {}", optimization_profile.context_length);
+    println!(
+        "       Context Length: {}",
+        optimization_profile.context_length
+    );
     println!("       Batch Size: {}", optimization_profile.batch_size);
     println!("       Thread Count: {}", optimization_profile.thread_count);
 
     Ok(())
 }
 
-async fn create_custom_gaming_profile(
-    optimization_manager: &OptimizationManager,
-) -> Result<()> {
+async fn create_custom_gaming_profile(optimization_manager: &OptimizationManager) -> Result<()> {
     println!("   🛠️ Creating custom gaming profile for RTX 4090 + Ryzen 9");
 
     use bolt::optimizations::{
-        cpu::{CpuOptimizations, CpuGovernor, CpuAffinity},
+        OptimizationCondition,
+        cpu::{CpuAffinity, CpuGovernor, CpuOptimizations},
         gpu::{GpuOptimizations, NvidiaOptimizations},
         memory::MemoryOptimizations,
         network::{NetworkOptimizations, NetworkPriority},
-        storage::{StorageOptimizations, IoScheduler},
-        OptimizationCondition,
+        storage::{IoScheduler, StorageOptimizations},
     };
 
     let custom_profile = OptimizationProfile {
@@ -296,7 +309,7 @@ async fn create_custom_gaming_profile(
         },
         storage_optimizations: StorageOptimizations {
             io_scheduler: Some(IoScheduler::None), // No scheduling for NVMe
-            read_ahead: Some(0), // Minimal read-ahead for gaming
+            read_ahead: Some(0),                   // Minimal read-ahead for gaming
         },
         conditions: vec![
             OptimizationCondition::GpuVendor(bolt::plugins::GpuVendor::Nvidia),
@@ -306,16 +319,19 @@ async fn create_custom_gaming_profile(
     };
 
     // Save the custom profile (in a real scenario)
-    println!("   💾 Custom profile created with {} optimization steps",
-        custom_profile.cpu_optimizations.to_steps().len() +
-        custom_profile.gpu_optimizations.to_steps().len() +
-        custom_profile.memory_optimizations.to_steps().len() +
-        custom_profile.network_optimizations.to_steps().len() +
-        custom_profile.storage_optimizations.to_steps().len()
+    println!(
+        "   💾 Custom profile created with {} optimization steps",
+        custom_profile.cpu_optimizations.to_steps().len()
+            + custom_profile.gpu_optimizations.to_steps().len()
+            + custom_profile.memory_optimizations.to_steps().len()
+            + custom_profile.network_optimizations.to_steps().len()
+            + custom_profile.storage_optimizations.to_steps().len()
     );
 
     // Hot-reload the profile
-    optimization_manager.hot_reload_profile("rtx4090-competitive", custom_profile).await?;
+    optimization_manager
+        .hot_reload_profile("rtx4090-competitive", custom_profile)
+        .await?;
 
     println!("   ✅ Custom RTX 4090 competitive profile created and loaded");
     Ok(())
@@ -329,14 +345,16 @@ async fn demonstrate_plugin_system(plugin_manager: &PluginManager) -> Result<()>
     println!("   📋 Available plugins: {}", plugins.len());
 
     for plugin in &plugins {
-        println!("       • {} ({:?}) - Enabled: {}",
-            plugin.name, plugin.plugin_type, plugin.enabled);
+        println!(
+            "       • {} ({:?}) - Enabled: {}",
+            plugin.name, plugin.plugin_type, plugin.enabled
+        );
     }
 
     // Simulate getting GPU plugins for NVIDIA
-    let nvidia_plugins = plugin_manager.get_gpu_plugins_for_vendor(
-        bolt::plugins::GpuVendor::Nvidia
-    ).await;
+    let nvidia_plugins = plugin_manager
+        .get_gpu_plugins_for_vendor(bolt::plugins::GpuVendor::Nvidia)
+        .await;
 
     println!("   🎮 NVIDIA-compatible plugins: {}", nvidia_plugins.len());
 
@@ -353,7 +371,9 @@ async fn demonstrate_plugin_system(plugin_manager: &PluginManager) -> Result<()>
         },
     };
 
-    plugin_manager.apply_optimizations("gaming", &optimization_context).await?;
+    plugin_manager
+        .apply_optimizations("gaming", &optimization_context)
+        .await?;
 
     println!("   ✅ Plugin system demonstration complete");
     Ok(())
@@ -365,14 +385,16 @@ pub async fn ghostforge_scan_steam_library(runtime: &BoltRuntime) -> Result<Vec<
     println!("🔍 Scanning Steam library for installed games");
 
     // Run a container to scan Steam library
-    runtime.run_container(
-        "bolt://steam-scanner:latest",
-        Some("steam-scanner"),
-        &[],
-        &["STEAM_PATH=/home/steam/.steam"],
-        &["~/.local/share/Steam:/home/steam/.steam:ro"],
-        false,
-    ).await?;
+    runtime
+        .run_container(
+            "bolt://steam-scanner:latest",
+            Some("steam-scanner"),
+            &[],
+            &["STEAM_PATH=/home/steam/.steam"],
+            &["~/.local/share/Steam:/home/steam/.steam:ro"],
+            false,
+        )
+        .await?;
 
     // In a real implementation, this would parse the Steam library
     let mock_games = vec![
@@ -396,7 +418,7 @@ pub async fn ghostforge_optimize_for_game(
         name if name.contains("counter-strike") => "competitive-gaming",
         name if name.contains("cyberpunk") || name.contains("witcher") => "steam-gaming",
         name if name.contains("minecraft") => "development", // Lighter requirements
-        _ => "steam-gaming", // Default gaming profile
+        _ => "steam-gaming",                                 // Default gaming profile
     };
 
     let context = bolt::plugins::OptimizationContext {
@@ -411,7 +433,9 @@ pub async fn ghostforge_optimize_for_game(
         },
     };
 
-    optimization_manager.apply_profile(profile_name, &context).await?;
+    optimization_manager
+        .apply_profile(profile_name, &context)
+        .await?;
 
     println!("✅ Applied '{}' profile for {}", profile_name, game_title);
     Ok(profile_name.to_string())
@@ -425,16 +449,21 @@ pub async fn ghostforge_create_gaming_session(
 
     let container_name = format!("gaming-session-{}", game_config.session_id);
 
-    runtime.run_container(
-        &game_config.container_image,
-        Some(&container_name),
-        &game_config.ports,
-        &game_config.environment,
-        &game_config.volumes,
-        game_config.detached,
-    ).await?;
+    runtime
+        .run_container(
+            &game_config.container_image,
+            Some(&container_name),
+            &game_config.ports,
+            &game_config.environment,
+            &game_config.volumes,
+            game_config.detached,
+        )
+        .await?;
 
-    println!("✅ Gaming session '{}' created successfully", game_config.session_name);
+    println!(
+        "✅ Gaming session '{}' created successfully",
+        game_config.session_name
+    );
     Ok(container_name)
 }
 

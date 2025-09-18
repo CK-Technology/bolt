@@ -1,9 +1,11 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, warn};
 use std::process::Command;
+use tracing::{debug, info, warn};
 
-use crate::runtime::gpu::{GPUInfo, GPUVendor, GamingConfig, AIWorkload, MLWorkload, ComputeWorkload};
+use crate::runtime::gpu::{
+    AIWorkload, ComputeWorkload, GPUInfo, GPUVendor, GamingConfig, MLWorkload,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NvbindManager {
@@ -16,10 +18,7 @@ impl NvbindManager {
         info!("🚀 Detecting nvbind GPU runtime support");
 
         // Check if nvbind binary is available
-        let nvbind_available = Command::new("nvbind")
-            .arg("--version")
-            .output()
-            .is_ok();
+        let nvbind_available = Command::new("nvbind").arg("--version").output().is_ok();
 
         if nvbind_available {
             info!("✅ nvbind GPU runtime detected");
@@ -46,7 +45,10 @@ impl NvbindManager {
             return Ok(());
         }
 
-        info!("🚀 Setting up nvbind GPU access for container: {}", container_id);
+        info!(
+            "🚀 Setting up nvbind GPU access for container: {}",
+            container_id
+        );
 
         // Show nvbind info for the system
         if let Ok(output) = Command::new("nvbind").arg("info").output() {
@@ -59,7 +61,10 @@ impl NvbindManager {
             info!("  ✓ Applying nvbind configuration:");
             info!("    • Driver: {:?}", nvbind_config.driver);
             info!("    • Devices: {:?}", nvbind_config.devices);
-            info!("    • Performance mode: {:?}", nvbind_config.performance_mode);
+            info!(
+                "    • Performance mode: {:?}",
+                nvbind_config.performance_mode
+            );
             info!("    • WSL2 optimized: {:?}", nvbind_config.wsl2_optimized);
         }
 
@@ -69,7 +74,10 @@ impl NvbindManager {
             info!("    • Profile: {:?}", gaming_config.profile);
             info!("    • DLSS: {:?}", gaming_config.dlss_enabled);
             info!("    • RT cores: {:?}", gaming_config.rt_cores_enabled);
-            info!("    • Wine optimizations: {:?}", gaming_config.wine_optimizations);
+            info!(
+                "    • Wine optimizations: {:?}",
+                gaming_config.wine_optimizations
+            );
         }
 
         // Apply AI/ML optimizations if enabled
@@ -92,10 +100,7 @@ impl NvbindManager {
         info!("📋 Listing GPUs via nvbind runtime");
 
         // Run nvbind info to get GPU information
-        let output = Command::new("nvbind")
-            .arg("info")
-            .arg("--json")
-            .output();
+        let output = Command::new("nvbind").arg("info").arg("--json").output();
 
         match output {
             Ok(result) => {
@@ -136,14 +141,20 @@ impl NvbindManager {
             return Ok(());
         }
 
-        info!("🎮 Running gaming workload via nvbind for container: {}", container_id);
+        info!(
+            "🎮 Running gaming workload via nvbind for container: {}",
+            container_id
+        );
         info!("  ✓ Gaming workload configured with nvbind optimizations:");
         info!("    • Game type: {}", gaming_config.game_type);
         info!("    • DXVK enabled: {}", gaming_config.dxvk_enabled);
         info!("    • VKD3D enabled: {}", gaming_config.vkd3d_enabled);
         info!("    • GameMode enabled: {}", gaming_config.gamemode_enabled);
         info!("    • VR enabled: {}", gaming_config.vr_enabled);
-        info!("    • Performance profile: {}", gaming_config.performance_profile);
+        info!(
+            "    • Performance profile: {}",
+            gaming_config.performance_profile
+        );
         info!("    • Ultra-low latency GPU passthrough enabled");
 
         Ok(())
@@ -159,14 +170,20 @@ impl NvbindManager {
             return Ok(());
         }
 
-        info!("🤖 Running AI workload via nvbind for container: {}", container_id);
+        info!(
+            "🤖 Running AI workload via nvbind for container: {}",
+            container_id
+        );
         info!("  ✓ AI workload configured with nvbind optimizations:");
         info!("    • Model: {}", ai_workload.model_name);
         info!("    • Backend: {:?}", ai_workload.ai_backend);
         info!("    • Context length: {:?}", ai_workload.context_length);
         info!("    • Quantization: {:?}", ai_workload.quantization);
         info!("    • Multi-GPU: {}", ai_workload.multi_gpu);
-        info!("    • Flash Attention: {}", ai_workload.enable_flash_attention);
+        info!(
+            "    • Flash Attention: {}",
+            ai_workload.enable_flash_attention
+        );
         info!("    • Tensor core acceleration enabled");
 
         Ok(())
@@ -182,13 +199,19 @@ impl NvbindManager {
             return Ok(());
         }
 
-        info!("🧠 Running ML workload via nvbind for container: {}", container_id);
+        info!(
+            "🧠 Running ML workload via nvbind for container: {}",
+            container_id
+        );
         info!("  ✓ ML workload configured with nvbind optimizations:");
         info!("    • Framework: {:?}", ml_workload.ml_framework);
         info!("    • Model type: {}", ml_workload.model_type);
         info!("    • Training mode: {}", ml_workload.training_mode);
         info!("    • Mixed precision: {}", ml_workload.mixed_precision);
-        info!("    • Distributed training: {}", ml_workload.distributed_training);
+        info!(
+            "    • Distributed training: {}",
+            ml_workload.distributed_training
+        );
         info!("    • Memory pool optimization enabled");
 
         Ok(())
@@ -204,13 +227,22 @@ impl NvbindManager {
             return Ok(());
         }
 
-        info!("⚙️ Running compute workload via nvbind for container: {}", container_id);
+        info!(
+            "⚙️ Running compute workload via nvbind for container: {}",
+            container_id
+        );
         info!("  ✓ Compute workload configured with nvbind optimizations:");
         info!("    • Compute type: {:?}", compute_workload.compute_type);
         info!("    • Precision: {:?}", compute_workload.precision);
         info!("    • CPU/GPU ratio: {:.1}", compute_workload.cpu_gpu_ratio);
-        info!("    • Memory requirements: {:?} GB", compute_workload.memory_requirements_gb);
-        info!("    • P2P enabled: {}", compute_workload.enable_peer_to_peer);
+        info!(
+            "    • Memory requirements: {:?} GB",
+            compute_workload.memory_requirements_gb
+        );
+        info!(
+            "    • P2P enabled: {}",
+            compute_workload.enable_peer_to_peer
+        );
         info!("    • Direct driver access enabled");
 
         Ok(())
@@ -249,14 +281,18 @@ impl NvbindManager {
             driver_version: "auto-detected".to_string(),
             bolt_optimizations: true,
             wsl2_mode,
-            performance_info: "Sub-microsecond GPU passthrough (100x faster than Docker)".to_string(),
+            performance_info: "Sub-microsecond GPU passthrough (100x faster than Docker)"
+                .to_string(),
         };
 
         if compatibility.available {
             info!("🚀 nvbind GPU runtime available:");
             info!("  • GPUs: {}", compatibility.gpu_count);
             info!("  • Driver: {}", compatibility.driver_version);
-            info!("  • Bolt optimizations: {}", compatibility.bolt_optimizations);
+            info!(
+                "  • Bolt optimizations: {}",
+                compatibility.bolt_optimizations
+            );
             info!("  • WSL2 mode: {}", compatibility.wsl2_mode);
             info!("  • Performance: {}", compatibility.performance_info);
         }
@@ -292,8 +328,12 @@ impl NvbindManager {
         nvbind_cmd.arg(&image);
         nvbind_cmd.args(&cmd);
 
-        info!("  Executing: nvbind run --runtime bolt --gpu {:?} {} {:?}",
-              gpu_devices.unwrap_or_else(|| "auto".to_string()), image, cmd);
+        info!(
+            "  Executing: nvbind run --runtime bolt --gpu {:?} {} {:?}",
+            gpu_devices.unwrap_or_else(|| "auto".to_string()),
+            image,
+            cmd
+        );
 
         // For now, just simulate the command - in real implementation we'd execute it
         info!("  ✓ nvbind container execution configured");

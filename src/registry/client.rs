@@ -27,7 +27,8 @@ impl DriftClient {
             "password": password
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&format!("{}{}", self.base_url, endpoints::AUTH_LOGIN))
             .json(&auth_request)
             .send()
@@ -44,7 +45,10 @@ impl DriftClient {
                 info!("✅ Successfully authenticated with Drift registry");
             }
         } else {
-            return Err(anyhow::anyhow!("Authentication failed: {}", response.status()));
+            return Err(anyhow::anyhow!(
+                "Authentication failed: {}",
+                response.status()
+            ));
         }
 
         Ok(())
@@ -52,7 +56,11 @@ impl DriftClient {
 
     /// Profile Management
 
-    pub async fn list_profiles(&self, page: Option<u32>, per_page: Option<u32>) -> Result<ProfileListResponse> {
+    pub async fn list_profiles(
+        &self,
+        page: Option<u32>,
+        per_page: Option<u32>,
+    ) -> Result<ProfileListResponse> {
         let mut url = format!("{}{}", self.base_url, endpoints::PROFILES_LIST);
 
         let mut params = Vec::new();
@@ -72,8 +80,12 @@ impl DriftClient {
         self.parse_response(response).await
     }
 
-    pub async fn search_profiles(&self, request: &SearchRequest) -> Result<SearchResponse<ProfileSummary>> {
-        let response = self.client
+    pub async fn search_profiles(
+        &self,
+        request: &SearchRequest,
+    ) -> Result<SearchResponse<ProfileSummary>> {
+        let response = self
+            .client
             .post(&format!("{}{}", self.base_url, endpoints::PROFILES_SEARCH))
             .json(request)
             .send()
@@ -83,24 +95,36 @@ impl DriftClient {
     }
 
     pub async fn get_profile(&self, name: &str) -> Result<ProfileDetail> {
-        let url = format!("{}{}", self.base_url, endpoints::PROFILES_GET.replace("{name}", name));
+        let url = format!(
+            "{}{}",
+            self.base_url,
+            endpoints::PROFILES_GET.replace("{name}", name)
+        );
         let response = self.get(&url).await?;
         self.parse_response(response).await
     }
 
     pub async fn download_profile(&self, name: &str) -> Result<Vec<u8>> {
-        let url = format!("{}{}", self.base_url, endpoints::PROFILES_DOWNLOAD.replace("{name}", name));
+        let url = format!(
+            "{}{}",
+            self.base_url,
+            endpoints::PROFILES_DOWNLOAD.replace("{name}", name)
+        );
         let response = self.get(&url).await?;
 
         if response.status().is_success() {
             Ok(response.bytes().await?.to_vec())
         } else {
-            Err(anyhow::anyhow!("Failed to download profile: {}", response.status()))
+            Err(anyhow::anyhow!(
+                "Failed to download profile: {}",
+                response.status()
+            ))
         }
     }
 
     pub async fn upload_profile(&self, request: &ProfileUploadRequest) -> Result<()> {
-        let response = self.client
+        let response = self
+            .client
             .post(&format!("{}{}", self.base_url, endpoints::PROFILES_UPLOAD))
             .header("Authorization", self.get_auth_header()?)
             .header("Content-Type", media_types::BOLT_PROFILE)
@@ -118,8 +142,13 @@ impl DriftClient {
     }
 
     pub async fn delete_profile(&self, name: &str) -> Result<()> {
-        let url = format!("{}{}", self.base_url, endpoints::PROFILES_DELETE.replace("{name}", name));
-        let response = self.client
+        let url = format!(
+            "{}{}",
+            self.base_url,
+            endpoints::PROFILES_DELETE.replace("{name}", name)
+        );
+        let response = self
+            .client
             .delete(&url)
             .header("Authorization", self.get_auth_header()?)
             .send()
@@ -135,7 +164,11 @@ impl DriftClient {
 
     /// Plugin Management
 
-    pub async fn list_plugins(&self, page: Option<u32>, per_page: Option<u32>) -> Result<PluginListResponse> {
+    pub async fn list_plugins(
+        &self,
+        page: Option<u32>,
+        per_page: Option<u32>,
+    ) -> Result<PluginListResponse> {
         let mut url = format!("{}{}", self.base_url, endpoints::PLUGINS_LIST);
 
         let mut params = Vec::new();
@@ -155,8 +188,12 @@ impl DriftClient {
         self.parse_response(response).await
     }
 
-    pub async fn search_plugins(&self, request: &SearchRequest) -> Result<SearchResponse<PluginSummary>> {
-        let response = self.client
+    pub async fn search_plugins(
+        &self,
+        request: &SearchRequest,
+    ) -> Result<SearchResponse<PluginSummary>> {
+        let response = self
+            .client
             .post(&format!("{}{}", self.base_url, endpoints::PLUGINS_SEARCH))
             .json(request)
             .send()
@@ -166,24 +203,36 @@ impl DriftClient {
     }
 
     pub async fn get_plugin(&self, name: &str) -> Result<PluginDetail> {
-        let url = format!("{}{}", self.base_url, endpoints::PLUGINS_GET.replace("{name}", name));
+        let url = format!(
+            "{}{}",
+            self.base_url,
+            endpoints::PLUGINS_GET.replace("{name}", name)
+        );
         let response = self.get(&url).await?;
         self.parse_response(response).await
     }
 
     pub async fn download_plugin(&self, name: &str) -> Result<Vec<u8>> {
-        let url = format!("{}{}", self.base_url, endpoints::PLUGINS_DOWNLOAD.replace("{name}", name));
+        let url = format!(
+            "{}{}",
+            self.base_url,
+            endpoints::PLUGINS_DOWNLOAD.replace("{name}", name)
+        );
         let response = self.get(&url).await?;
 
         if response.status().is_success() {
             Ok(response.bytes().await?.to_vec())
         } else {
-            Err(anyhow::anyhow!("Failed to download plugin: {}", response.status()))
+            Err(anyhow::anyhow!(
+                "Failed to download plugin: {}",
+                response.status()
+            ))
         }
     }
 
     pub async fn upload_plugin(&self, request: &PluginUploadRequest) -> Result<()> {
-        let response = self.client
+        let response = self
+            .client
             .post(&format!("{}{}", self.base_url, endpoints::PLUGINS_UPLOAD))
             .header("Authorization", self.get_auth_header()?)
             .header("Content-Type", media_types::BOLT_PLUGIN_BINARY)
@@ -203,19 +252,25 @@ impl DriftClient {
     /// Metrics
 
     pub async fn get_metrics(&self) -> Result<RegistryMetrics> {
-        let response = self.get(&format!("{}{}", self.base_url, endpoints::METRICS_OVERVIEW)).await?;
+        let response = self
+            .get(&format!("{}{}", self.base_url, endpoints::METRICS_OVERVIEW))
+            .await?;
         self.parse_response(response).await
     }
 
     /// Health Check
 
     pub async fn health_check(&self) -> Result<serde_json::Value> {
-        let response = self.get(&format!("{}{}", self.base_url, endpoints::HEALTH)).await?;
+        let response = self
+            .get(&format!("{}{}", self.base_url, endpoints::HEALTH))
+            .await?;
         self.parse_response(response).await
     }
 
     pub async fn get_version(&self) -> Result<serde_json::Value> {
-        let response = self.get(&format!("{}{}", self.base_url, endpoints::VERSION)).await?;
+        let response = self
+            .get(&format!("{}{}", self.base_url, endpoints::VERSION))
+            .await?;
         self.parse_response(response).await
     }
 
@@ -320,7 +375,8 @@ impl DriftClient {
             if available_cores < min_cores {
                 return Err(anyhow::anyhow!(
                     "Insufficient CPU cores: required {}, available {}",
-                    min_cores, available_cores
+                    min_cores,
+                    available_cores
                 ));
             }
         }

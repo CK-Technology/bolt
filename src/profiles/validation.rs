@@ -1,7 +1,7 @@
 use anyhow::Result;
 
-use crate::optimizations::OptimizationProfile;
 use super::SystemRequirements;
+use crate::optimizations::OptimizationProfile;
 
 pub fn validate_profile(profile: &OptimizationProfile) -> Result<()> {
     if profile.name.is_empty() {
@@ -30,13 +30,17 @@ pub fn validate_profile(profile: &OptimizationProfile) -> Result<()> {
 
         if let Some(memory_offset) = gpu_opts.memory_clock_offset {
             if memory_offset.abs() > 2000 {
-                return Err(anyhow::anyhow!("NVIDIA memory clock offset too extreme (max ±2000 MHz)"));
+                return Err(anyhow::anyhow!(
+                    "NVIDIA memory clock offset too extreme (max ±2000 MHz)"
+                ));
             }
         }
 
         if let Some(core_offset) = gpu_opts.core_clock_offset {
             if core_offset.abs() > 1000 {
-                return Err(anyhow::anyhow!("NVIDIA core clock offset too extreme (max ±1000 MHz)"));
+                return Err(anyhow::anyhow!(
+                    "NVIDIA core clock offset too extreme (max ±1000 MHz)"
+                ));
             }
         }
     }
@@ -58,7 +62,8 @@ pub fn check_system_requirements(requirements: &SystemRequirements) -> Result<()
         if system_info.cpu_cores < min_cores {
             return Err(anyhow::anyhow!(
                 "Insufficient CPU cores: required {}, available {}",
-                min_cores, system_info.cpu_cores
+                min_cores,
+                system_info.cpu_cores
             ));
         }
     }
@@ -67,7 +72,8 @@ pub fn check_system_requirements(requirements: &SystemRequirements) -> Result<()
         if system_info.memory_gb < min_memory {
             return Err(anyhow::anyhow!(
                 "Insufficient memory: required {} GB, available {} GB",
-                min_memory, system_info.memory_gb
+                min_memory,
+                system_info.memory_gb
             ));
         }
     }
@@ -77,7 +83,8 @@ pub fn check_system_requirements(requirements: &SystemRequirements) -> Result<()
             if std::mem::discriminant(required_vendor) != std::mem::discriminant(system_vendor) {
                 return Err(anyhow::anyhow!(
                     "Incompatible GPU vendor: required {:?}, found {:?}",
-                    required_vendor, system_vendor
+                    required_vendor,
+                    system_vendor
                 ));
             }
         } else {
@@ -90,7 +97,8 @@ pub fn check_system_requirements(requirements: &SystemRequirements) -> Result<()
             if gpu_memory < min_gpu_memory {
                 return Err(anyhow::anyhow!(
                     "Insufficient GPU memory: required {} GB, available {} GB",
-                    min_gpu_memory, gpu_memory
+                    min_gpu_memory,
+                    gpu_memory
                 ));
             }
         } else {
@@ -132,16 +140,15 @@ fn get_total_memory_gb() -> Result<u32> {
 }
 
 fn detect_gpu_vendor() -> Result<Option<crate::plugins::GpuVendor>> {
-    let lspci_output = std::process::Command::new("lspci")
-        .arg("-nn")
-        .output();
+    let lspci_output = std::process::Command::new("lspci").arg("-nn").output();
 
     if let Ok(output) = lspci_output {
         let output_str = String::from_utf8_lossy(&output.stdout);
         if output_str.to_lowercase().contains("nvidia") {
             return Ok(Some(crate::plugins::GpuVendor::Nvidia));
         }
-        if output_str.to_lowercase().contains("amd") || output_str.to_lowercase().contains("radeon") {
+        if output_str.to_lowercase().contains("amd") || output_str.to_lowercase().contains("radeon")
+        {
             return Ok(Some(crate::plugins::GpuVendor::Amd));
         }
         if output_str.to_lowercase().contains("intel") {

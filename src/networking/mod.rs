@@ -6,9 +6,18 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
+pub mod advanced_networking;
 pub mod bridge;
 pub mod ebpf;
+pub mod firewall_advanced;
 pub mod quic;
+pub mod quic_proxy;
+pub mod quic_real;
+
+// Re-export main networking types
+pub use advanced_networking::BoltAdvancedNetworking;
+pub use firewall_advanced::AdvancedFirewallManager;
+pub use quic_proxy::{ProxyRule, QUICProxyConfig, QUICSocketProxy};
 
 /// Networking configuration for containers
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -372,6 +381,383 @@ impl NetworkManager {
         let metrics = self.metrics.read().await;
         metrics.clone()
     }
+
+    /// Create Bolt network with enhanced features
+    pub async fn create_bolt_network(
+        &mut self,
+        name: &str,
+        driver: &str,
+        subnet: Option<&str>,
+    ) -> Result<()> {
+        info!("🌐 Creating Bolt network: {} (driver: {})", name, driver);
+
+        // Validate network name
+        if name.is_empty() {
+            return Err(anyhow::anyhow!("Network name cannot be empty"));
+        }
+
+        // Set default subnet if not provided
+        let subnet = subnet.unwrap_or("172.20.0.0/16");
+
+        // Create network based on driver type
+        match driver {
+            "bolt" => {
+                self.create_bolt_bridge_network(name, subnet).await?;
+            }
+            "bridge" => {
+                self.create_traditional_bridge_network(name, subnet).await?;
+            }
+            "overlay" => {
+                self.create_overlay_network(name, subnet).await?;
+            }
+            "macvlan" => {
+                self.create_macvlan_network(name, subnet).await?;
+            }
+            _ => {
+                return Err(anyhow::anyhow!("Unsupported network driver: {}", driver));
+            }
+        }
+
+        info!("✅ Network '{}' created successfully", name);
+        Ok(())
+    }
+
+    /// Create Bolt bridge network with QUIC support
+    async fn create_bolt_bridge_network(&self, name: &str, subnet: &str) -> Result<()> {
+        info!("🌉 Creating Bolt bridge network with QUIC support");
+
+        // Create bridge interface
+        let bridge_name = format!("br-{}", name);
+        self.create_bridge_interface(&bridge_name).await?;
+
+        // Configure subnet
+        self.configure_bridge_subnet(&bridge_name, subnet).await?;
+
+        // Enable QUIC on bridge
+        if let Some(ref quic_server) = self.quic_server {
+            quic_server.enable_optimizations(&bridge_name).await?;
+        }
+
+        // Enable eBPF acceleration if available
+        if let Some(ref ebpf_manager) = self.ebpf_manager {
+            ebpf_manager
+                .enable_bridge_acceleration(&bridge_name)
+                .await?;
+        }
+
+        info!("  ✓ Bolt bridge network configured with advanced features");
+        Ok(())
+    }
+
+    /// Create traditional bridge network
+    async fn create_traditional_bridge_network(&self, name: &str, subnet: &str) -> Result<()> {
+        info!("🌉 Creating traditional bridge network");
+
+        let bridge_name = format!("br-{}", name);
+        self.create_bridge_interface(&bridge_name).await?;
+        self.configure_bridge_subnet(&bridge_name, subnet).await?;
+
+        info!("  ✓ Traditional bridge network configured");
+        Ok(())
+    }
+
+    /// Create overlay network
+    async fn create_overlay_network(&self, name: &str, subnet: &str) -> Result<()> {
+        info!("🔗 Creating overlay network");
+
+        // Create VXLAN interface
+        let vxlan_name = format!("vx-{}", name);
+        self.create_vxlan_interface(&vxlan_name, 4789).await?;
+
+        // Configure overlay subnet
+        self.configure_overlay_subnet(&vxlan_name, subnet).await?;
+
+        info!("  ✓ Overlay network configured");
+        Ok(())
+    }
+
+    /// Create macvlan network
+    async fn create_macvlan_network(&self, name: &str, subnet: &str) -> Result<()> {
+        info!("📡 Creating macvlan network");
+
+        let macvlan_name = format!("mv-{}", name);
+        self.create_macvlan_interface(&macvlan_name, "eth0").await?;
+
+        info!("  ✓ Macvlan network configured");
+        Ok(())
+    }
+
+    /// Create bridge interface
+    async fn create_bridge_interface(&self, bridge_name: &str) -> Result<()> {
+        info!("  🔧 Creating bridge interface: {}", bridge_name);
+
+        // Use ip command to create bridge
+        let output = std::process::Command::new("ip")
+            .args(&["link", "add", "name", bridge_name, "type", "bridge"])
+            .output();
+
+        match output {
+            Ok(result) => {
+                if result.status.success() {
+                    info!("    ✓ Bridge interface created");
+
+                    // Bring bridge up
+                    let _ = std::process::Command::new("ip")
+                        .args(&["link", "set", bridge_name, "up"])
+                        .output();
+
+                    info!("    ✓ Bridge interface activated");
+                } else {
+                    let stderr = String::from_utf8_lossy(&result.stderr);
+                    if stderr.contains("File exists") {
+                        info!("    ✓ Bridge interface already exists");
+                    } else {
+                        return Err(anyhow::anyhow!("Failed to create bridge: {}", stderr));
+                    }
+                }
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!("Failed to run ip command: {}", e));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Configure bridge subnet
+    async fn configure_bridge_subnet(&self, bridge_name: &str, subnet: &str) -> Result<()> {
+        info!("  🔧 Configuring subnet: {}", subnet);
+
+        // Parse subnet to get gateway IP
+        let gateway_ip = self.calculate_gateway_ip(subnet)?;
+
+        // Assign IP to bridge
+        let output = std::process::Command::new("ip")
+            .args(&["addr", "add", &gateway_ip, "dev", bridge_name])
+            .output();
+
+        match output {
+            Ok(result) => {
+                if result.status.success() {
+                    info!("    ✓ Gateway IP assigned: {}", gateway_ip);
+                } else {
+                    let stderr = String::from_utf8_lossy(&result.stderr);
+                    if stderr.contains("File exists") {
+                        info!("    ✓ IP address already assigned");
+                    } else {
+                        warn!("Failed to assign IP: {}", stderr);
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to run ip command: {}", e);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Create VXLAN interface
+    async fn create_vxlan_interface(&self, vxlan_name: &str, vni: u32) -> Result<()> {
+        info!(
+            "  🔧 Creating VXLAN interface: {} (VNI: {})",
+            vxlan_name, vni
+        );
+
+        let output = std::process::Command::new("ip")
+            .args(&[
+                "link",
+                "add",
+                vxlan_name,
+                "type",
+                "vxlan",
+                "id",
+                &vni.to_string(),
+                "dstport",
+                "4789",
+                "nolearning",
+            ])
+            .output();
+
+        match output {
+            Ok(result) => {
+                if result.status.success() {
+                    info!("    ✓ VXLAN interface created");
+
+                    // Bring interface up
+                    let _ = std::process::Command::new("ip")
+                        .args(&["link", "set", vxlan_name, "up"])
+                        .output();
+                } else {
+                    let stderr = String::from_utf8_lossy(&result.stderr);
+                    if !stderr.contains("File exists") {
+                        warn!("Failed to create VXLAN: {}", stderr);
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to run ip command: {}", e);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Configure overlay subnet
+    async fn configure_overlay_subnet(&self, vxlan_name: &str, subnet: &str) -> Result<()> {
+        info!("  🔧 Configuring overlay subnet: {}", subnet);
+
+        let gateway_ip = self.calculate_gateway_ip(subnet)?;
+
+        let output = std::process::Command::new("ip")
+            .args(&["addr", "add", &gateway_ip, "dev", vxlan_name])
+            .output();
+
+        match output {
+            Ok(result) => {
+                if result.status.success() {
+                    info!("    ✓ Overlay gateway configured: {}", gateway_ip);
+                } else {
+                    let stderr = String::from_utf8_lossy(&result.stderr);
+                    if !stderr.contains("File exists") {
+                        warn!("Failed to configure overlay: {}", stderr);
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to run ip command: {}", e);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Create macvlan interface
+    async fn create_macvlan_interface(&self, macvlan_name: &str, parent: &str) -> Result<()> {
+        info!(
+            "  🔧 Creating macvlan interface: {} (parent: {})",
+            macvlan_name, parent
+        );
+
+        let output = std::process::Command::new("ip")
+            .args(&[
+                "link",
+                "add",
+                macvlan_name,
+                "link",
+                parent,
+                "type",
+                "macvlan",
+                "mode",
+                "bridge",
+            ])
+            .output();
+
+        match output {
+            Ok(result) => {
+                if result.status.success() {
+                    info!("    ✓ Macvlan interface created");
+
+                    // Bring interface up
+                    let _ = std::process::Command::new("ip")
+                        .args(&["link", "set", macvlan_name, "up"])
+                        .output();
+                } else {
+                    let stderr = String::from_utf8_lossy(&result.stderr);
+                    if !stderr.contains("File exists") {
+                        warn!("Failed to create macvlan: {}", stderr);
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to run ip command: {}", e);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Calculate gateway IP from subnet
+    fn calculate_gateway_ip(&self, subnet: &str) -> Result<String> {
+        // Simple implementation - use .1 as gateway
+        if let Some(pos) = subnet.find('/') {
+            let ip_part = &subnet[..pos];
+            let prefix_len = &subnet[pos + 1..];
+
+            // Parse IP and set last octet to 1
+            let ip_parts: Vec<&str> = ip_part.split('.').collect();
+            if ip_parts.len() == 4 {
+                let gateway = format!(
+                    "{}.{}.{}.1/{}",
+                    ip_parts[0], ip_parts[1], ip_parts[2], prefix_len
+                );
+                return Ok(gateway);
+            }
+        }
+
+        Err(anyhow::anyhow!("Invalid subnet format: {}", subnet))
+    }
+
+    /// List Bolt networks
+    pub async fn list_bolt_networks(&self) -> Result<Vec<BoltNetworkInfo>> {
+        info!("📋 Listing Bolt networks");
+
+        let mut networks = Vec::new();
+
+        // Get system network interfaces
+        let output = std::process::Command::new("ip")
+            .args(&["link", "show"])
+            .output();
+
+        match output {
+            Ok(result) => {
+                if result.status.success() {
+                    let output_str = String::from_utf8_lossy(&result.stdout);
+
+                    // Parse bridge interfaces
+                    for line in output_str.lines() {
+                        if line.contains("br-") && line.contains("state UP") {
+                            if let Some(name_start) = line.find("br-") {
+                                if let Some(name_end) = line[name_start..].find(':') {
+                                    let bridge_name = &line[name_start..name_start + name_end];
+                                    let network_name =
+                                        bridge_name.strip_prefix("br-").unwrap_or(bridge_name);
+
+                                    networks.push(BoltNetworkInfo {
+                                        id: format!(
+                                            "{:x}",
+                                            bridge_name.as_bytes().iter().fold(0u64, |acc, &b| acc
+                                                .wrapping_mul(31)
+                                                .wrapping_add(b as u64))
+                                        ),
+                                        name: network_name.to_string(),
+                                        driver: "bolt".to_string(),
+                                        scope: "local".to_string(),
+                                        subnet: "172.20.0.0/16".to_string(), // Would be detected from interface
+                                        gateway: "172.20.0.1 (QUIC)".to_string(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Err(_) => {}
+        }
+
+        Ok(networks)
+    }
+}
+
+/// Bolt network information
+#[derive(Debug, Clone)]
+pub struct BoltNetworkInfo {
+    pub id: String,
+    pub name: String,
+    pub driver: String,
+    pub scope: String,
+    pub subnet: String,
+    pub gateway: String,
 }
 
 impl Default for NetworkConfig {

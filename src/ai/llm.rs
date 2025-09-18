@@ -28,12 +28,12 @@ pub enum LlmEngineType {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ModelFormat {
-    Gguf,      // llama.cpp format
-    Ggml,      // Legacy llama.cpp
+    Gguf,        // llama.cpp format
+    Ggml,        // Legacy llama.cpp
     Safetensors, // Hugging Face
-    Pytorch,   // PyTorch format
-    Onnx,      // ONNX format
-    TensorRT,  // NVIDIA TensorRT
+    Pytorch,     // PyTorch format
+    Onnx,        // ONNX format
+    TensorRT,    // NVIDIA TensorRT
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,7 +61,11 @@ impl LlmOptimizer {
         optimizer
     }
 
-    pub fn get_recommended_engine(&self, model_size: &ModelSize, gpu_memory_gb: u32) -> LlmEngineType {
+    pub fn get_recommended_engine(
+        &self,
+        model_size: &ModelSize,
+        gpu_memory_gb: u32,
+    ) -> LlmEngineType {
         match (model_size, gpu_memory_gb) {
             // Large models need specialized engines
             (ModelSize::XLarge, mem) if mem >= 80 => LlmEngineType::Vllm,
@@ -89,39 +93,78 @@ impl LlmOptimizer {
         gpu_memory_gb: u32,
     ) -> Result<LlmOptimizationProfile> {
         let profile = match engine {
-            LlmEngineType::Ollama => self.create_ollama_profile(model_name, model_size, gpu_memory_gb),
-            LlmEngineType::LlamaCpp => self.create_llamacpp_profile(model_name, model_size, gpu_memory_gb),
+            LlmEngineType::Ollama => {
+                self.create_ollama_profile(model_name, model_size, gpu_memory_gb)
+            }
+            LlmEngineType::LlamaCpp => {
+                self.create_llamacpp_profile(model_name, model_size, gpu_memory_gb)
+            }
             LlmEngineType::Vllm => self.create_vllm_profile(model_name, model_size, gpu_memory_gb),
-            LlmEngineType::TensorrtLlm => self.create_tensorrt_profile(model_name, model_size, gpu_memory_gb),
+            LlmEngineType::TensorrtLlm => {
+                self.create_tensorrt_profile(model_name, model_size, gpu_memory_gb)
+            }
             _ => self.create_default_profile(engine, model_name, model_size, gpu_memory_gb),
         }?;
 
         Ok(profile)
     }
 
-    pub fn get_container_environment(&self, profile: &LlmOptimizationProfile) -> HashMap<String, String> {
+    pub fn get_container_environment(
+        &self,
+        profile: &LlmOptimizationProfile,
+    ) -> HashMap<String, String> {
         let mut env = HashMap::new();
 
         match profile.engine {
             LlmEngineType::Ollama => {
-                env.insert("OLLAMA_GPU_LAYERS".to_string(), profile.gpu_layers.to_string());
-                env.insert("OLLAMA_NUM_PARALLEL".to_string(), profile.batch_size.to_string());
+                env.insert(
+                    "OLLAMA_GPU_LAYERS".to_string(),
+                    profile.gpu_layers.to_string(),
+                );
+                env.insert(
+                    "OLLAMA_NUM_PARALLEL".to_string(),
+                    profile.batch_size.to_string(),
+                );
                 env.insert("OLLAMA_FLASH_ATTENTION".to_string(), "1".to_string());
             }
             LlmEngineType::LlamaCpp => {
-                env.insert("LLAMA_CUDA_LAYERS".to_string(), profile.gpu_layers.to_string());
-                env.insert("LLAMA_CONTEXT_SIZE".to_string(), profile.context_length.to_string());
-                env.insert("LLAMA_BATCH_SIZE".to_string(), profile.batch_size.to_string());
+                env.insert(
+                    "LLAMA_CUDA_LAYERS".to_string(),
+                    profile.gpu_layers.to_string(),
+                );
+                env.insert(
+                    "LLAMA_CONTEXT_SIZE".to_string(),
+                    profile.context_length.to_string(),
+                );
+                env.insert(
+                    "LLAMA_BATCH_SIZE".to_string(),
+                    profile.batch_size.to_string(),
+                );
             }
             LlmEngineType::Vllm => {
                 env.insert("VLLM_GPU_MEMORY_UTILIZATION".to_string(), "0.9".to_string());
-                env.insert("VLLM_TENSOR_PARALLEL_SIZE".to_string(), profile.tensor_parallel_size.to_string());
-                env.insert("VLLM_MAX_MODEL_LEN".to_string(), profile.context_length.to_string());
+                env.insert(
+                    "VLLM_TENSOR_PARALLEL_SIZE".to_string(),
+                    profile.tensor_parallel_size.to_string(),
+                );
+                env.insert(
+                    "VLLM_MAX_MODEL_LEN".to_string(),
+                    profile.context_length.to_string(),
+                );
             }
             LlmEngineType::TensorrtLlm => {
-                env.insert("TRTLLM_MAX_BATCH_SIZE".to_string(), profile.batch_size.to_string());
-                env.insert("TRTLLM_MAX_INPUT_LEN".to_string(), (profile.context_length / 2).to_string());
-                env.insert("TRTLLM_MAX_OUTPUT_LEN".to_string(), (profile.context_length / 2).to_string());
+                env.insert(
+                    "TRTLLM_MAX_BATCH_SIZE".to_string(),
+                    profile.batch_size.to_string(),
+                );
+                env.insert(
+                    "TRTLLM_MAX_INPUT_LEN".to_string(),
+                    (profile.context_length / 2).to_string(),
+                );
+                env.insert(
+                    "TRTLLM_MAX_OUTPUT_LEN".to_string(),
+                    (profile.context_length / 2).to_string(),
+                );
             }
             _ => {}
         }
@@ -140,8 +183,12 @@ impl LlmOptimizer {
             LlmEngineType::LlamaCpp => "ghcr.io/ggerganov/llama.cpp:latest".to_string(),
             LlmEngineType::Vllm => "vllm/vllm-openai:latest".to_string(),
             LlmEngineType::TensorrtLlm => "nvcr.io/nvidia/tritonserver:latest".to_string(),
-            LlmEngineType::Oobabooga => "ghcr.io/oobabooga/text-generation-webui:latest".to_string(),
-            LlmEngineType::Transformers => "huggingface/transformers-pytorch-gpu:latest".to_string(),
+            LlmEngineType::Oobabooga => {
+                "ghcr.io/oobabooga/text-generation-webui:latest".to_string()
+            }
+            LlmEngineType::Transformers => {
+                "huggingface/transformers-pytorch-gpu:latest".to_string()
+            }
             LlmEngineType::Mlc => "mlcai/mlc-llm:latest".to_string(),
         }
     }
@@ -199,7 +246,7 @@ impl LlmOptimizer {
             model_path: model_name.to_string(),
             quantization: QuantizationType::FP16,
             context_length: self.get_context_length(model_size),
-            batch_size: 64, // vLLM handles batching internally
+            batch_size: 64,  // vLLM handles batching internally
             gpu_layers: 999, // vLLM loads entire model on GPU
             tensor_parallel_size: tensor_parallel,
             pipeline_parallel_size: 1,
@@ -308,7 +355,11 @@ impl LlmOptimizer {
                 engine_type: LlmEngineType::TensorrtLlm,
                 supported_formats: vec![ModelFormat::TensorRT],
                 gpu_support: true,
-                quantization_support: vec![QuantizationType::FP16, QuantizationType::INT8, QuantizationType::INT4],
+                quantization_support: vec![
+                    QuantizationType::FP16,
+                    QuantizationType::INT8,
+                    QuantizationType::INT4,
+                ],
             },
             // Add more engines as needed
         ];

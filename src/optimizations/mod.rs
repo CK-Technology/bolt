@@ -66,9 +66,14 @@ impl OptimizationManager {
         Ok(())
     }
 
-    pub async fn apply_profile(&self, profile_name: &str, context: &OptimizationContext) -> Result<()> {
+    pub async fn apply_profile(
+        &self,
+        profile_name: &str,
+        context: &OptimizationContext,
+    ) -> Result<()> {
         let profiles = self.profiles.read().await;
-        let profile = profiles.get(profile_name)
+        let profile = profiles
+            .get(profile_name)
             .ok_or_else(|| anyhow::anyhow!("Profile not found: {}", profile_name))?;
 
         if !self.profile_matches_conditions(profile, context) {
@@ -78,11 +83,18 @@ impl OptimizationManager {
         let optimizations = self.build_optimization_pipeline(profile, context).await?;
 
         for optimization in &optimizations {
-            self.plugin_manager.apply_optimizations(&optimization.optimization_type, context).await?;
+            self.plugin_manager
+                .apply_optimizations(&optimization.optimization_type, context)
+                .await?;
         }
 
-        self.active_optimizations.write().await
-            .insert(context.container_id.clone(), optimizations.iter().map(|o| o.optimization_type.clone()).collect());
+        self.active_optimizations.write().await.insert(
+            context.container_id.clone(),
+            optimizations
+                .iter()
+                .map(|o| o.optimization_type.clone())
+                .collect(),
+        );
 
         Ok(())
     }
@@ -92,13 +104,21 @@ impl OptimizationManager {
         if let Some(optimizations) = active.remove(container_id) {
             for optimization_type in optimizations {
                 // Remove optimizations - this would call plugin-specific removal
-                tracing::info!("Removing optimization: {} for container: {}", optimization_type, container_id);
+                tracing::info!(
+                    "Removing optimization: {} for container: {}",
+                    optimization_type,
+                    container_id
+                );
             }
         }
         Ok(())
     }
 
-    pub async fn hot_reload_profile(&self, profile_name: &str, profile: OptimizationProfile) -> Result<()> {
+    pub async fn hot_reload_profile(
+        &self,
+        profile_name: &str,
+        profile: OptimizationProfile,
+    ) -> Result<()> {
         let mut profiles = self.profiles.write().await;
         profiles.insert(profile_name.to_string(), profile);
 
@@ -107,14 +127,22 @@ impl OptimizationManager {
         for (container_id, active_opts) in active.iter() {
             if active_opts.contains(&profile_name.to_string()) {
                 // Hot-reload logic here
-                tracing::info!("Hot-reloading profile {} for container {}", profile_name, container_id);
+                tracing::info!(
+                    "Hot-reloading profile {} for container {}",
+                    profile_name,
+                    container_id
+                );
             }
         }
 
         Ok(())
     }
 
-    async fn build_optimization_pipeline(&self, profile: &OptimizationProfile, context: &OptimizationContext) -> Result<Vec<OptimizationStep>> {
+    async fn build_optimization_pipeline(
+        &self,
+        profile: &OptimizationProfile,
+        context: &OptimizationContext,
+    ) -> Result<Vec<OptimizationStep>> {
         let mut steps = Vec::new();
 
         steps.extend(profile.cpu_optimizations.to_steps());
@@ -127,7 +155,11 @@ impl OptimizationManager {
         Ok(steps)
     }
 
-    fn profile_matches_conditions(&self, profile: &OptimizationProfile, context: &OptimizationContext) -> bool {
+    fn profile_matches_conditions(
+        &self,
+        profile: &OptimizationProfile,
+        context: &OptimizationContext,
+    ) -> bool {
         for condition in &profile.conditions {
             match condition {
                 OptimizationCondition::GameTitle(title) => {
@@ -200,9 +232,9 @@ impl OptimizationManager {
                 io_scheduler: Some(storage::IoScheduler::Mq_deadline),
                 read_ahead: Some(256),
             },
-            conditions: vec![
-                OptimizationCondition::GpuVendor(crate::plugins::GpuVendor::Nvidia),
-            ],
+            conditions: vec![OptimizationCondition::GpuVendor(
+                crate::plugins::GpuVendor::Nvidia,
+            )],
         }
     }
 
@@ -322,9 +354,7 @@ impl OptimizationManager {
                 io_scheduler: Some(storage::IoScheduler::Noop),
                 read_ahead: Some(1024),
             },
-            conditions: vec![
-                OptimizationCondition::MemoryGb(8),
-            ],
+            conditions: vec![OptimizationCondition::MemoryGb(8)],
         }
     }
 

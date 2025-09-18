@@ -39,7 +39,7 @@ pub struct CapsuleHandle {
 /// Configuration from Nova's TOML format
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NovaContainerConfig {
-    pub capsule: String,  // Image name
+    pub capsule: String, // Image name
     pub volumes: Vec<String>,
     pub network: String,
     pub env: HashMap<String, String>,
@@ -87,14 +87,19 @@ impl BoltNovaRuntime {
     }
 
     /// Start a capsule from Nova configuration
-    pub async fn start_capsule(&self, name: &str, config: &NovaContainerConfig) -> Result<CapsuleHandle> {
+    pub async fn start_capsule(
+        &self,
+        name: &str,
+        config: &NovaContainerConfig,
+    ) -> Result<CapsuleHandle> {
         info!("Starting capsule '{}' from Nova config", name);
 
         // Convert Nova config to Bolt capsule config
         let _capsule_config = self.nova_to_bolt_config(config)?;
 
         // Create environment variables
-        let env_vars: Vec<String> = config.env
+        let env_vars: Vec<String> = config
+            .env
             .iter()
             .map(|(k, v)| format!("{}={}", k, v))
             .collect();
@@ -113,11 +118,12 @@ impl BoltNovaRuntime {
         runtime::run_container(
             &config.capsule,
             Some(name),
-            &[],  // ports - will be configured via network
+            &[], // ports - will be configured via network
             &env_vars,
             &volumes,
-            true,  // detach for background running
-        ).await?;
+            true, // detach for background running
+        )
+        .await?;
 
         // Get container info
         let containers = runtime::list_containers_info(false).await?;
@@ -131,12 +137,14 @@ impl BoltNovaRuntime {
             id: container.id.clone(),
             name: name.to_string(),
             status: CapsuleStatus::Running,
-            pid: None,  // Will be populated by monitoring
+            pid: None, // Will be populated by monitoring
         };
 
         // Store in active capsules
         let mut inner = self.inner.write().await;
-        inner.active_capsules.insert(name.to_string(), handle.clone());
+        inner
+            .active_capsules
+            .insert(name.to_string(), handle.clone());
 
         Ok(handle)
     }
@@ -184,9 +192,7 @@ impl BoltNovaRuntime {
     pub async fn get_capsule_status(&self, name: &str) -> Result<NovaStatus> {
         let containers = runtime::list_containers_info(true).await?;
 
-        let container = containers
-            .iter()
-            .find(|c| c.name == name);
+        let container = containers.iter().find(|c| c.name == name);
 
         match container {
             Some(c) if c.status == "running" => Ok(NovaStatus::Running),
@@ -304,7 +310,8 @@ impl BoltNovaRuntime {
                 cache_policy: crate::capsules::CachePolicy::WriteBack,
             },
             data_disks: vec![],
-            shared_folders: nova_config.volumes
+            shared_folders: nova_config
+                .volumes
                 .iter()
                 .filter_map(|v| {
                     let parts: Vec<&str> = v.split(':').collect();
@@ -382,4 +389,3 @@ pub enum NovaError {
     #[error("GPU configuration error: {0}")]
     GpuError(String),
 }
-

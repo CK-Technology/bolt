@@ -92,6 +92,7 @@ impl ComposeCompat {
             services: HashMap::new(),
             networks: None,
             volumes: None,
+            snapshots: None,
         };
 
         // Convert services

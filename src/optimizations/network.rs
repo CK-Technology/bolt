@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use super::{OptimizationStep, ToOptimizationSteps};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkOptimizations {
@@ -51,7 +51,7 @@ impl ToOptimizationSteps for NetworkOptimizations {
 impl NetworkPriority {
     pub fn to_qos_class(&self) -> u32 {
         match self {
-            NetworkPriority::Critical => 0,  // Highest priority
+            NetworkPriority::Critical => 0, // Highest priority
             NetworkPriority::Gaming => 1,
             NetworkPriority::Streaming => 2,
             NetworkPriority::Background => 3, // Lowest priority

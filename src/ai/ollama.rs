@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::process::Command;
-use tracing::{info, warn, debug};
+use tracing::{debug, info, warn};
 
 use super::{AiOptimizer, AiWorkloadConfig, ModelSize};
 
@@ -45,23 +45,36 @@ impl OllamaManager {
         }
     }
 
-    pub async fn optimize_for_container(&self, container_id: &str, model_name: &str) -> Result<AiWorkloadConfig> {
-        info!("🤖 Optimizing Ollama for container {} with model {}", container_id, model_name);
+    pub async fn optimize_for_container(
+        &self,
+        container_id: &str,
+        model_name: &str,
+    ) -> Result<AiWorkloadConfig> {
+        info!(
+            "🤖 Optimizing Ollama for container {} with model {}",
+            container_id, model_name
+        );
 
         let gpu_memory = self.get_available_gpu_memory().await?;
         let system_memory = self.get_available_system_memory()?;
 
         let optimizer = AiOptimizer::new();
-        let mut config = optimizer.optimize_for_ollama(model_name, gpu_memory).await?;
+        let mut config = optimizer
+            .optimize_for_ollama(model_name, gpu_memory)
+            .await?;
 
         // Ollama-specific optimizations
-        self.apply_ollama_specific_optimizations(&mut config, model_name).await?;
+        self.apply_ollama_specific_optimizations(&mut config, model_name)
+            .await?;
 
         info!("✅ Ollama optimization complete for {}", model_name);
         Ok(config)
     }
 
-    pub async fn create_optimization_profile(&self, model_name: &str) -> Result<OllamaOptimizationProfile> {
+    pub async fn create_optimization_profile(
+        &self,
+        model_name: &str,
+    ) -> Result<OllamaOptimizationProfile> {
         let model_info = self.get_model_info(model_name).await?;
         let gpu_memory = self.get_available_gpu_memory().await?;
         let cpu_count = num_cpus::get() as u32;
@@ -80,14 +93,22 @@ impl OllamaManager {
         Ok(profile)
     }
 
-    pub async fn apply_optimizations(&self, container_id: &str, profile: &OllamaOptimizationProfile) -> Result<()> {
-        info!("🔧 Applying Ollama optimizations to container {}", container_id);
+    pub async fn apply_optimizations(
+        &self,
+        container_id: &str,
+        profile: &OllamaOptimizationProfile,
+    ) -> Result<()> {
+        info!(
+            "🔧 Applying Ollama optimizations to container {}",
+            container_id
+        );
 
         let env_vars = self.generate_environment_variables(profile);
 
         // Apply environment variables to container
         for (key, value) in env_vars {
-            self.set_container_env_var(container_id, &key, &value).await?;
+            self.set_container_env_var(container_id, &key, &value)
+                .await?;
         }
 
         // Apply system-level optimizations
@@ -100,9 +121,7 @@ impl OllamaManager {
     pub async fn pull_model(&self, model_name: &str) -> Result<()> {
         info!("📥 Pulling Ollama model: {}", model_name);
 
-        let output = Command::new("ollama")
-            .args(&["pull", model_name])
-            .output();
+        let output = Command::new("ollama").args(&["pull", model_name]).output();
 
         match output {
             Ok(result) => {
@@ -111,7 +130,11 @@ impl OllamaManager {
                     Ok(())
                 } else {
                     let error = String::from_utf8_lossy(&result.stderr);
-                    Err(anyhow::anyhow!("Failed to pull model {}: {}", model_name, error))
+                    Err(anyhow::anyhow!(
+                        "Failed to pull model {}: {}",
+                        model_name,
+                        error
+                    ))
                 }
             }
             Err(e) => {
@@ -148,7 +171,10 @@ impl OllamaManager {
 
             Ok(models)
         } else {
-            Err(anyhow::anyhow!("Failed to list models: {}", response.status()))
+            Err(anyhow::anyhow!(
+                "Failed to list models: {}",
+                response.status()
+            ))
         }
     }
 
@@ -163,11 +189,18 @@ impl OllamaManager {
         if response.status().is_success() {
             Ok(response.json().await?)
         } else {
-            Err(anyhow::anyhow!("Failed to get model info for {}", model_name))
+            Err(anyhow::anyhow!(
+                "Failed to get model info for {}",
+                model_name
+            ))
         }
     }
 
-    async fn apply_ollama_specific_optimizations(&self, config: &mut AiWorkloadConfig, model_name: &str) -> Result<()> {
+    async fn apply_ollama_specific_optimizations(
+        &self,
+        config: &mut AiWorkloadConfig,
+        model_name: &str,
+    ) -> Result<()> {
         // Determine if this is a code model
         if model_name.to_lowercase().contains("code") {
             config.model_config.context_length = Some(8192); // Larger context for code
@@ -175,20 +208,31 @@ impl OllamaManager {
         }
 
         // Adjust for chat vs completion models
-        if model_name.to_lowercase().contains("chat") || model_name.to_lowercase().contains("instruct") {
+        if model_name.to_lowercase().contains("chat")
+            || model_name.to_lowercase().contains("instruct")
+        {
             config.model_config.batch_size = Some(1); // Chat typically uses batch size 1
         }
 
         // Vision model optimizations
-        if model_name.to_lowercase().contains("vision") || model_name.to_lowercase().contains("llava") {
-            config.hardware_config.memory_config.memory_limit_gb =
-                config.hardware_config.memory_config.memory_limit_gb.map(|x| x + 4); // Extra memory for vision
+        if model_name.to_lowercase().contains("vision")
+            || model_name.to_lowercase().contains("llava")
+        {
+            config.hardware_config.memory_config.memory_limit_gb = config
+                .hardware_config
+                .memory_config
+                .memory_limit_gb
+                .map(|x| x + 4); // Extra memory for vision
         }
 
         Ok(())
     }
 
-    fn calculate_optimal_gpu_layers(&self, model_info: &serde_json::Value, gpu_memory_gb: u32) -> u32 {
+    fn calculate_optimal_gpu_layers(
+        &self,
+        model_info: &serde_json::Value,
+        gpu_memory_gb: u32,
+    ) -> u32 {
         // Simplified calculation - in practice, this would be more sophisticated
         let total_layers = model_info["details"]["parameter_size"]
             .as_str()
@@ -196,11 +240,11 @@ impl OllamaManager {
             .unwrap_or(7.0) as u32;
 
         match gpu_memory_gb {
-            0..=4 => 0,           // CPU only
+            0..=4 => 0, // CPU only
             5..=8 => total_layers / 4,
             9..=16 => total_layers / 2,
             17..=24 => (total_layers * 3) / 4,
-            _ => total_layers,    // All layers on GPU
+            _ => total_layers, // All layers on GPU
         }
     }
 
@@ -223,12 +267,21 @@ impl OllamaManager {
         }
     }
 
-    fn generate_environment_variables(&self, profile: &OllamaOptimizationProfile) -> HashMap<String, String> {
+    fn generate_environment_variables(
+        &self,
+        profile: &OllamaOptimizationProfile,
+    ) -> HashMap<String, String> {
         let mut env_vars = HashMap::new();
 
-        env_vars.insert("OLLAMA_NUM_PARALLEL".to_string(), profile.batch_size.to_string());
+        env_vars.insert(
+            "OLLAMA_NUM_PARALLEL".to_string(),
+            profile.batch_size.to_string(),
+        );
         env_vars.insert("OLLAMA_MAX_LOADED_MODELS".to_string(), "2".to_string());
-        env_vars.insert("OLLAMA_GPU_LAYERS".to_string(), profile.gpu_layers.to_string());
+        env_vars.insert(
+            "OLLAMA_GPU_LAYERS".to_string(),
+            profile.gpu_layers.to_string(),
+        );
 
         if profile.use_mmap {
             env_vars.insert("OLLAMA_USE_MMAP".to_string(), "1".to_string());
@@ -243,7 +296,10 @@ impl OllamaManager {
         }
 
         env_vars.insert("OLLAMA_FLASH_ATTENTION".to_string(), "1".to_string());
-        env_vars.insert("OLLAMA_THREADS".to_string(), profile.thread_count.to_string());
+        env_vars.insert(
+            "OLLAMA_THREADS".to_string(),
+            profile.thread_count.to_string(),
+        );
 
         env_vars
     }
@@ -267,7 +323,12 @@ impl OllamaManager {
         Ok(())
     }
 
-    async fn set_container_env_var(&self, container_id: &str, key: &str, value: &str) -> Result<()> {
+    async fn set_container_env_var(
+        &self,
+        container_id: &str,
+        key: &str,
+        value: &str,
+    ) -> Result<()> {
         debug!("Setting container {} env: {}={}", container_id, key, value);
         // This would integrate with the container runtime to set environment variables
         Ok(())
@@ -277,10 +338,16 @@ impl OllamaManager {
         // Fallback method using container
         let output = Command::new("docker")
             .args(&[
-                "run", "--rm", "--gpus", "all",
-                "-v", "ollama:/root/.ollama",
+                "run",
+                "--rm",
+                "--gpus",
+                "all",
+                "-v",
+                "ollama:/root/.ollama",
                 "ollama/ollama:latest",
-                "ollama", "pull", model_name
+                "ollama",
+                "pull",
+                model_name,
             ])
             .output();
 
@@ -291,10 +358,13 @@ impl OllamaManager {
                     Ok(())
                 } else {
                     let error = String::from_utf8_lossy(&result.stderr);
-                    Err(anyhow::anyhow!("Failed to pull model via container: {}", error))
+                    Err(anyhow::anyhow!(
+                        "Failed to pull model via container: {}",
+                        error
+                    ))
                 }
             }
-            Err(e) => Err(anyhow::anyhow!("Container pull failed: {}", e))
+            Err(e) => Err(anyhow::anyhow!("Container pull failed: {}", e)),
         }
     }
 

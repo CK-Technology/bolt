@@ -86,4 +86,4 @@ pub enum GamingError {
 }
 
 /// Convenience type alias for Bolt results
-pub type Result<T> = std::result::Result<T, BoltError>;
+pub type Result<T, E = BoltError> = std::result::Result<T, E>;

@@ -3,9 +3,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub mod client;
+pub mod drift_integration;
 pub mod types;
 
 pub use client::DriftClient;
+pub use drift_integration::{BoltPackage, DriftRegistryClient};
 pub use types::*;
 
 /// Drift Registry API specification for Bolt integration

@@ -18,43 +18,88 @@ pub struct Service {
     pub image: Option<String>,
     pub build: Option<String>,
     pub capsule: Option<String>,
+    pub command: Option<Vec<String>>,
+    pub entrypoint: Option<Vec<String>>,
     pub ports: Option<Vec<String>>,
     pub volumes: Option<Vec<String>>,
     pub environment: Option<HashMap<String, String>>,
     pub env: Option<HashMap<String, String>>,
     pub depends_on: Option<Vec<String>>,
-    pub restart: Option<RestartPolicy>,
+    pub restart: Option<String>,
     pub networks: Option<Vec<String>>,
     pub storage: Option<Storage>,
     pub auth: Option<Auth>,
     pub gaming: Option<GamingConfig>,
+    pub working_dir: Option<String>,
+    pub user: Option<String>,
+    pub hostname: Option<String>,
+    pub container_name: Option<String>,
+    pub privileged: Option<bool>,
+    pub read_only: Option<bool>,
+    pub stdin_open: Option<bool>,
+    pub tty: Option<bool>,
+    pub network_mode: Option<String>,
+    pub pid: Option<String>,
+    pub ipc: Option<String>,
+    pub platform: Option<String>,
+    pub labels: Option<HashMap<String, String>>,
+    pub devices: Option<Vec<String>>,
+    pub cap_add: Option<Vec<String>>,
+    pub cap_drop: Option<Vec<String>>,
+    pub security_opt: Option<Vec<String>>,
+    pub sysctls: Option<HashMap<String, String>>,
+    pub tmpfs: Option<Vec<String>>,
+    pub dns: Option<Vec<String>>,
+    pub dns_search: Option<Vec<String>>,
+    pub extra_hosts: Option<Vec<String>>,
+    pub group_add: Option<Vec<String>>,
+    pub volumes_from: Option<Vec<String>>,
+    pub links: Option<Vec<String>>,
+    pub logging: Option<LoggingConfig>,
+    pub healthcheck: Option<HealthcheckConfig>,
+    pub cpu_limit: Option<String>,
+    pub memory_limit: Option<String>,
 }
+
+pub type NetworkConfig = Network;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Network {
-    pub driver: Option<String>,
-    pub subnet: Option<String>,
-    pub gateway: Option<String>,
-    pub ipam: Option<Ipam>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Ipam {
     pub driver: String,
-    pub config: Vec<IpamConfig>,
+    pub driver_opts: Option<HashMap<String, String>>,
+    pub attachable: Option<bool>,
+    pub enable_ipv6: Option<bool>,
+    pub internal: Option<bool>,
+    pub labels: Option<HashMap<String, String>>,
+    pub ipam: Option<IpamConfig>,
+    pub external: Option<bool>,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IpamConfig {
-    pub subnet: String,
-    pub gateway: Option<String>,
+    pub driver: Option<String>,
+    pub config: Option<Vec<IpamSubnetConfig>>,
+    pub options: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IpamSubnetConfig {
+    pub subnet: Option<String>,
+    pub ip_range: Option<String>,
+    pub gateway: Option<String>,
+    pub aux_addresses: Option<HashMap<String, String>>,
+}
+
+pub type VolumeConfig = Volume;
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct Volume {
     pub driver: Option<String>,
     pub driver_opts: Option<HashMap<String, String>>,
     pub external: Option<bool>,
+    pub labels: Option<HashMap<String, String>>,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -71,6 +116,23 @@ pub struct Auth {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GamingConfig {
+    pub enabled: bool,
+    pub gpu_passthrough: bool,
+    pub nvidia_runtime: bool,
+    pub amd_runtime: bool,
+    pub audio_passthrough: bool,
+    pub real_time_priority: bool,
+    pub wine_prefix: Option<String>,
+    pub proton_version: Option<String>,
+    pub dxvk_enabled: Option<bool>,
+    pub esync_enabled: Option<bool>,
+    pub fsync_enabled: Option<bool>,
+    pub performance_profile: Option<String>,
+    pub input_devices: Option<Vec<String>>,
+    pub display_driver: Option<String>,
+    pub resolution: Option<String>,
+    pub refresh_rate: Option<u32>,
+    pub vsync: Option<bool>,
     pub gpu: Option<GpuConfig>,
     pub audio: Option<AudioConfig>,
     pub wine: Option<WineConfig>,
@@ -78,16 +140,32 @@ pub struct GamingConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct LoggingConfig {
+    pub driver: String,
+    pub options: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct HealthcheckConfig {
+    pub test: Vec<String>,
+    pub interval: Option<String>,
+    pub timeout: Option<String>,
+    pub retries: Option<u32>,
+    pub start_period: Option<String>,
+    pub disable: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GpuConfig {
-    pub runtime: Option<String>,                // "nvbind", "docker", "nvidia", "amd"
+    pub runtime: Option<String>, // "nvbind", "docker", "nvidia", "amd"
     pub nvidia: Option<NvidiaConfig>,
     pub amd: Option<AmdConfig>,
     pub nvbind: Option<NvbindConfig>,
     pub passthrough: Option<bool>,
-    pub isolation_level: Option<String>,        // "shared", "exclusive", "virtual"
-    pub memory_limit: Option<String>,           // e.g., "8GB"
-    pub gaming: Option<GpuGamingConfig>,        // nvbind gaming optimizations
-    pub aiml: Option<GpuAiMlConfig>,           // nvbind AI/ML optimizations
+    pub isolation_level: Option<String>, // "shared", "exclusive", "virtual"
+    pub memory_limit: Option<String>,    // e.g., "8GB"
+    pub gaming: Option<GpuGamingConfig>, // nvbind gaming optimizations
+    pub aiml: Option<GpuAiMlConfig>,     // nvbind AI/ML optimizations
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -110,31 +188,31 @@ pub struct AmdConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct NvbindConfig {
-    pub driver: Option<String>,                 // "auto", "nvidia-open", "proprietary", "nouveau"
-    pub devices: Option<Vec<String>>,           // e.g., ["gpu:0"], ["gpu:all"]
-    pub wsl2_optimized: Option<bool>,           // Enable WSL2 optimizations
-    pub performance_mode: Option<String>,       // "ultra", "high", "balanced", "efficient"
-    pub preload_libraries: Option<bool>,        // Preload GPU libraries
+    pub driver: Option<String>, // "auto", "nvidia-open", "proprietary", "nouveau"
+    pub devices: Option<Vec<String>>, // e.g., ["gpu:0"], ["gpu:all"]
+    pub wsl2_optimized: Option<bool>, // Enable WSL2 optimizations
+    pub performance_mode: Option<String>, // "ultra", "high", "balanced", "efficient"
+    pub preload_libraries: Option<bool>, // Preload GPU libraries
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GpuGamingConfig {
-    pub profile: Option<String>,                // "ultra-low-latency", "performance", "balanced"
+    pub profile: Option<String>, // "ultra-low-latency", "performance", "balanced"
     pub dlss_enabled: Option<bool>,
     pub rt_cores_enabled: Option<bool>,
     pub wine_optimizations: Option<bool>,
-    pub vrs_enabled: Option<bool>,              // Variable Rate Shading
+    pub vrs_enabled: Option<bool>, // Variable Rate Shading
     pub performance_profile: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GpuAiMlConfig {
-    pub profile: Option<String>,                // "training", "inference", "development"
-    pub mig_enabled: Option<bool>,              // Multi-Instance GPU
+    pub profile: Option<String>,   // "training", "inference", "development"
+    pub mig_enabled: Option<bool>, // Multi-Instance GPU
     pub tensor_cores_enabled: Option<bool>,
     pub mixed_precision: Option<bool>,
-    pub cuda_cache_size: Option<u32>,           // CUDA cache size in MB
-    pub memory_pool_size: Option<String>,       // e.g., "16GB"
+    pub cuda_cache_size: Option<u32>,     // CUDA cache size in MB
+    pub memory_pool_size: Option<String>, // e.g., "16GB"
 }
 
 // Snapshot Configuration
@@ -151,52 +229,52 @@ pub struct SnapshotConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RetentionPolicy {
-    pub keep_hourly: Option<u32>,     // Keep N hourly snapshots
-    pub keep_daily: Option<u32>,      // Keep N daily snapshots
-    pub keep_weekly: Option<u32>,     // Keep N weekly snapshots
-    pub keep_monthly: Option<u32>,    // Keep N monthly snapshots
-    pub keep_yearly: Option<u32>,     // Keep N yearly snapshots
-    pub max_total: Option<u32>,       // Maximum total snapshots
+    pub keep_hourly: Option<u32>,          // Keep N hourly snapshots
+    pub keep_daily: Option<u32>,           // Keep N daily snapshots
+    pub keep_weekly: Option<u32>,          // Keep N weekly snapshots
+    pub keep_monthly: Option<u32>,         // Keep N monthly snapshots
+    pub keep_yearly: Option<u32>,          // Keep N yearly snapshots
+    pub max_total: Option<u32>,            // Maximum total snapshots
     pub cleanup_frequency: Option<String>, // "daily", "weekly", "monthly"
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SnapshotTriggers {
     // Time-based triggers
-    pub hourly: Option<bool>,                        // Take hourly snapshots
-    pub daily: Option<String>,                       // Daily at specific time (e.g. "02:00")
-    pub weekly: Option<String>,                      // Weekly on day+time (e.g. "sunday@02:00")
-    pub monthly: Option<String>,                     // Monthly on day+time (e.g. "1@02:00")
+    pub hourly: Option<bool>,    // Take hourly snapshots
+    pub daily: Option<String>,   // Daily at specific time (e.g. "02:00")
+    pub weekly: Option<String>,  // Weekly on day+time (e.g. "sunday@02:00")
+    pub monthly: Option<String>, // Monthly on day+time (e.g. "1@02:00")
 
     // Operation-based triggers
-    pub before_container_run: Option<bool>,          // Before running containers
-    pub before_build: Option<bool>,                  // Before building images
-    pub before_surge_up: Option<bool>,               // Before surge up
-    pub before_system_update: Option<bool>,          // Before system updates
+    pub before_container_run: Option<bool>, // Before running containers
+    pub before_build: Option<bool>,         // Before building images
+    pub before_surge_up: Option<bool>,      // Before surge up
+    pub before_system_update: Option<bool>, // Before system updates
 
     // Change-based triggers
     pub on_file_changes: Option<ChangeBasedConfig>, // Monitor file changes
-    pub min_change_threshold: Option<String>,        // Minimum changes to trigger (e.g. "100MB", "1000 files")
-    pub change_detection_interval: Option<String>,   // How often to check (e.g. "5m", "1h")
+    pub min_change_threshold: Option<String>, // Minimum changes to trigger (e.g. "100MB", "1000 files")
+    pub change_detection_interval: Option<String>, // How often to check (e.g. "5m", "1h")
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ChangeBasedConfig {
     pub enabled: Option<bool>,
-    pub watch_paths: Option<Vec<String>>,            // Paths to monitor for changes
-    pub exclude_paths: Option<Vec<String>>,          // Paths to exclude from monitoring
-    pub file_patterns: Option<Vec<String>>,          // File patterns to monitor (e.g. "*.toml", "*.rs")
-    pub exclude_patterns: Option<Vec<String>>,       // Patterns to exclude (e.g. "*.tmp", "*.log")
-    pub change_types: Option<Vec<String>>,           // "create", "modify", "delete"
+    pub watch_paths: Option<Vec<String>>, // Paths to monitor for changes
+    pub exclude_paths: Option<Vec<String>>, // Paths to exclude from monitoring
+    pub file_patterns: Option<Vec<String>>, // File patterns to monitor (e.g. "*.toml", "*.rs")
+    pub exclude_patterns: Option<Vec<String>>, // Patterns to exclude (e.g. "*.tmp", "*.log")
+    pub change_types: Option<Vec<String>>, // "create", "modify", "delete"
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct NamedSnapshot {
-    pub name: String,                                // User-friendly name
-    pub description: Option<String>,                 // Description of the snapshot
-    pub trigger: Option<String>,                     // When to create ("manual", "before_gaming", etc.)
-    pub auto_create: Option<bool>,                   // Create automatically
-    pub keep_forever: Option<bool>,                  // Exclude from retention cleanup
+    pub name: String,                // User-friendly name
+    pub description: Option<String>, // Description of the snapshot
+    pub trigger: Option<String>,     // When to create ("manual", "before_gaming", etc.)
+    pub auto_create: Option<bool>,   // Create automatically
+    pub keep_forever: Option<bool>,  // Exclude from retention cleanup
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -227,6 +305,44 @@ pub enum RestartPolicy {
     Always,
     OnFailure,
     UnlessStopped,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum DriverType {
+    Auto,
+    Docker,
+    Podman,
+    Containerd,
+    Crun,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum GamingProfile {
+    Balanced,
+    HighPerformance,
+    PowerSaver,
+    Competitive,
+    Quality,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PerformanceMode {
+    Gaming,
+    Balanced,
+    PowerSaver,
+    HighPerformance,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum IsolationLevel {
+    Shared,
+    Exclusive,
+    Container,
+    Process,
 }
 
 impl BoltFile {
@@ -681,24 +797,18 @@ impl BoltFile {
         debug!("Validating network definitions");
 
         for (name, network) in networks {
-            if let Some(ref subnet) = network.subnet {
-                if !subnet.contains('/') {
-                    return Err(anyhow!(
-                        "Network '{}': subnet '{}' must be in CIDR notation",
-                        name,
-                        subnet
-                    ));
-                }
-            }
-
             if let Some(ref ipam) = network.ipam {
-                for config in &ipam.config {
-                    if !config.subnet.contains('/') {
-                        return Err(anyhow!(
-                            "Network '{}': IPAM subnet '{}' must be in CIDR notation",
-                            name,
-                            config.subnet
-                        ));
+                if let Some(ref configs) = ipam.config {
+                    for config in configs {
+                        if let Some(ref subnet) = config.subnet {
+                            if !subnet.contains('/') {
+                                return Err(anyhow!(
+                                    "Network '{}': IPAM subnet '{}' must be in CIDR notation",
+                                    name,
+                                    subnet
+                                ));
+                            }
+                        }
                     }
                 }
             }
@@ -746,7 +856,7 @@ impl BoltFile {
             }
 
             // Suggest health checks for long-running services
-            if service.restart == Some(RestartPolicy::Always) {
+            if service.restart == Some("always".to_string()) {
                 suggestions.push(format!(
                     "Service '{}': Consider adding health checks for better reliability",
                     name
@@ -909,18 +1019,11 @@ pub fn create_example_boltfile() -> BoltFile {
         "web".to_string(),
         Service {
             image: Some("bolt://nginx:latest".to_string()),
-            build: None,
-            capsule: None,
             ports: Some(vec!["80:80".to_string()]),
             volumes: Some(vec!["./site:/usr/share/nginx/html".to_string()]),
-            environment: None,
-            env: None,
             depends_on: Some(vec!["api".to_string()]),
-            restart: Some(RestartPolicy::Always),
-            networks: None,
-            storage: None,
-            auth: None,
-            gaming: None,
+            restart: Some("always".to_string()),
+            ..Default::default()
         },
     );
 
@@ -930,21 +1033,15 @@ pub fn create_example_boltfile() -> BoltFile {
         Service {
             image: None,
             build: Some("./api".to_string()),
-            capsule: None,
             ports: Some(vec!["3000:3000".to_string()]),
-            volumes: None,
-            environment: None,
             env: {
                 let mut env = HashMap::new();
                 env.insert("DATABASE_URL".to_string(), "bolt://db".to_string());
                 Some(env)
             },
             depends_on: Some(vec!["db".to_string()]),
-            restart: Some(RestartPolicy::Always),
-            networks: None,
-            storage: None,
-            auth: None,
-            gaming: None,
+            restart: Some("always".to_string()),
+            ..Default::default()
         },
     );
 
@@ -952,16 +1049,8 @@ pub fn create_example_boltfile() -> BoltFile {
     services.insert(
         "db".to_string(),
         Service {
-            image: None,
-            build: None,
             capsule: Some("postgres".to_string()),
-            ports: None,
-            volumes: None,
-            environment: None,
-            env: None,
-            depends_on: None,
-            restart: Some(RestartPolicy::Always),
-            networks: None,
+            restart: Some("always".to_string()),
             storage: Some(Storage {
                 size: "5Gi".to_string(),
                 driver: None,
@@ -970,7 +1059,7 @@ pub fn create_example_boltfile() -> BoltFile {
                 user: "demo".to_string(),
                 password: "secret".to_string(),
             }),
-            gaming: None,
+            ..Default::default()
         },
     );
 
@@ -989,7 +1078,7 @@ pub fn create_example_boltfile() -> BoltFile {
             environment: None,
             env: None,
             depends_on: None,
-            restart: Some(RestartPolicy::No),
+            restart: Some("no".to_string()),
             networks: None,
             storage: Some(Storage {
                 size: "100Gi".to_string(),
@@ -997,6 +1086,23 @@ pub fn create_example_boltfile() -> BoltFile {
             }),
             auth: None,
             gaming: Some(GamingConfig {
+                enabled: true,
+                gpu_passthrough: true,
+                nvidia_runtime: true,
+                amd_runtime: false,
+                audio_passthrough: true,
+                real_time_priority: true,
+                wine_prefix: Some("/games/wine-prefix".to_string()),
+                proton_version: Some("8.0".to_string()),
+                dxvk_enabled: Some(true),
+                esync_enabled: Some(true),
+                fsync_enabled: Some(true),
+                performance_profile: Some("maximum".to_string()),
+                input_devices: None,
+                display_driver: None,
+                resolution: None,
+                refresh_rate: None,
+                vsync: Some(true),
                 gpu: Some(GpuConfig {
                     runtime: Some("nvbind".to_string()),
                     nvidia: Some(NvidiaConfig {
@@ -1046,6 +1152,7 @@ pub fn create_example_boltfile() -> BoltFile {
                     rt_priority: Some(50),
                 }),
             }),
+            ..Default::default()
         },
     );
 
@@ -1060,26 +1167,26 @@ pub fn create_example_boltfile() -> BoltFile {
             root_path: Some("/".to_string()),
             snapshot_path: Some("/.snapshots".to_string()),
             retention: Some(RetentionPolicy {
-                keep_hourly: Some(0),     // No hourly snapshots
-                keep_daily: Some(7),      // Keep 7 daily snapshots
-                keep_weekly: Some(4),     // Keep 4 weekly snapshots
-                keep_monthly: Some(6),    // Keep 6 monthly snapshots
-                keep_yearly: Some(2),     // Keep 2 yearly snapshots
-                max_total: Some(50),      // Maximum 50 total snapshots
+                keep_hourly: Some(0),  // No hourly snapshots
+                keep_daily: Some(7),   // Keep 7 daily snapshots
+                keep_weekly: Some(4),  // Keep 4 weekly snapshots
+                keep_monthly: Some(6), // Keep 6 monthly snapshots
+                keep_yearly: Some(2),  // Keep 2 yearly snapshots
+                max_total: Some(50),   // Maximum 50 total snapshots
                 cleanup_frequency: Some("daily".to_string()),
             }),
             triggers: Some(SnapshotTriggers {
                 // Time-based
                 hourly: Some(false),
-                daily: Some("02:00".to_string()),           // Daily at 2 AM
-                weekly: Some("sunday@03:00".to_string()),   // Sunday at 3 AM
-                monthly: Some("1@04:00".to_string()),       // 1st of month at 4 AM
+                daily: Some("02:00".to_string()), // Daily at 2 AM
+                weekly: Some("sunday@03:00".to_string()), // Sunday at 3 AM
+                monthly: Some("1@04:00".to_string()), // 1st of month at 4 AM
 
                 // Operation-based
-                before_container_run: Some(false),          // Don't snapshot before every run
-                before_build: Some(true),                   // Snapshot before builds
-                before_surge_up: Some(true),                // Snapshot before surge operations
-                before_system_update: Some(true),           // Snapshot before system updates
+                before_container_run: Some(false), // Don't snapshot before every run
+                before_build: Some(true),          // Snapshot before builds
+                before_surge_up: Some(true),       // Snapshot before surge operations
+                before_system_update: Some(true),  // Snapshot before system updates
 
                 // Change-based
                 on_file_changes: Some(ChangeBasedConfig {
@@ -1108,10 +1215,7 @@ pub fn create_example_boltfile() -> BoltFile {
                         "*.cache".to_string(),
                         ".git/*".to_string(),
                     ]),
-                    change_types: Some(vec![
-                        "modify".to_string(),
-                        "create".to_string(),
-                    ]),
+                    change_types: Some(vec!["modify".to_string(), "create".to_string()]),
                 }),
                 min_change_threshold: Some("50MB".to_string()),
                 change_detection_interval: Some("30m".to_string()),

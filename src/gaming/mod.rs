@@ -4,6 +4,7 @@ use std::process::Command;
 use tokio::process::Command as AsyncCommand;
 use tracing::{debug, info, warn};
 
+pub mod advanced_optimizations;
 pub mod realtime;
 pub mod wayland;
 // Gaming commands enum for API usage

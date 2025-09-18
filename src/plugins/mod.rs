@@ -82,13 +82,21 @@ impl PluginManager {
                 }
             }
             PluginType::NetworkOptimization | PluginType::PerformanceMonitoring => {
-                if let Some(_opt_plugin) = plugin.as_any().downcast_ref::<Box<dyn OptimizationPlugin>>() {
+                if let Some(_opt_plugin) = plugin
+                    .as_any()
+                    .downcast_ref::<Box<dyn OptimizationPlugin>>()
+                {
                     // Cannot clone trait objects, needs redesign
-                    tracing::warn!("Optimization plugin loading needs redesign for trait object handling");
+                    tracing::warn!(
+                        "Optimization plugin loading needs redesign for trait object handling"
+                    );
                 }
             }
             _ => {
-                self.plugins.write().await.insert(manifest.name.clone(), plugin);
+                self.plugins
+                    .write()
+                    .await
+                    .insert(manifest.name.clone(), plugin);
             }
         }
 
@@ -101,7 +109,11 @@ impl PluginManager {
         Vec::new()
     }
 
-    pub async fn apply_optimizations(&self, optimization_type: &str, context: &OptimizationContext) -> Result<()> {
+    pub async fn apply_optimizations(
+        &self,
+        optimization_type: &str,
+        context: &OptimizationContext,
+    ) -> Result<()> {
         let plugins = self.optimization_plugins.read().await;
 
         for plugin in plugins.values() {
@@ -152,7 +164,9 @@ impl PluginManager {
             match permission {
                 Permission::SystemControl => {
                     if !self.has_root_privileges() {
-                        return Err(anyhow::anyhow!("Plugin requires system control but running without privileges"));
+                        return Err(anyhow::anyhow!(
+                            "Plugin requires system control but running without privileges"
+                        ));
                     }
                 }
                 _ => {}

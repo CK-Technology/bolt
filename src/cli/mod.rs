@@ -4,7 +4,9 @@ pub mod compat;
 
 #[derive(Parser)]
 #[command(name = "bolt")]
-#[command(about = "Next-generation container runtime for Linux gaming and development")]
+#[command(
+    about = "Performance-first container runtime with revolutionary networking and optimization"
+)]
 #[command(version, long_about = None)]
 pub struct Cli {
     #[command(subcommand)]

@@ -1,7 +1,7 @@
-//! Bolt - Next-generation container runtime for Linux gaming and development
+//! Bolt - Performance-first container runtime with revolutionary networking
 //!
-//! This crate provides programmatic access to Bolt's container runtime, orchestration,
-//! and gaming optimization features.
+//! This crate provides programmatic access to Bolt's high-performance container runtime,
+//! advanced networking capabilities, and intelligent optimization features.
 
 #![recursion_limit = "512"]
 
@@ -10,10 +10,14 @@ pub mod builds;
 pub mod capsules;
 pub mod compat;
 pub mod config;
+pub mod docker_compat;
 pub mod error;
 pub mod gaming;
+pub mod monitoring;
 pub mod network;
 pub mod networking;
+pub mod nova_api;
+pub mod nova_bridge;
 pub mod optimizations;
 pub mod plugins;
 pub mod profiles;
@@ -21,8 +25,7 @@ pub mod registry;
 pub mod runtime;
 pub mod surge;
 pub mod types;
-pub mod nova_api;
-pub mod nova_bridge;
+pub mod volume;
 
 pub use config::*;
 pub use error::{BoltError, Result};
@@ -36,9 +39,19 @@ pub use anyhow;
 /// Re-exports for easier API usage
 pub mod api {
     pub use crate::config::{BoltConfig, BoltFile, GamingConfig, Service, create_example_boltfile};
+    pub use crate::docker_compat::{DockerCompatLayer, DockerEnvironmentAnalysis};
+    pub use crate::gaming::advanced_optimizations::{
+        AdvancedGamingConfig, AdvancedGamingOptimizer, PerformanceProfile,
+    };
+    pub use crate::networking::{AdvancedFirewallManager, BoltAdvancedNetworking, QUICSocketProxy};
+    pub use crate::nova_api::{
+        BoltNovaRuntime, CapsuleHandle, CapsuleMetrics, NovaContainerConfig, NovaStatus,
+    };
+    pub use crate::nova_bridge::{
+        NovaBridgeConfig, NovaBridgeManager, NovaServiceDiscovery, ServiceEntry,
+    };
+    pub use crate::registry::drift_integration::{BoltPackage, DriftRegistryClient};
     pub use crate::{BoltRuntime, ContainerInfo, NetworkInfo, ServiceInfo, SurgeStatus};
-    pub use crate::nova_api::{BoltNovaRuntime, NovaContainerConfig, NovaStatus, CapsuleMetrics, CapsuleHandle};
-    pub use crate::nova_bridge::{NovaBridgeManager, NovaBridgeConfig, NovaServiceDiscovery, ServiceEntry};
 }
 
 /// Builder for creating Boltfiles programmatically
@@ -80,6 +93,7 @@ impl BoltFileBuilder {
             services: self.services,
             networks: None,
             volumes: None,
+            snapshots: None,
         }
     }
 }

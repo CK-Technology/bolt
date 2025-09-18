@@ -670,6 +670,12 @@ impl GhostbayClient {
 
         Ok((namespace, name, tag))
     }
+
+    pub async fn blob_exists(&self, _blob_name: &str) -> Result<bool> {
+        info!("Checking if blob exists in Ghostbay");
+        // Stub implementation - in a real scenario this would check the Ghostbay API
+        Ok(true)
+    }
 }
 
 /// Integration helper for Bolt's storage manager

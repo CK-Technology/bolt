@@ -2,15 +2,15 @@
 name = "bolt"
 version = "0.1.0"
 edition = "2024"
-description = "Next-generation Rust container runtime with gaming optimizations, GPU passthrough, and QUIC networking"
+description = "Performance-first Rust container runtime with revolutionary networking, GPU optimization, and intelligent resource management"
 license = "MIT"
 authors = ["ghostkellz <ghostkellz@proton.me>"]
 repository = "https://github.com/CK-Technology/bolt"
 homepage = "https://github.com/CK-Technology/bolt"
 documentation = "https://github.com/CK-Technology/bolt#api"
 readme = "README.md"
-keywords = ["containers", "gaming", "gpu", "quic", "orchestration"]
-categories = ["virtualization", "game-development", "network-programming"]
+keywords = ["containers", "performance", "gpu", "quic", "networking", "optimization"]
+categories = ["virtualization", "development-tools", "network-programming"]
 rust-version = "1.85"
 
 [lib]
@@ -34,7 +34,7 @@ anyhow = "1.0"
 thiserror = "1.0"
 # Logging
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # === PHASE 1: OCI RUNTIME & CONTAINERS ===
 # OCI runtime components
@@ -58,7 +58,8 @@ memmap2 = "0.9"
 # libseccomp = "0.3"  # Seccomp filtering
 
 # === PHASE 3: QUIC NETWORKING ===
-# QUIC implementation
+# QUIC implementation - multi-backend support for optimal performance
+quiche = { version = "0.21", optional = true }
 quinn = { version = "0.10", optional = true }
 rustls = { version = "0.20", features = ["dangerous_configuration"], optional = true }
 rcgen = { version = "0.12", optional = true }
@@ -141,9 +142,18 @@ libloading = "0.8"
 hex = "0.4"
 # Async trait support for plugins
 async-trait = "0.1"
+# Bytes manipulation
+bytes = "1.5"
 # nvbind integration for sub-microsecond GPU passthrough
 nvbind = { git = "https://github.com/ghostkellz/nvbind", features = ["bolt"], optional = true }
-# UUID generation for examples - removed duplicate, already defined above
+# Monitoring and observability
+warp = "0.3"
+hostname = "0.4"
+# Tracing and logging
+tracing-appender = "0.2"
+# Metrics and monitoring
+# opentelemetry = { version = "0.20", features = ["rt-tokio"] }
+# opentelemetry-jaeger = { version = "0.19", features = ["rt-tokio"] }
 
 [dev-dependencies]
 tempfile = "3.8"
@@ -167,7 +177,7 @@ default = ["gaming", "quic-networking", "oci-runtime"]
 
 # Core features
 gaming = ["wayland-client", "smithay-client-toolkit"]
-quic-networking = ["quinn", "rustls", "rcgen", "ipnet"]
+quic-networking = ["quiche", "quinn", "rustls", "rcgen", "ipnet"]
 oci-runtime = ["oci-spec", "nix"]
 
 # Optional GPU support

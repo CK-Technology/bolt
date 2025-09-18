@@ -61,14 +61,15 @@ impl PluginRegistry {
         self.plugins
             .values()
             .filter(|entry| {
-                entry.manifest.name.contains(query) ||
-                entry.manifest.description.contains(query)
+                entry.manifest.name.contains(query) || entry.manifest.description.contains(query)
             })
             .collect()
     }
 
     pub async fn install(&self, plugin_name: &str, install_path: &PathBuf) -> Result<()> {
-        let entry = self.plugins.get(plugin_name)
+        let entry = self
+            .plugins
+            .get(plugin_name)
             .ok_or_else(|| anyhow::anyhow!("Plugin not found: {}", plugin_name))?;
 
         self.download_plugin(entry, install_path).await?;
@@ -88,7 +89,10 @@ impl PluginRegistry {
     pub fn list_by_type(&self, plugin_type: &super::PluginType) -> Vec<&RegistryEntry> {
         self.plugins
             .values()
-            .filter(|entry| std::mem::discriminant(&entry.manifest.plugin_type) == std::mem::discriminant(plugin_type))
+            .filter(|entry| {
+                std::mem::discriminant(&entry.manifest.plugin_type)
+                    == std::mem::discriminant(plugin_type)
+            })
             .collect()
     }
 

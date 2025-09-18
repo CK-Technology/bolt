@@ -61,7 +61,10 @@ impl NvidiaManager {
     }
 
     pub async fn enable_dlss(&self, container_id: &str, enabled: bool) -> Result<()> {
-        info!("🎯 Setting NVIDIA DLSS to {} for container {}", enabled, container_id);
+        info!(
+            "🎯 Setting NVIDIA DLSS to {} for container {}",
+            enabled, container_id
+        );
 
         // DLSS is enabled by ensuring the container has access to the right libraries
         // and setting the appropriate environment variables
@@ -87,7 +90,10 @@ impl NvidiaManager {
     }
 
     pub async fn enable_reflex(&self, container_id: &str, enabled: bool) -> Result<()> {
-        info!("⚡ Setting NVIDIA Reflex to {} for container {}", enabled, container_id);
+        info!(
+            "⚡ Setting NVIDIA Reflex to {} for container {}",
+            enabled, container_id
+        );
 
         // Reflex requires low-latency mode and specific driver settings
         let reflex_env = if enabled {
@@ -104,7 +110,8 @@ impl NvidiaManager {
             ]
         };
 
-        self.set_container_env_vars(container_id, reflex_env).await?;
+        self.set_container_env_vars(container_id, reflex_env)
+            .await?;
 
         // Apply system-level optimizations for Reflex
         if enabled {
@@ -118,19 +125,28 @@ impl NvidiaManager {
     }
 
     pub async fn set_power_limit(&self, device_id: u32, watts: u32) -> Result<()> {
-        info!("⚡ Setting NVIDIA GPU {} power limit to {} watts", device_id, watts);
+        info!(
+            "⚡ Setting NVIDIA GPU {} power limit to {} watts",
+            device_id, watts
+        );
 
         #[cfg(feature = "nvidia-support")]
         {
             let nvml = Nvml::init().context("Failed to initialize NVML")?;
-            let device = nvml.device_by_index(device_id).context("Failed to get GPU device")?;
+            let device = nvml
+                .device_by_index(device_id)
+                .context("Failed to get GPU device")?;
 
             // Convert watts to milliwatts for NVML
             let milliwatts = watts * 1000;
-            device.set_power_management_limit(milliwatts)
+            device
+                .set_power_management_limit(milliwatts)
                 .context("Failed to set power limit")?;
 
-            info!("✅ Power limit set to {} watts for GPU {}", watts, device_id);
+            info!(
+                "✅ Power limit set to {} watts for GPU {}",
+                watts, device_id
+            );
         }
 
         #[cfg(not(feature = "nvidia-support"))]
@@ -143,14 +159,21 @@ impl NvidiaManager {
     }
 
     pub async fn set_memory_clock_offset(&self, device_id: u32, offset_mhz: i32) -> Result<()> {
-        info!("🔧 Setting NVIDIA GPU {} memory clock offset to {} MHz", device_id, offset_mhz);
+        info!(
+            "🔧 Setting NVIDIA GPU {} memory clock offset to {} MHz",
+            device_id, offset_mhz
+        );
 
         // Use nvidia-settings for clock offsets
         let output = Command::new("nvidia-settings")
             .args(&[
                 "-a",
-                &format!("[gpu:{}]/GPUMemoryTransferRateOffset[3]={}", device_id, offset_mhz),
-                "--assign-server-socket", "/tmp/.X11-unix/X0"
+                &format!(
+                    "[gpu:{}]/GPUMemoryTransferRateOffset[3]={}",
+                    device_id, offset_mhz
+                ),
+                "--assign-server-socket",
+                "/tmp/.X11-unix/X0",
             ])
             .output()
             .context("Failed to execute nvidia-settings")?;
@@ -162,18 +185,28 @@ impl NvidiaManager {
             ));
         }
 
-        info!("✅ Memory clock offset set to {} MHz for GPU {}", offset_mhz, device_id);
+        info!(
+            "✅ Memory clock offset set to {} MHz for GPU {}",
+            offset_mhz, device_id
+        );
         Ok(())
     }
 
     pub async fn set_core_clock_offset(&self, device_id: u32, offset_mhz: i32) -> Result<()> {
-        info!("🔧 Setting NVIDIA GPU {} core clock offset to {} MHz", device_id, offset_mhz);
+        info!(
+            "🔧 Setting NVIDIA GPU {} core clock offset to {} MHz",
+            device_id, offset_mhz
+        );
 
         let output = Command::new("nvidia-settings")
             .args(&[
                 "-a",
-                &format!("[gpu:{}]/GPUGraphicsClockOffset[3]={}", device_id, offset_mhz),
-                "--assign-server-socket", "/tmp/.X11-unix/X0"
+                &format!(
+                    "[gpu:{}]/GPUGraphicsClockOffset[3]={}",
+                    device_id, offset_mhz
+                ),
+                "--assign-server-socket",
+                "/tmp/.X11-unix/X0",
             ])
             .output()
             .context("Failed to execute nvidia-settings")?;
@@ -185,11 +218,18 @@ impl NvidiaManager {
             ));
         }
 
-        info!("✅ Core clock offset set to {} MHz for GPU {}", offset_mhz, device_id);
+        info!(
+            "✅ Core clock offset set to {} MHz for GPU {}",
+            offset_mhz, device_id
+        );
         Ok(())
     }
 
-    async fn set_container_env_vars(&self, container_id: &str, env_vars: Vec<(&str, &str)>) -> Result<()> {
+    async fn set_container_env_vars(
+        &self,
+        container_id: &str,
+        env_vars: Vec<(&str, &str)>,
+    ) -> Result<()> {
         // This would integrate with the container runtime to set environment variables
         // For now, we'll log what would be set
         for (key, value) in env_vars {
@@ -223,10 +263,7 @@ impl NvidiaManager {
     #[cfg(not(feature = "nvidia-support"))]
     async fn set_power_limit_fallback(&self, device_id: u32, watts: u32) -> Result<()> {
         let output = Command::new("nvidia-smi")
-            .args(&[
-                "-i", &device_id.to_string(),
-                "-pl", &watts.to_string()
-            ])
+            .args(&["-i", &device_id.to_string(), "-pl", &watts.to_string()])
             .output()
             .context("Failed to execute nvidia-smi")?;
 

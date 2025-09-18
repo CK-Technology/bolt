@@ -61,10 +61,15 @@ impl NovaBridgeManager {
 
     /// Connect a container to a Nova bridge
     pub async fn connect_container(&self, bridge_name: &str, container_id: &str) -> Result<String> {
-        let bridge = self.bridges.get(bridge_name)
+        let bridge = self
+            .bridges
+            .get(bridge_name)
             .ok_or_else(|| anyhow::anyhow!("Bridge {} not found", bridge_name))?;
 
-        info!("Connecting container {} to bridge {}", container_id, bridge_name);
+        info!(
+            "Connecting container {} to bridge {}",
+            container_id, bridge_name
+        );
 
         // Create veth pair
         let veth_host = format!("veth-{}", &container_id[..8]);
@@ -72,7 +77,9 @@ impl NovaBridgeManager {
 
         // Create the veth pair
         std::process::Command::new("ip")
-            .args(&["link", "add", &veth_host, "type", "veth", "peer", "name", &veth_cont])
+            .args(&[
+                "link", "add", &veth_host, "type", "veth", "peer", "name", &veth_cont,
+            ])
             .status()?;
 
         // Attach host end to bridge
@@ -90,7 +97,10 @@ impl NovaBridgeManager {
 
     /// Disconnect a container from a bridge
     pub async fn disconnect_container(&self, bridge_name: &str, container_id: &str) -> Result<()> {
-        info!("Disconnecting container {} from bridge {}", container_id, bridge_name);
+        info!(
+            "Disconnecting container {} from bridge {}",
+            container_id, bridge_name
+        );
 
         let veth_host = format!("veth-{}", &container_id[..8]);
 
@@ -147,7 +157,17 @@ impl NovaBridgeManager {
 
         // Add IP address to bridge
         std::process::Command::new("ip")
-            .args(&["addr", "add", &format!("{}/{}", config.gateway, config.subnet.split('/').last().unwrap_or("24")), "dev", &config.name])
+            .args(&[
+                "addr",
+                "add",
+                &format!(
+                    "{}/{}",
+                    config.gateway,
+                    config.subnet.split('/').last().unwrap_or("24")
+                ),
+                "dev",
+                &config.name,
+            ])
             .status()?;
 
         Ok(())
@@ -162,7 +182,19 @@ impl NovaBridgeManager {
 
         // Add MASQUERADE rule for outbound traffic
         std::process::Command::new("iptables")
-            .args(&["-t", "nat", "-A", "POSTROUTING", "-s", &config.subnet, "!", "-o", &config.name, "-j", "MASQUERADE"])
+            .args(&[
+                "-t",
+                "nat",
+                "-A",
+                "POSTROUTING",
+                "-s",
+                &config.subnet,
+                "!",
+                "-o",
+                &config.name,
+                "-j",
+                "MASQUERADE",
+            ])
             .status()?;
 
         // Allow forwarding from the bridge
@@ -172,15 +204,32 @@ impl NovaBridgeManager {
 
         // Allow forwarding to the bridge
         std::process::Command::new("iptables")
-            .args(&["-A", "FORWARD", "-o", &config.name, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"])
+            .args(&[
+                "-A",
+                "FORWARD",
+                "-o",
+                &config.name,
+                "-m",
+                "state",
+                "--state",
+                "RELATED,ESTABLISHED",
+                "-j",
+                "ACCEPT",
+            ])
             .status()?;
 
         Ok(())
     }
 
     /// Setup QUIC overlay network if enabled
-    pub async fn setup_quic_overlay(&self, bridge_name: &str, remote_endpoints: Vec<String>) -> Result<()> {
-        let bridge = self.bridges.get(bridge_name)
+    pub async fn setup_quic_overlay(
+        &self,
+        bridge_name: &str,
+        remote_endpoints: Vec<String>,
+    ) -> Result<()> {
+        let bridge = self
+            .bridges
+            .get(bridge_name)
             .ok_or_else(|| anyhow::anyhow!("Bridge {} not found", bridge_name))?;
 
         if !bridge.enable_quic {
@@ -224,7 +273,10 @@ impl NovaServiceDiscovery {
 
     /// Register a Bolt container with Nova's service discovery
     pub fn register_service(&mut self, entry: ServiceEntry) -> Result<()> {
-        info!("Registering service: {} at {}", entry.name, entry.ip_address);
+        info!(
+            "Registering service: {} at {}",
+            entry.name, entry.ip_address
+        );
         self.services.insert(entry.name.clone(), entry);
         Ok(())
     }

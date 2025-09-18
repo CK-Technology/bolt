@@ -63,11 +63,16 @@ async fn main() -> anyhow::Result<()> {
     // 4. Start the container
     println!("4. Starting container 'web'...");
     let handle = runtime.start_capsule("web", &nova_config).await?;
-    println!("✓ Container started: {} (status: {:?})", handle.name, handle.status);
+    println!(
+        "✓ Container started: {} (status: {:?})",
+        handle.name, handle.status
+    );
 
     // 5. Connect to Nova bridge network
     println!("5. Connecting to Nova bridge network...");
-    let veth_interface = bridge_manager.connect_container(&bridge_config.name, &handle.id).await?;
+    let veth_interface = bridge_manager
+        .connect_container(&bridge_config.name, &handle.id)
+        .await?;
     println!("✓ Connected via interface: {}", veth_interface);
 
     // 6. Register with Nova service discovery
@@ -96,15 +101,20 @@ async fn main() -> anyhow::Result<()> {
     println!("Status: {:?}", status);
 
     let metrics = runtime.get_capsule_metrics("web").await?;
-    println!("Metrics: CPU: {:.1}%, Memory: {} MB",
-             metrics.cpu_usage_percent, metrics.memory_usage_mb);
+    println!(
+        "Metrics: CPU: {:.1}%, Memory: {} MB",
+        metrics.cpu_usage_percent, metrics.memory_usage_mb
+    );
 
     // 8. Gaming container example
     println!("\n8. Creating gaming container example...");
 
     let mut gaming_env = HashMap::new();
     gaming_env.insert("DISPLAY".to_string(), ":0".to_string());
-    gaming_env.insert("PULSE_RUNTIME_PATH".to_string(), "/run/user/1000/pulse".to_string());
+    gaming_env.insert(
+        "PULSE_RUNTIME_PATH".to_string(),
+        "/run/user/1000/pulse".to_string(),
+    );
 
     let gaming_config = NovaContainerConfig {
         capsule: "lutris/games:latest".to_string(),
@@ -123,14 +133,19 @@ async fn main() -> anyhow::Result<()> {
     println!("✓ Gaming container started: {}", gaming_handle.name);
 
     // Configure GPU passthrough
-    runtime.configure_gpu_passthrough("gaming", "nvidia0").await?;
+    runtime
+        .configure_gpu_passthrough("gaming", "nvidia0")
+        .await?;
     println!("✓ GPU passthrough configured");
 
     // 9. List all containers managed by Nova
     println!("\n9. Listing all containers...");
     let containers = runtime.list_capsules().await?;
     for container in containers {
-        println!("  - {} ({}): {:?}", container.name, container.id, container.status);
+        println!(
+            "  - {} ({}): {:?}",
+            container.name, container.id, container.status
+        );
     }
 
     // 10. Demonstrate lifecycle management
@@ -152,7 +167,9 @@ async fn main() -> anyhow::Result<()> {
     println!("\n11. Cleaning up...");
 
     // Disconnect from bridge
-    bridge_manager.disconnect_container(&bridge_config.name, &gaming_handle.id).await?;
+    bridge_manager
+        .disconnect_container(&bridge_config.name, &gaming_handle.id)
+        .await?;
     println!("✓ Disconnected gaming container from bridge");
 
     // Remove containers
@@ -213,14 +230,19 @@ impl NovaGuiIntegration {
     }
 
     /// Get container status for GUI display
-    pub async fn get_container_status_for_gui(&self, name: &str) -> anyhow::Result<(NovaStatus, CapsuleMetrics)> {
+    pub async fn get_container_status_for_gui(
+        &self,
+        name: &str,
+    ) -> anyhow::Result<(NovaStatus, CapsuleMetrics)> {
         let status = self.runtime.get_capsule_status(name).await?;
         let metrics = self.runtime.get_capsule_metrics(name).await?;
         Ok((status, metrics))
     }
 
     /// List all containers for GUI table view
-    pub async fn list_containers_for_gui(&self) -> anyhow::Result<Vec<(CapsuleHandle, CapsuleMetrics)>> {
+    pub async fn list_containers_for_gui(
+        &self,
+    ) -> anyhow::Result<Vec<(CapsuleHandle, CapsuleMetrics)>> {
         let containers = self.runtime.list_capsules().await?;
         let mut result = Vec::new();
 

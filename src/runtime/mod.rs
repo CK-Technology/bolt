@@ -1,4 +1,5 @@
 use crate::{BoltError, Result};
+use std::collections::HashMap;
 use tokio::process::Command as AsyncCommand;
 use tracing::{debug, info, warn};
 
@@ -288,11 +289,25 @@ pub async fn list_containers_info(all: bool) -> Result<Vec<ContainerInfo>> {
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string(),
+                names: vec![
+                    value
+                        .get("Names")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                ],
                 image: value
                     .get("Image")
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string(),
+                image_id: value
+                    .get("ImageID")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                labels: HashMap::new(), // TODO: Parse from container labels
+                uptime: None,           // TODO: Calculate uptime
                 command: value
                     .get("Command")
                     .and_then(|v| v.as_str())
@@ -375,7 +390,10 @@ pub async fn remove_container(container: &str, force: bool) -> Result<()> {
 }
 
 pub async fn restart_container(container: &str, timeout: u64) -> Result<()> {
-    info!("🔄 Restarting container: {} (timeout: {}s)", container, timeout);
+    info!(
+        "🔄 Restarting container: {} (timeout: {}s)",
+        container, timeout
+    );
 
     let runtime = detect_container_runtime().await?;
     let mut cmd = AsyncCommand::new(&runtime);

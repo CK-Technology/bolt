@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use super::{OptimizationStep, ToOptimizationSteps};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageOptimizations {

@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use super::{OptimizationStep, ToOptimizationSteps};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CpuOptimizations {
@@ -21,10 +21,10 @@ pub enum CpuGovernor {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CpuAffinity {
-    Gaming,      // Isolate to specific cores for gaming
-    Balanced,    // Use all cores efficiently
-    Isolated,    // Isolate from system processes
-    NumaAware,   // NUMA-aware allocation for AI/ML
+    Gaming,    // Isolate to specific cores for gaming
+    Balanced,  // Use all cores efficiently
+    Isolated,  // Isolate from system processes
+    NumaAware, // NUMA-aware allocation for AI/ML
 }
 
 impl ToOptimizationSteps for CpuOptimizations {

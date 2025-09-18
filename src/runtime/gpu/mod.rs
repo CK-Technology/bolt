@@ -6,8 +6,8 @@ use std::process::Command;
 use tracing::{debug, info, warn};
 
 pub mod amd;
-pub mod nvidia;
 pub mod nvbind;
+pub mod nvidia;
 pub mod velocity;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,7 +52,11 @@ impl GPUManager {
             info!("✅ nvbind GPU runtime detected");
         }
 
-        Ok(Self { nvidia, amd, nvbind })
+        Ok(Self {
+            nvidia,
+            amd,
+            nvbind,
+        })
     }
 
     pub async fn setup_container_gpu_access(
@@ -67,9 +71,13 @@ impl GPUManager {
             if runtime == "nvbind" {
                 if let Some(ref nvbind_manager) = self.nvbind {
                     info!("  Using nvbind GPU runtime (sub-microsecond passthrough)");
-                    return nvbind_manager.setup_container_access(container_id, gpu_config).await;
+                    return nvbind_manager
+                        .setup_container_access(container_id, gpu_config)
+                        .await;
                 } else {
-                    warn!("⚠️ nvbind GPU runtime requested but not available, falling back to traditional methods");
+                    warn!(
+                        "⚠️ nvbind GPU runtime requested but not available, falling back to traditional methods"
+                    );
                 }
             }
         }
@@ -105,7 +113,10 @@ impl GPUManager {
         if let Some(ref nvbind) = self.nvbind {
             let nvbind_gpus = nvbind.list_gpus().await?;
             if !nvbind_gpus.is_empty() {
-                info!("  Using nvbind for GPU detection ({} GPUs found)", nvbind_gpus.len());
+                info!(
+                    "  Using nvbind for GPU detection ({} GPUs found)",
+                    nvbind_gpus.len()
+                );
                 gpus.extend(nvbind_gpus);
                 return Ok(gpus);
             }
@@ -152,7 +163,9 @@ impl GPUManager {
                 // Prefer nvbind for gaming workloads due to ultra-low latency
                 if let Some(ref nvbind) = self.nvbind {
                     info!("  🚀 Using nvbind for gaming workload (ultra-low latency mode)");
-                    nvbind.run_gaming_workload(container_id, &game_config).await?;
+                    nvbind
+                        .run_gaming_workload(container_id, &game_config)
+                        .await?;
                 } else {
                     self.setup_gaming_gpu(container_id, &game_config).await?;
                     // Integrate with Wayland if available using safe environment management
@@ -185,7 +198,9 @@ impl GPUManager {
                 // Prefer nvbind for compute workloads due to better driver integration
                 if let Some(ref nvbind) = self.nvbind {
                     info!("  🚀 Using nvbind for compute workload (direct driver access)");
-                    nvbind.run_compute_workload(container_id, &compute_workload).await?;
+                    nvbind
+                        .run_compute_workload(container_id, &compute_workload)
+                        .await?;
                 } else {
                     self.setup_compute_workload(container_id, &compute_workload)
                         .await?;
@@ -574,7 +589,10 @@ impl GPUManager {
                 info!("🚀 nvbind GPU runtime available:");
                 info!("  • GPUs: {}", compatibility.gpu_count);
                 info!("  • Driver: {}", compatibility.driver_version);
-                info!("  • Bolt optimizations: {}", compatibility.bolt_optimizations);
+                info!(
+                    "  • Bolt optimizations: {}",
+                    compatibility.bolt_optimizations
+                );
                 info!("  • WSL2 mode: {}", compatibility.wsl2_mode);
                 info!("  • Performance: Sub-microsecond GPU passthrough (100x faster than Docker)");
             }

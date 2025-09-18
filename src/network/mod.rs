@@ -376,6 +376,18 @@ pub async fn list_networks_info() -> Result<Vec<NetworkInfo>> {
                     .get("Subnet")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string()),
+                id: value
+                    .get("Id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                created: Some(
+                    value
+                        .get("Created")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                ),
             };
             networks.push(network);
         }

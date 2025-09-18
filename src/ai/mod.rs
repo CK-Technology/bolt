@@ -2,8 +2,8 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub mod ollama;
 pub mod llm;
+pub mod ollama;
 
 /// AI/ML workload optimization module for Bolt
 /// Provides specialized optimizations for local LLMs, training, and inference
@@ -39,10 +39,10 @@ pub struct ModelConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ModelSize {
-    Small,    // < 3B parameters (Phi, small Llama)
-    Medium,   // 3B - 13B parameters (Llama 3 8B, Code Llama)
-    Large,    // 13B - 70B parameters (Llama 3 70B, CodeLlama 34B)
-    XLarge,   // > 70B parameters (Llama 3 405B, GPT-4 class)
+    Small,  // < 3B parameters (Phi, small Llama)
+    Medium, // 3B - 13B parameters (Llama 3 8B, Code Llama)
+    Large,  // 13B - 70B parameters (Llama 3 70B, CodeLlama 34B)
+    XLarge, // > 70B parameters (Llama 3 405B, GPT-4 class)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,10 +66,10 @@ pub struct AiHardwareConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GpuAllocation {
-    Exclusive,           // Entire GPU for this workload
-    Shared { percentage: u32 }, // Share GPU with other workloads
+    Exclusive,                      // Entire GPU for this workload
+    Shared { percentage: u32 },     // Share GPU with other workloads
     MultiGpu { gpu_ids: Vec<u32> }, // Use multiple GPUs
-    CpuOnly,            // CPU-only inference
+    CpuOnly,                        // CPU-only inference
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,7 +94,7 @@ pub enum VectorInstructions {
     Auto,
     Avx2,
     Avx512,
-    Neon,    // ARM
+    Neon, // ARM
     None,
 }
 
@@ -119,7 +119,11 @@ impl AiOptimizer {
         }
     }
 
-    pub async fn optimize_for_ollama(&self, model_name: &str, gpu_memory_gb: u32) -> Result<AiWorkloadConfig> {
+    pub async fn optimize_for_ollama(
+        &self,
+        model_name: &str,
+        gpu_memory_gb: u32,
+    ) -> Result<AiWorkloadConfig> {
         let model_size = self.determine_model_size(model_name);
         let quantization = self.select_optimal_quantization(&model_size, gpu_memory_gb);
         let gpu_allocation = self.determine_gpu_allocation(&model_size, gpu_memory_gb);
@@ -163,7 +167,11 @@ impl AiOptimizer {
         Ok(config)
     }
 
-    pub async fn optimize_for_training(&self, model_size: &ModelSize, available_memory_gb: u32) -> Result<AiWorkloadConfig> {
+    pub async fn optimize_for_training(
+        &self,
+        model_size: &ModelSize,
+        available_memory_gb: u32,
+    ) -> Result<AiWorkloadConfig> {
         let config = AiWorkloadConfig {
             workload_type: AiWorkloadType::Training,
             model_config: ModelConfig {
@@ -171,7 +179,9 @@ impl AiOptimizer {
                 model_size: model_size.clone(),
                 quantization: None, // Full precision for training
                 context_length: Some(2048),
-                batch_size: Some(self.calculate_optimal_batch_size(model_size, available_memory_gb)),
+                batch_size: Some(
+                    self.calculate_optimal_batch_size(model_size, available_memory_gb),
+                ),
                 max_tokens: None,
             },
             hardware_config: AiHardwareConfig {
@@ -203,13 +213,23 @@ impl AiOptimizer {
         Ok(config)
     }
 
-    pub fn get_recommended_environment_vars(&self, config: &AiWorkloadConfig) -> HashMap<String, String> {
+    pub fn get_recommended_environment_vars(
+        &self,
+        config: &AiWorkloadConfig,
+    ) -> HashMap<String, String> {
         let mut env_vars = HashMap::new();
 
         match config.workload_type {
             AiWorkloadType::Inference => {
-                env_vars.insert("OMP_NUM_THREADS".to_string(),
-                    config.hardware_config.cpu_config.thread_count.unwrap_or(1).to_string());
+                env_vars.insert(
+                    "OMP_NUM_THREADS".to_string(),
+                    config
+                        .hardware_config
+                        .cpu_config
+                        .thread_count
+                        .unwrap_or(1)
+                        .to_string(),
+                );
 
                 if config.performance_config.flash_attention {
                     env_vars.insert("OLLAMA_FLASH_ATTENTION".to_string(), "1".to_string());
@@ -221,7 +241,11 @@ impl AiOptimizer {
                         env_vars.insert("NVIDIA_VISIBLE_DEVICES".to_string(), "all".to_string());
                     }
                     GpuAllocation::MultiGpu { gpu_ids } => {
-                        let gpu_list = gpu_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(",");
+                        let gpu_list = gpu_ids
+                            .iter()
+                            .map(|id| id.to_string())
+                            .collect::<Vec<_>>()
+                            .join(",");
                         env_vars.insert("CUDA_VISIBLE_DEVICES".to_string(), gpu_list);
                     }
                     GpuAllocation::CpuOnly => {
@@ -231,7 +255,10 @@ impl AiOptimizer {
                 }
             }
             AiWorkloadType::Training => {
-                env_vars.insert("PYTORCH_CUDA_ALLOC_CONF".to_string(), "max_split_size_mb:128".to_string());
+                env_vars.insert(
+                    "PYTORCH_CUDA_ALLOC_CONF".to_string(),
+                    "max_split_size_mb:128".to_string(),
+                );
                 env_vars.insert("NCCL_DEBUG".to_string(), "INFO".to_string());
 
                 if config.performance_config.mixed_precision {
@@ -256,14 +283,21 @@ impl AiOptimizer {
             ModelSize::XLarge
         } else if model_lower.contains("70b") || model_lower.contains("34b") {
             ModelSize::Large
-        } else if model_lower.contains("13b") || model_lower.contains("8b") || model_lower.contains("7b") {
+        } else if model_lower.contains("13b")
+            || model_lower.contains("8b")
+            || model_lower.contains("7b")
+        {
             ModelSize::Medium
         } else {
             ModelSize::Small
         }
     }
 
-    fn select_optimal_quantization(&self, model_size: &ModelSize, gpu_memory_gb: u32) -> QuantizationType {
+    fn select_optimal_quantization(
+        &self,
+        model_size: &ModelSize,
+        gpu_memory_gb: u32,
+    ) -> QuantizationType {
         match (model_size, gpu_memory_gb) {
             (ModelSize::XLarge, mem) if mem >= 80 => QuantizationType::FP16,
             (ModelSize::XLarge, _) => QuantizationType::GGML_Q4_0,
@@ -275,7 +309,11 @@ impl AiOptimizer {
         }
     }
 
-    fn determine_gpu_allocation(&self, model_size: &ModelSize, gpu_memory_gb: u32) -> GpuAllocation {
+    fn determine_gpu_allocation(
+        &self,
+        model_size: &ModelSize,
+        gpu_memory_gb: u32,
+    ) -> GpuAllocation {
         match model_size {
             ModelSize::XLarge => {
                 if gpu_memory_gb >= 80 {
@@ -304,7 +342,11 @@ impl AiOptimizer {
         }
     }
 
-    fn calculate_optimal_batch_size(&self, model_size: &ModelSize, available_memory_gb: u32) -> u32 {
+    fn calculate_optimal_batch_size(
+        &self,
+        model_size: &ModelSize,
+        available_memory_gb: u32,
+    ) -> u32 {
         match model_size {
             ModelSize::XLarge => (available_memory_gb / 40).max(1),
             ModelSize::Large => (available_memory_gb / 20).max(1),

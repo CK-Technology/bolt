@@ -1,4 +1,4 @@
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use libloading::{Library, Symbol};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -21,12 +21,17 @@ pub async fn load_plugin(path: &PathBuf, manifest: &PluginManifest) -> Result<Bo
     let library_path = path.join(&manifest.entry_point);
 
     if !library_path.exists() {
-        return Err(anyhow::anyhow!("Plugin library not found: {:?}", library_path));
+        return Err(anyhow::anyhow!(
+            "Plugin library not found: {:?}",
+            library_path
+        ));
     }
 
     unsafe {
-        let lib = Arc::new(Library::new(&library_path)
-            .with_context(|| format!("Failed to load plugin library: {:?}", library_path))?);
+        let lib = Arc::new(
+            Library::new(&library_path)
+                .with_context(|| format!("Failed to load plugin library: {:?}", library_path))?,
+        );
 
         let create_plugin: Symbol<unsafe extern "C" fn() -> *mut dyn Plugin> = lib
             .get(b"create_plugin")

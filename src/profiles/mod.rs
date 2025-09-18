@@ -87,12 +87,22 @@ impl ProfileManager {
     pub async fn search_profiles(&self, query: &str, tags: &[String]) -> Vec<ProfileEntry> {
         let registry = self.registry.read().await;
 
-        registry.profiles
+        registry
+            .profiles
             .values()
             .filter(|entry| {
-                let name_match = entry.profile.name.to_lowercase().contains(&query.to_lowercase());
-                let desc_match = entry.profile.description.to_lowercase().contains(&query.to_lowercase());
-                let tag_match = tags.is_empty() || tags.iter().any(|tag| entry.metadata.tags.contains(tag));
+                let name_match = entry
+                    .profile
+                    .name
+                    .to_lowercase()
+                    .contains(&query.to_lowercase());
+                let desc_match = entry
+                    .profile
+                    .description
+                    .to_lowercase()
+                    .contains(&query.to_lowercase());
+                let tag_match =
+                    tags.is_empty() || tags.iter().any(|tag| entry.metadata.tags.contains(tag));
 
                 (name_match || desc_match) && tag_match
             })
@@ -102,12 +112,17 @@ impl ProfileManager {
 
     pub async fn get_profile(&self, name: &str) -> Option<OptimizationProfile> {
         let registry = self.registry.read().await;
-        registry.profiles.get(name).map(|entry| entry.profile.clone())
+        registry
+            .profiles
+            .get(name)
+            .map(|entry| entry.profile.clone())
     }
 
     pub async fn install_profile(&self, name: &str) -> Result<()> {
         let registry = self.registry.read().await;
-        let entry = registry.profiles.get(name)
+        let entry = registry
+            .profiles
+            .get(name)
             .ok_or_else(|| anyhow::anyhow!("Profile not found: {}", name))?;
 
         validation::validate_profile(&entry.profile)?;
@@ -123,7 +138,9 @@ impl ProfileManager {
     pub async fn create_user_profile(&self, profile: OptimizationProfile) -> Result<()> {
         validation::validate_profile(&profile)?;
 
-        let profile_path = self.user_profiles_dir.join(format!("{}.toml", profile.name));
+        let profile_path = self
+            .user_profiles_dir
+            .join(format!("{}.toml", profile.name));
         let content = toml::to_string_pretty(&profile)?;
         tokio::fs::write(profile_path, content).await?;
 
@@ -135,10 +152,14 @@ impl ProfileManager {
 
     pub async fn share_profile(&self, profile_name: &str, repository: &str) -> Result<()> {
         let registry = self.registry.read().await;
-        let profile = registry.user_profiles.get(profile_name)
+        let profile = registry
+            .user_profiles
+            .get(profile_name)
             .ok_or_else(|| anyhow::anyhow!("User profile not found: {}", profile_name))?;
 
-        let repo = registry.repositories.iter()
+        let repo = registry
+            .repositories
+            .iter()
             .find(|r| r.name == repository)
             .ok_or_else(|| anyhow::anyhow!("Repository not found: {}", repository))?;
 
@@ -166,10 +187,14 @@ impl ProfileManager {
     pub async fn list_by_game(&self, game_title: &str) -> Vec<ProfileEntry> {
         let registry = self.registry.read().await;
 
-        registry.profiles
+        registry
+            .profiles
             .values()
             .filter(|entry| {
-                entry.metadata.compatible_games.iter()
+                entry
+                    .metadata
+                    .compatible_games
+                    .iter()
                     .any(|game| game.to_lowercase().contains(&game_title.to_lowercase()))
             })
             .cloned()
@@ -183,7 +208,9 @@ impl ProfileManager {
         profiles.sort_by(|a, b| {
             let score_a = a.metadata.downloads as f32 + a.metadata.rating * 100.0;
             let score_b = b.metadata.downloads as f32 + b.metadata.rating * 100.0;
-            score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
+            score_b
+                .partial_cmp(&score_a)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         profiles.into_iter().take(limit).cloned().collect()
