@@ -45,6 +45,14 @@ pub enum Commands {
         /// Run in detached mode
         #[arg(short, long)]
         detach: bool,
+
+        /// GPU runtime to use (nvbind, docker, nvidia, amd)
+        #[arg(long)]
+        runtime: Option<String>,
+
+        /// GPU devices to use (e.g., all, 0, 1,2)
+        #[arg(long)]
+        gpu: Option<String>,
     },
 
     /// Build a container image
@@ -88,6 +96,7 @@ pub enum Commands {
     },
 
     /// Remove containers
+    #[command(alias = "remove")]
     Rm {
         /// Container names or IDs
         containers: Vec<String>,
@@ -95,6 +104,16 @@ pub enum Commands {
         /// Force removal
         #[arg(short, long)]
         force: bool,
+    },
+
+    /// Restart containers
+    Restart {
+        /// Container names or IDs
+        containers: Vec<String>,
+
+        /// Timeout for stop before restart (seconds)
+        #[arg(short, long, default_value = "10")]
+        timeout: u64,
     },
 
     /// Surge orchestration commands (like docker-compose)
@@ -113,6 +132,18 @@ pub enum Commands {
     Network {
         #[command(subcommand)]
         command: NetworkCommands,
+    },
+
+    /// Volume management
+    Volume {
+        #[command(subcommand)]
+        command: VolumeCommands,
+    },
+
+    /// Snapshot management (BTRFS/ZFS)
+    Snapshot {
+        #[command(subcommand)]
+        command: SnapshotCommands,
     },
 
     /// Docker/Podman compatibility layer
@@ -253,6 +284,31 @@ pub enum GpuCommands {
         #[arg(long)]
         device: Option<u32>,
     },
+
+    /// Configure nvbind GPU runtime
+    Nvbind {
+        /// GPU devices to use (e.g., all, 0, 1,2)
+        #[arg(long)]
+        devices: Option<String>,
+
+        /// Driver type (auto, nvidia-open, proprietary, nouveau)
+        #[arg(long, default_value = "auto")]
+        driver: String,
+
+        /// Performance mode (ultra, high, balanced, efficient)
+        #[arg(long, default_value = "ultra")]
+        performance: String,
+
+        /// Enable WSL2 optimizations
+        #[arg(long)]
+        wsl2: bool,
+    },
+
+    /// Check nvbind runtime compatibility
+    Check,
+
+    /// Show GPU runtime performance comparison
+    Benchmark,
 }
 
 #[derive(Subcommand)]
@@ -262,7 +318,7 @@ pub enum NetworkCommands {
         /// Network name
         name: String,
 
-        /// Network driver
+        /// Network driver (bolt, gquic, bridge, host, none)
         #[arg(long, default_value = "bolt")]
         driver: String,
 
@@ -272,11 +328,151 @@ pub enum NetworkCommands {
     },
 
     /// List networks
+    #[command(alias = "ls")]
     List,
 
     /// Remove network
+    #[command(alias = "rm")]
     Remove {
         /// Network name
         name: String,
     },
+}
+
+#[derive(Subcommand)]
+pub enum VolumeCommands {
+    /// Create volume
+    Create {
+        /// Volume name
+        name: String,
+
+        /// Volume driver
+        #[arg(long, default_value = "local")]
+        driver: String,
+
+        /// Volume size
+        #[arg(long)]
+        size: Option<String>,
+
+        /// Driver options
+        #[arg(short, long)]
+        opt: Vec<String>,
+    },
+
+    /// List volumes
+    #[command(alias = "ls")]
+    List,
+
+    /// Remove volume
+    #[command(alias = "rm")]
+    Remove {
+        /// Volume name
+        name: String,
+
+        /// Force removal
+        #[arg(short, long)]
+        force: bool,
+    },
+
+    /// Inspect volume
+    Inspect {
+        /// Volume name
+        name: String,
+    },
+
+    /// Prune unused volumes
+    Prune {
+        /// Don't prompt for confirmation
+        #[arg(short, long)]
+        force: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum SnapshotCommands {
+    /// Create a snapshot
+    Create {
+        /// Snapshot name (optional)
+        #[arg(short, long)]
+        name: Option<String>,
+
+        /// Description for the snapshot
+        #[arg(short, long)]
+        description: Option<String>,
+
+        /// Type of snapshot
+        #[arg(long, default_value = "manual")]
+        snapshot_type: String,
+    },
+
+    /// List all snapshots
+    #[command(alias = "ls")]
+    List {
+        /// Show detailed information
+        #[arg(short, long)]
+        verbose: bool,
+
+        /// Filter by snapshot type
+        #[arg(long)]
+        filter_type: Option<String>,
+    },
+
+    /// Show snapshot details
+    Show {
+        /// Snapshot ID or name
+        snapshot: String,
+    },
+
+    /// Rollback to a snapshot
+    Rollback {
+        /// Snapshot ID or name to rollback to
+        snapshot: String,
+
+        /// Force rollback without confirmation
+        #[arg(short, long)]
+        force: bool,
+    },
+
+    /// Delete a snapshot
+    #[command(alias = "rm")]
+    Delete {
+        /// Snapshot ID or name to delete
+        snapshot: String,
+
+        /// Force deletion without confirmation
+        #[arg(short, long)]
+        force: bool,
+    },
+
+    /// Apply retention policy (cleanup old snapshots)
+    Cleanup {
+        /// Dry run - show what would be deleted
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Force cleanup without confirmation
+        #[arg(short, long)]
+        force: bool,
+    },
+
+    /// Show snapshot configuration
+    Config {
+        /// Show full configuration details
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
+    /// Enable/disable automatic snapshots
+    Auto {
+        /// Enable or disable automatic snapshots
+        #[arg(value_enum)]
+        action: AutoAction,
+    },
+}
+
+#[derive(clap::ValueEnum, Clone, Debug)]
+pub enum AutoAction {
+    Enable,
+    Disable,
+    Status,
 }

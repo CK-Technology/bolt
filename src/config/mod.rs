@@ -10,6 +10,7 @@ pub struct BoltFile {
     pub services: HashMap<String, Service>,
     pub networks: Option<HashMap<String, Network>>,
     pub volumes: Option<HashMap<String, Volume>>,
+    pub snapshots: Option<SnapshotConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -78,9 +79,15 @@ pub struct GamingConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GpuConfig {
+    pub runtime: Option<String>,                // "nvbind", "docker", "nvidia", "amd"
     pub nvidia: Option<NvidiaConfig>,
     pub amd: Option<AmdConfig>,
+    pub nvbind: Option<NvbindConfig>,
     pub passthrough: Option<bool>,
+    pub isolation_level: Option<String>,        // "shared", "exclusive", "virtual"
+    pub memory_limit: Option<String>,           // e.g., "8GB"
+    pub gaming: Option<GpuGamingConfig>,        // nvbind gaming optimizations
+    pub aiml: Option<GpuAiMlConfig>,           // nvbind AI/ML optimizations
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -99,6 +106,97 @@ pub struct NvidiaConfig {
 pub struct AmdConfig {
     pub device: Option<u32>,
     pub rocm: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct NvbindConfig {
+    pub driver: Option<String>,                 // "auto", "nvidia-open", "proprietary", "nouveau"
+    pub devices: Option<Vec<String>>,           // e.g., ["gpu:0"], ["gpu:all"]
+    pub wsl2_optimized: Option<bool>,           // Enable WSL2 optimizations
+    pub performance_mode: Option<String>,       // "ultra", "high", "balanced", "efficient"
+    pub preload_libraries: Option<bool>,        // Preload GPU libraries
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct GpuGamingConfig {
+    pub profile: Option<String>,                // "ultra-low-latency", "performance", "balanced"
+    pub dlss_enabled: Option<bool>,
+    pub rt_cores_enabled: Option<bool>,
+    pub wine_optimizations: Option<bool>,
+    pub vrs_enabled: Option<bool>,              // Variable Rate Shading
+    pub performance_profile: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct GpuAiMlConfig {
+    pub profile: Option<String>,                // "training", "inference", "development"
+    pub mig_enabled: Option<bool>,              // Multi-Instance GPU
+    pub tensor_cores_enabled: Option<bool>,
+    pub mixed_precision: Option<bool>,
+    pub cuda_cache_size: Option<u32>,           // CUDA cache size in MB
+    pub memory_pool_size: Option<String>,       // e.g., "16GB"
+}
+
+// Snapshot Configuration
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SnapshotConfig {
+    pub enabled: Option<bool>,                       // Enable/disable snapshots
+    pub filesystem: Option<String>,                  // "btrfs", "zfs", "auto"
+    pub root_path: Option<String>,                   // Path to snapshot (default: "/")
+    pub snapshot_path: Option<String>,               // Where to store snapshots
+    pub retention: Option<RetentionPolicy>,          // Retention settings
+    pub triggers: Option<SnapshotTriggers>,          // When to take snapshots
+    pub named_snapshots: Option<Vec<NamedSnapshot>>, // Pre-defined snapshots
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RetentionPolicy {
+    pub keep_hourly: Option<u32>,     // Keep N hourly snapshots
+    pub keep_daily: Option<u32>,      // Keep N daily snapshots
+    pub keep_weekly: Option<u32>,     // Keep N weekly snapshots
+    pub keep_monthly: Option<u32>,    // Keep N monthly snapshots
+    pub keep_yearly: Option<u32>,     // Keep N yearly snapshots
+    pub max_total: Option<u32>,       // Maximum total snapshots
+    pub cleanup_frequency: Option<String>, // "daily", "weekly", "monthly"
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SnapshotTriggers {
+    // Time-based triggers
+    pub hourly: Option<bool>,                        // Take hourly snapshots
+    pub daily: Option<String>,                       // Daily at specific time (e.g. "02:00")
+    pub weekly: Option<String>,                      // Weekly on day+time (e.g. "sunday@02:00")
+    pub monthly: Option<String>,                     // Monthly on day+time (e.g. "1@02:00")
+
+    // Operation-based triggers
+    pub before_container_run: Option<bool>,          // Before running containers
+    pub before_build: Option<bool>,                  // Before building images
+    pub before_surge_up: Option<bool>,               // Before surge up
+    pub before_system_update: Option<bool>,          // Before system updates
+
+    // Change-based triggers
+    pub on_file_changes: Option<ChangeBasedConfig>, // Monitor file changes
+    pub min_change_threshold: Option<String>,        // Minimum changes to trigger (e.g. "100MB", "1000 files")
+    pub change_detection_interval: Option<String>,   // How often to check (e.g. "5m", "1h")
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ChangeBasedConfig {
+    pub enabled: Option<bool>,
+    pub watch_paths: Option<Vec<String>>,            // Paths to monitor for changes
+    pub exclude_paths: Option<Vec<String>>,          // Paths to exclude from monitoring
+    pub file_patterns: Option<Vec<String>>,          // File patterns to monitor (e.g. "*.toml", "*.rs")
+    pub exclude_patterns: Option<Vec<String>>,       // Patterns to exclude (e.g. "*.tmp", "*.log")
+    pub change_types: Option<Vec<String>>,           // "create", "modify", "delete"
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct NamedSnapshot {
+    pub name: String,                                // User-friendly name
+    pub description: Option<String>,                 // Description of the snapshot
+    pub trigger: Option<String>,                     // When to create ("manual", "before_gaming", etc.)
+    pub auto_create: Option<bool>,                   // Create automatically
+    pub keep_forever: Option<bool>,                  // Exclude from retention cleanup
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -900,6 +998,7 @@ pub fn create_example_boltfile() -> BoltFile {
             auth: None,
             gaming: Some(GamingConfig {
                 gpu: Some(GpuConfig {
+                    runtime: Some("nvbind".to_string()),
                     nvidia: Some(NvidiaConfig {
                         device: Some(0),
                         dlss: Some(true),
@@ -911,7 +1010,25 @@ pub fn create_example_boltfile() -> BoltFile {
                         core_clock_offset: Some(0),
                     }),
                     amd: None,
+                    nvbind: Some(NvbindConfig {
+                        driver: Some("auto".to_string()),
+                        devices: Some(vec!["gpu:0".to_string()]),
+                        wsl2_optimized: Some(true),
+                        performance_mode: Some("ultra".to_string()),
+                        preload_libraries: Some(true),
+                    }),
                     passthrough: Some(true),
+                    isolation_level: Some("exclusive".to_string()),
+                    memory_limit: Some("8GB".to_string()),
+                    gaming: Some(GpuGamingConfig {
+                        profile: Some("ultra-low-latency".to_string()),
+                        dlss_enabled: Some(true),
+                        rt_cores_enabled: Some(true),
+                        wine_optimizations: Some(true),
+                        vrs_enabled: Some(true),
+                        performance_profile: Some("maximum".to_string()),
+                    }),
+                    aiml: None,
                 }),
                 audio: Some(AudioConfig {
                     system: "pipewire".to_string(),
@@ -937,5 +1054,91 @@ pub fn create_example_boltfile() -> BoltFile {
         services,
         networks: None,
         volumes: None,
+        snapshots: Some(SnapshotConfig {
+            enabled: Some(true),
+            filesystem: Some("auto".to_string()),
+            root_path: Some("/".to_string()),
+            snapshot_path: Some("/.snapshots".to_string()),
+            retention: Some(RetentionPolicy {
+                keep_hourly: Some(0),     // No hourly snapshots
+                keep_daily: Some(7),      // Keep 7 daily snapshots
+                keep_weekly: Some(4),     // Keep 4 weekly snapshots
+                keep_monthly: Some(6),    // Keep 6 monthly snapshots
+                keep_yearly: Some(2),     // Keep 2 yearly snapshots
+                max_total: Some(50),      // Maximum 50 total snapshots
+                cleanup_frequency: Some("daily".to_string()),
+            }),
+            triggers: Some(SnapshotTriggers {
+                // Time-based
+                hourly: Some(false),
+                daily: Some("02:00".to_string()),           // Daily at 2 AM
+                weekly: Some("sunday@03:00".to_string()),   // Sunday at 3 AM
+                monthly: Some("1@04:00".to_string()),       // 1st of month at 4 AM
+
+                // Operation-based
+                before_container_run: Some(false),          // Don't snapshot before every run
+                before_build: Some(true),                   // Snapshot before builds
+                before_surge_up: Some(true),                // Snapshot before surge operations
+                before_system_update: Some(true),           // Snapshot before system updates
+
+                // Change-based
+                on_file_changes: Some(ChangeBasedConfig {
+                    enabled: Some(true),
+                    watch_paths: Some(vec![
+                        "/etc".to_string(),
+                        "/home".to_string(),
+                        "/var/lib/bolt".to_string(),
+                    ]),
+                    exclude_paths: Some(vec![
+                        "/tmp".to_string(),
+                        "/var/tmp".to_string(),
+                        "/var/log".to_string(),
+                        "/var/cache".to_string(),
+                    ]),
+                    file_patterns: Some(vec![
+                        "*.toml".to_string(),
+                        "*.yaml".to_string(),
+                        "*.yml".to_string(),
+                        "*.json".to_string(),
+                        "*.conf".to_string(),
+                    ]),
+                    exclude_patterns: Some(vec![
+                        "*.tmp".to_string(),
+                        "*.log".to_string(),
+                        "*.cache".to_string(),
+                        ".git/*".to_string(),
+                    ]),
+                    change_types: Some(vec![
+                        "modify".to_string(),
+                        "create".to_string(),
+                    ]),
+                }),
+                min_change_threshold: Some("50MB".to_string()),
+                change_detection_interval: Some("30m".to_string()),
+            }),
+            named_snapshots: Some(vec![
+                NamedSnapshot {
+                    name: "fresh-install".to_string(),
+                    description: Some("Clean system after fresh Bolt installation".to_string()),
+                    trigger: Some("manual".to_string()),
+                    auto_create: Some(false),
+                    keep_forever: Some(true),
+                },
+                NamedSnapshot {
+                    name: "before-gaming".to_string(),
+                    description: Some("Before setting up gaming environment".to_string()),
+                    trigger: Some("before_gaming_setup".to_string()),
+                    auto_create: Some(true),
+                    keep_forever: Some(false),
+                },
+                NamedSnapshot {
+                    name: "stable-config".to_string(),
+                    description: Some("Known stable configuration".to_string()),
+                    trigger: Some("manual".to_string()),
+                    auto_create: Some(false),
+                    keep_forever: Some(true),
+                },
+            ]),
+        }),
     }
 }

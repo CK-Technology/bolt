@@ -293,6 +293,16 @@ pub async fn list_containers_info(all: bool) -> Result<Vec<ContainerInfo>> {
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string(),
+                command: value
+                    .get("Command")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("/bin/sh")
+                    .to_string(),
+                created: value
+                    .get("CreatedAt")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string(),
                 status: value
                     .get("Status")
                     .and_then(|v| v.as_str())
@@ -305,6 +315,11 @@ pub async fn list_containers_info(all: bool) -> Result<Vec<ContainerInfo>> {
                     .split(',')
                     .map(|s| s.trim().to_string())
                     .collect(),
+                runtime: value
+                    .get("Labels")
+                    .and_then(|labels| labels.get("bolt.runtime"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
             };
             containers.push(container);
         }
@@ -356,5 +371,28 @@ pub async fn remove_container(container: &str, force: bool) -> Result<()> {
     }
 
     info!("✅ Container removed: {}", container);
+    Ok(())
+}
+
+pub async fn restart_container(container: &str, timeout: u64) -> Result<()> {
+    info!("🔄 Restarting container: {} (timeout: {}s)", container, timeout);
+
+    let runtime = detect_container_runtime().await?;
+    let mut cmd = AsyncCommand::new(&runtime);
+    cmd.arg("restart")
+        .arg("--time")
+        .arg(timeout.to_string())
+        .arg(container);
+
+    let output = cmd.output().await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
+            message: format!("Failed to restart container: {}", stderr),
+        }));
+    }
+
+    info!("✅ Container restarted: {}", container);
     Ok(())
 }

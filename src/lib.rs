@@ -146,6 +146,11 @@ impl BoltRuntime {
         runtime::remove_container(container, force).await
     }
 
+    /// Restart a container
+    pub async fn restart_container(&self, container: &str, timeout: u64) -> Result<()> {
+        runtime::restart_container(container, timeout).await
+    }
+
     /// Start Surge orchestration
     pub async fn surge_up(
         &self,

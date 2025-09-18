@@ -7,12 +7,14 @@ use tracing::{debug, info, warn};
 
 pub mod amd;
 pub mod nvidia;
+pub mod nvbind;
 pub mod velocity;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GPUManager {
     pub nvidia: Option<nvidia::NvidiaManager>,
     pub amd: Option<amd::AmdManager>,
+    pub nvbind: Option<nvbind::NvbindManager>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +40,7 @@ impl GPUManager {
 
         let nvidia = nvidia::NvidiaManager::detect().ok();
         let amd = amd::AmdManager::detect().ok();
+        let nvbind = nvbind::NvbindManager::detect().ok();
 
         if nvidia.is_some() {
             info!("✅ NVIDIA GPU support detected");
@@ -45,8 +48,11 @@ impl GPUManager {
         if amd.is_some() {
             info!("✅ AMD GPU support detected");
         }
+        if nvbind.is_some() {
+            info!("✅ nvbind GPU runtime detected");
+        }
 
-        Ok(Self { nvidia, amd })
+        Ok(Self { nvidia, amd, nvbind })
     }
 
     pub async fn setup_container_gpu_access(
@@ -56,6 +62,19 @@ impl GPUManager {
     ) -> Result<()> {
         info!("🚀 Setting up GPU access for container: {}", container_id);
 
+        // Check if nvbind runtime is preferred
+        if let Some(ref runtime) = gpu_config.runtime {
+            if runtime == "nvbind" {
+                if let Some(ref nvbind_manager) = self.nvbind {
+                    info!("  Using nvbind GPU runtime (sub-microsecond passthrough)");
+                    return nvbind_manager.setup_container_access(container_id, gpu_config).await;
+                } else {
+                    warn!("⚠️ nvbind GPU runtime requested but not available, falling back to traditional methods");
+                }
+            }
+        }
+
+        // Fallback to traditional GPU management
         if let Some(ref nvidia_config) = gpu_config.nvidia {
             if let Some(ref nvidia_manager) = self.nvidia {
                 nvidia_manager
@@ -82,6 +101,17 @@ impl GPUManager {
     pub async fn get_available_gpus(&self) -> Result<Vec<GPUInfo>> {
         let mut gpus = Vec::new();
 
+        // Try nvbind first for better performance and detection
+        if let Some(ref nvbind) = self.nvbind {
+            let nvbind_gpus = nvbind.list_gpus().await?;
+            if !nvbind_gpus.is_empty() {
+                info!("  Using nvbind for GPU detection ({} GPUs found)", nvbind_gpus.len());
+                gpus.extend(nvbind_gpus);
+                return Ok(gpus);
+            }
+        }
+
+        // Fallback to traditional detection
         if let Some(ref nvidia) = self.nvidia {
             gpus.extend(nvidia.list_gpus().await?);
         }
@@ -119,23 +149,47 @@ impl GPUManager {
                     .await?;
             }
             GPUWorkload::Gaming(game_config) => {
-                self.setup_gaming_gpu(container_id, &game_config).await?;
-                // Integrate with Wayland if available using safe environment management
-                self.setup_wayland_gaming_integration(container_id, &game_config)
-                    .await?;
+                // Prefer nvbind for gaming workloads due to ultra-low latency
+                if let Some(ref nvbind) = self.nvbind {
+                    info!("  🚀 Using nvbind for gaming workload (ultra-low latency mode)");
+                    nvbind.run_gaming_workload(container_id, &game_config).await?;
+                } else {
+                    self.setup_gaming_gpu(container_id, &game_config).await?;
+                    // Integrate with Wayland if available using safe environment management
+                    self.setup_wayland_gaming_integration(container_id, &game_config)
+                        .await?;
+                }
             }
             GPUWorkload::AI(ai_workload) => {
                 info!("🤖 Setting up AI workload: {}", ai_workload.name);
-                self.setup_ai_workload(container_id, &ai_workload).await?;
+                // Prefer nvbind for AI workloads due to optimized tensor operations
+                if let Some(ref nvbind) = self.nvbind {
+                    info!("  🚀 Using nvbind for AI workload (tensor core optimizations)");
+                    nvbind.run_ai_workload(container_id, &ai_workload).await?;
+                } else {
+                    self.setup_ai_workload(container_id, &ai_workload).await?;
+                }
             }
             GPUWorkload::MachineLearning(ml_workload) => {
                 info!("🧠 Setting up ML workload: {}", ml_workload.name);
-                self.setup_ml_workload(container_id, &ml_workload).await?;
+                // Prefer nvbind for ML workloads due to optimized memory management
+                if let Some(ref nvbind) = self.nvbind {
+                    info!("  🚀 Using nvbind for ML workload (memory pool optimizations)");
+                    nvbind.run_ml_workload(container_id, &ml_workload).await?;
+                } else {
+                    self.setup_ml_workload(container_id, &ml_workload).await?;
+                }
             }
             GPUWorkload::ComputeGeneral(compute_workload) => {
                 info!("⚙️ Setting up compute workload: {}", compute_workload.name);
-                self.setup_compute_workload(container_id, &compute_workload)
-                    .await?;
+                // Prefer nvbind for compute workloads due to better driver integration
+                if let Some(ref nvbind) = self.nvbind {
+                    info!("  🚀 Using nvbind for compute workload (direct driver access)");
+                    nvbind.run_compute_workload(container_id, &compute_workload).await?;
+                } else {
+                    self.setup_compute_workload(container_id, &compute_workload)
+                        .await?;
+                }
             }
         }
 
@@ -510,6 +564,37 @@ impl GPUManager {
         );
 
         Ok(())
+    }
+
+    /// Check nvbind runtime compatibility and provide performance information
+    pub async fn check_nvbind_compatibility(&self) -> Result<Option<nvbind::NvbindCompatibility>> {
+        if let Some(ref nvbind) = self.nvbind {
+            let compatibility = nvbind.check_compatibility().await?;
+            if compatibility.available {
+                info!("🚀 nvbind GPU runtime available:");
+                info!("  • GPUs: {}", compatibility.gpu_count);
+                info!("  • Driver: {}", compatibility.driver_version);
+                info!("  • Bolt optimizations: {}", compatibility.bolt_optimizations);
+                info!("  • WSL2 mode: {}", compatibility.wsl2_mode);
+                info!("  • Performance: Sub-microsecond GPU passthrough (100x faster than Docker)");
+            }
+            Ok(Some(compatibility))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Get the best available GPU runtime
+    pub fn get_preferred_gpu_runtime(&self) -> String {
+        if self.nvbind.is_some() {
+            "nvbind".to_string()
+        } else if self.nvidia.is_some() {
+            "nvidia".to_string()
+        } else if self.amd.is_some() {
+            "amd".to_string()
+        } else {
+            "none".to_string()
+        }
     }
 }
 

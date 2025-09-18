@@ -1,0 +1,105 @@
+# Bolt Gaming Container with nvbind GPU Runtime
+# Example configuration showcasing nvbind's superior GPU passthrough for gaming workloads
+
+[project]
+name = "gaming-workstation"
+version = "1.0.0"
+
+# Gaming container with NVIDIA GPU acceleration
+[services.steam]
+image = "bolt://steam:latest"
+platform = "linux/amd64"
+
+# nvbind GPU configuration for gaming
+[services.steam.gpu]
+runtime = "nvbind"                    # Use nvbind instead of docker/nvidia-toolkit
+driver = "auto"                       # Auto-detect: nvidia-open, proprietary, nouveau
+devices = ["gpu:0"]                   # Primary GPU
+isolation = "exclusive"               # Exclusive GPU access for best gaming performance
+wsl2_optimized = true                 # Enable WSL2 gaming optimizations
+
+# Gaming-specific GPU profile
+[services.steam.gpu.gaming]
+profile = "ultra-low-latency"         # Performance, Balanced, Efficiency, UltraLowLatency
+dlss_enabled = true                   # Enable DLSS support
+rt_cores_enabled = true               # Ray tracing acceleration
+wine_optimizations = true             # Wine/Proton GPU optimizations
+
+# Bolt capsule configuration
+[services.steam.gpu.capsule]
+snapshot_gpu_state = true            # Enable GPU state in snapshots
+memory_limit = "8GB"                  # GPU memory limit for capsule
+compute_limit = "80%"                 # GPU compute limit
+
+# Container Device Interface (CDI) settings
+[services.steam.gpu.cdi]
+version = "0.6.0"
+spec_name = "nvidia.com/gpu-bolt"
+custom_env = [
+    "NVIDIA_VISIBLE_DEVICES=0",
+    "BOLT_GPU_RUNTIME=nvbind",
+    "DXVK_HUD=1",
+    "VKD3D_CONFIG=dxr"
+]
+
+# AI/ML workload example
+[services.pytorch]
+image = "pytorch/pytorch:latest"
+
+[services.pytorch.gpu]
+runtime = "nvbind"
+driver = "auto"
+devices = ["gpu:1", "gpu:2"]          # Multi-GPU for ML training
+isolation = "virtual"                 # Virtual GPU with resource limits
+
+# AI/ML optimizations
+[services.pytorch.gpu.aiml]
+profile = "training"                  # Training, Inference, Development
+mig_enabled = true                    # Multi-Instance GPU support
+tensor_cores_enabled = true           # Tensor Core acceleration
+memory_pool_enabled = true            # GPU memory pooling
+
+[services.pytorch.gpu.capsule]
+memory_limit = "16GB"
+compute_limit = "95%"
+
+# High-performance computing example
+[services.blender]
+image = "linuxserver/blender:latest"
+
+[services.blender.gpu]
+runtime = "nvbind"
+driver = "nvidia-open"                # Specify exact driver type
+devices = ["gpu:all"]                 # Use all available GPUs
+isolation = "shared"                  # Shared access for rendering
+
+[services.blender.gpu.hpc]
+profile = "render"                    # Rendering workload optimizations
+cuda_cores_max = true                 # Maximum CUDA core utilization
+optix_enabled = true                  # OptiX ray tracing for Blender
+
+# Global nvbind configuration
+[runtime.nvbind]
+log_level = "info"
+performance_mode = "ultra"            # Ultra, High, Balanced, Efficient
+cache_driver_info = true              # Cache driver detection for faster startup
+preload_libraries = true              # Preload GPU libraries
+
+# WSL2-specific optimizations
+[runtime.nvbind.wsl2]
+enabled = true
+gpu_acceleration = "dxcore"           # DXCore for WSL2 GPU access
+shared_memory_optimization = true     # Optimize shared memory for gaming
+low_latency_mode = true               # Ultra-low latency for competitive gaming
+
+# Security and isolation settings
+[runtime.nvbind.security]
+seccomp_profile = "bolt-gpu"          # Custom seccomp profile for GPU access
+apparmor_profile = "bolt-nvidia"      # AppArmor profile for NVIDIA drivers
+device_isolation = true               # Enable device namespace isolation
+
+# Performance monitoring
+[runtime.nvbind.monitoring]
+gpu_telemetry = true                  # Collect GPU performance metrics
+latency_tracking = true               # Track GPU passthrough latency
+benchmark_mode = false                # Disable for production

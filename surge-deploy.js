@@ -5,69 +5,69 @@
  * Deploys static content to surge with bolt.cktech.org domain
  */
 
-const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+const { execSync } = require("child_process");
+const fs = require("fs");
+const path = require("path");
 
-const SURGE_DOMAIN = 'bolt.cktech.org';
-const BUILD_DIR = './dist';
-const PACKAGE_DIR = './packages';
+const SURGE_DOMAIN = "bolt.cktech.org";
+const BUILD_DIR = "./dist";
+const PACKAGE_DIR = "./packages";
 
 function log(message) {
-    console.log(`[SURGE] ${message}`);
+  console.log(`[SURGE] ${message}`);
 }
 
 function error(message) {
-    console.error(`[ERROR] ${message}`);
-    process.exit(1);
+  console.error(`[ERROR] ${message}`);
+  process.exit(1);
 }
 
 function exec(command, cwd = process.cwd()) {
-    try {
-        log(`Executing: ${command}`);
-        return execSync(command, {
-            cwd,
-            stdio: 'inherit',
-            encoding: 'utf8'
-        });
-    } catch (err) {
-        error(`Command failed: ${command}\n${err.message}`);
-    }
+  try {
+    log(`Executing: ${command}`);
+    return execSync(command, {
+      cwd,
+      stdio: "inherit",
+      encoding: "utf8",
+    });
+  } catch (err) {
+    error(`Command failed: ${command}\n${err.message}`);
+  }
 }
 
 function checkSurge() {
-    try {
-        execSync('surge --version', { stdio: 'pipe' });
-        log('✓ Surge CLI found');
-    } catch (err) {
-        log('Installing Surge CLI...');
-        exec('npm install -g surge');
-    }
+  try {
+    execSync("surge --version", { stdio: "pipe" });
+    log("✓ Surge CLI found");
+  } catch (err) {
+    log("Installing Surge CLI...");
+    exec("npm install -g surge");
+  }
 }
 
 function createBuildDirectory() {
-    log('Creating build directory...');
+  log("Creating build directory...");
 
-    if (fs.existsSync(BUILD_DIR)) {
-        exec(`rm -rf ${BUILD_DIR}`);
-    }
+  if (fs.existsSync(BUILD_DIR)) {
+    exec(`rm -rf ${BUILD_DIR}`);
+  }
 
-    fs.mkdirSync(BUILD_DIR, { recursive: true });
-    fs.mkdirSync(path.join(BUILD_DIR, 'packages'), { recursive: true });
-    fs.mkdirSync(path.join(BUILD_DIR, 'packages', 'arch'), { recursive: true });
-    fs.mkdirSync(path.join(BUILD_DIR, 'packages', 'debian'), { recursive: true });
+  fs.mkdirSync(BUILD_DIR, { recursive: true });
+  fs.mkdirSync(path.join(BUILD_DIR, "packages"), { recursive: true });
+  fs.mkdirSync(path.join(BUILD_DIR, "packages", "arch"), { recursive: true });
+  fs.mkdirSync(path.join(BUILD_DIR, "packages", "debian"), { recursive: true });
 }
 
 function generateStaticSite() {
-    log('Generating static site content...');
+  log("Generating static site content...");
 
-    // Copy install script
-    if (fs.existsSync('./install.sh')) {
-        fs.copyFileSync('./install.sh', path.join(BUILD_DIR, 'install.sh'));
-    }
+  // Copy install script
+  if (fs.existsSync("./install.sh")) {
+    fs.copyFileSync("./install.sh", path.join(BUILD_DIR, "install.sh"));
+  }
 
-    // Create index.html
-    const indexHtml = `<!DOCTYPE html>
+  // Create index.html
+  const indexHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -190,10 +190,10 @@ function generateStaticSite() {
 </body>
 </html>`;
 
-    fs.writeFileSync(path.join(BUILD_DIR, 'index.html'), indexHtml);
+  fs.writeFileSync(path.join(BUILD_DIR, "index.html"), indexHtml);
 
-    // Create package index pages
-    const archIndex = `<!DOCTYPE html>
+  // Create package index pages
+  const archIndex = `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -218,7 +218,7 @@ function generateStaticSite() {
 </body>
 </html>`;
 
-    const debianIndex = `<!DOCTYPE html>
+  const debianIndex = `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -245,11 +245,17 @@ function generateStaticSite() {
 </body>
 </html>`;
 
-    fs.writeFileSync(path.join(BUILD_DIR, 'packages', 'arch', 'index.html'), archIndex);
-    fs.writeFileSync(path.join(BUILD_DIR, 'packages', 'debian', 'index.html'), debianIndex);
+  fs.writeFileSync(
+    path.join(BUILD_DIR, "packages", "arch", "index.html"),
+    archIndex,
+  );
+  fs.writeFileSync(
+    path.join(BUILD_DIR, "packages", "debian", "index.html"),
+    debianIndex,
+  );
 
-    // Create 404 page
-    const notFound = `<!DOCTYPE html>
+  // Create 404 page
+  const notFound = `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -268,50 +274,50 @@ function generateStaticSite() {
 </body>
 </html>`;
 
-    fs.writeFileSync(path.join(BUILD_DIR, '404.html'), notFound);
+  fs.writeFileSync(path.join(BUILD_DIR, "404.html"), notFound);
 
-    log('✓ Static site generated');
+  log("✓ Static site generated");
 }
 
 function deployToSurge() {
-    log('Deploying to Surge...');
+  log("Deploying to Surge...");
 
-    // Check if SURGE_TOKEN is set for CI/CD
-    if (process.env.SURGE_TOKEN) {
-        log('Using SURGE_TOKEN for authentication');
-    } else {
-        log('Manual login required - surge login will prompt for credentials');
-    }
+  // Check if SURGE_TOKEN is set for CI/CD
+  if (process.env.SURGE_TOKEN) {
+    log("Using SURGE_TOKEN for authentication");
+  } else {
+    log("Manual login required - surge login will prompt for credentials");
+  }
 
-    // Deploy with surge
-    exec(`surge ${BUILD_DIR} ${SURGE_DOMAIN}`);
+  // Deploy with surge
+  exec(`surge ${BUILD_DIR} ${SURGE_DOMAIN}`);
 
-    log(`✓ Deployed to https://${SURGE_DOMAIN}`);
+  log(`✓ Deployed to https://${SURGE_DOMAIN}`);
 }
 
 function createCNAME() {
-    log('Creating CNAME file...');
-    fs.writeFileSync(path.join(BUILD_DIR, 'CNAME'), SURGE_DOMAIN);
-    log('✓ CNAME file created');
+  log("Creating CNAME file...");
+  fs.writeFileSync(path.join(BUILD_DIR, "CNAME"), SURGE_DOMAIN);
+  log("✓ CNAME file created");
 }
 
 function main() {
-    log('Starting Surge deployment for Bolt...');
+  log("Starting Surge deployment for Bolt...");
 
-    checkSurge();
-    createBuildDirectory();
-    generateStaticSite();
-    createCNAME();
-    deployToSurge();
+  checkSurge();
+  createBuildDirectory();
+  generateStaticSite();
+  createCNAME();
+  deployToSurge();
 
-    log('Deployment complete!');
-    log(`Site available at: https://${SURGE_DOMAIN}`);
+  log("Deployment complete!");
+  log(`Site available at: https://${SURGE_DOMAIN}`);
 }
 
 // Handle command line arguments
 const args = process.argv.slice(2);
-if (args.includes('--help')) {
-    console.log(`
+if (args.includes("--help")) {
+  console.log(`
 Bolt Surge Deployment Script
 
 Usage: node surge-deploy.js [options]
@@ -329,20 +335,20 @@ Examples:
   node surge-deploy.js --build   # Build only
   node surge-deploy.js --deploy  # Deploy only
 `);
-    process.exit(0);
+  process.exit(0);
 }
 
-if (args.includes('--build')) {
-    checkSurge();
-    createBuildDirectory();
-    generateStaticSite();
-    createCNAME();
-    log('Build complete!');
-} else if (args.includes('--deploy')) {
-    if (!fs.existsSync(BUILD_DIR)) {
-        error('Build directory not found. Run with --build first.');
-    }
-    deployToSurge();
+if (args.includes("--build")) {
+  checkSurge();
+  createBuildDirectory();
+  generateStaticSite();
+  createCNAME();
+  log("Build complete!");
+} else if (args.includes("--deploy")) {
+  if (!fs.existsSync(BUILD_DIR)) {
+    error("Build directory not found. Run with --build first.");
+  }
+  deployToSurge();
 } else {
-    main();
+  main();
 }

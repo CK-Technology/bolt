@@ -4,8 +4,11 @@ pub struct ContainerInfo {
     pub id: String,
     pub name: String,
     pub image: String,
+    pub command: String,
+    pub created: String,
     pub status: String,
     pub ports: Vec<String>,
+    pub runtime: Option<String>, // nvbind, docker, etc.
 }
 
 /// Surge orchestration status

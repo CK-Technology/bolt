@@ -1,0 +1,149 @@
+# Example Boltfile with comprehensive snapshot configuration
+project = "gaming-setup"
+
+# Snapshot configuration
+[snapshots]
+enabled = true
+filesystem = "auto"  # Auto-detect BTRFS or ZFS
+root_path = "/"
+snapshot_path = "/.snapshots"
+
+# Retention policy - keep system clean but preserve important snapshots
+[snapshots.retention]
+keep_hourly = 0        # No hourly snapshots
+keep_daily = 7         # Keep 7 daily snapshots
+keep_weekly = 4        # Keep 4 weekly snapshots (1 month)
+keep_monthly = 6       # Keep 6 monthly snapshots (6 months)
+keep_yearly = 2        # Keep 2 yearly snapshots
+max_total = 50         # Maximum 50 total snapshots
+cleanup_frequency = "daily"  # Run cleanup daily
+
+# When to take snapshots
+[snapshots.triggers]
+# Time-based snapshots
+hourly = false
+daily = "02:00"                    # Daily at 2 AM
+weekly = "sunday@03:00"            # Weekly on Sunday at 3 AM
+monthly = "1@04:00"                # Monthly on 1st at 4 AM
+
+# Operation-based snapshots
+before_container_run = false       # Don't snapshot before every container run
+before_build = true                # Snapshot before image builds
+before_surge_up = true             # Snapshot before surge operations
+before_system_update = true        # Snapshot before system updates
+
+# Change-based snapshots
+min_change_threshold = "100MB"     # Only snapshot if >100MB changed
+change_detection_interval = "30m"  # Check for changes every 30 minutes
+
+[snapshots.triggers.on_file_changes]
+enabled = true
+watch_paths = [
+    "/etc",                        # System configuration
+    "/home",                       # User data
+    "/var/lib/bolt",              # Bolt data
+    "/opt/games",                 # Game installations
+]
+exclude_paths = [
+    "/tmp",
+    "/var/tmp",
+    "/var/log",
+    "/var/cache",
+    "/home/*/.cache",
+    "/home/*/.local/share/Steam/steamapps/shadercache",  # Exclude shader cache
+]
+file_patterns = [
+    "*.toml",
+    "*.yaml",
+    "*.yml",
+    "*.json",
+    "*.conf",
+    "*.cfg",
+    "*.ini",
+]
+exclude_patterns = [
+    "*.tmp",
+    "*.log",
+    "*.cache",
+    ".git/*",
+    "*.swp",
+    "*~",
+]
+change_types = ["modify", "create"]  # Don't trigger on deletions
+
+# Named snapshots for specific scenarios
+[[snapshots.named_snapshots]]
+name = "fresh-install"
+description = "Clean system after fresh Bolt installation"
+trigger = "manual"
+auto_create = false
+keep_forever = true
+
+[[snapshots.named_snapshots]]
+name = "before-gaming-setup"
+description = "Before setting up gaming environment"
+trigger = "before_gaming_setup"
+auto_create = true
+keep_forever = false
+
+[[snapshots.named_snapshots]]
+name = "stable-config"
+description = "Known working configuration"
+trigger = "manual"
+auto_create = false
+keep_forever = true
+
+[[snapshots.named_snapshots]]
+name = "before-nvidia-driver-update"
+description = "Before updating NVIDIA drivers"
+trigger = "before_nvidia_update"
+auto_create = true
+keep_forever = false
+
+# Services configuration
+[services.steam]
+image = "ghcr.io/games-on-whales/steam:latest"
+ports = ["8080:8080"]
+volumes = [
+    "/home/user/steam:/home/steam",
+    "/home/user/games:/games"
+]
+environment = { DISPLAY = ":0" }
+
+[services.steam.gaming.gpu]
+runtime = "nvbind"
+isolation_level = "exclusive"
+memory_limit = "8GB"
+
+[services.steam.gaming.gpu.nvbind]
+driver = "auto"
+devices = ["gpu:0"]
+performance_mode = "ultra"
+wsl2_optimized = true
+
+[services.steam.gaming.gpu.gaming]
+profile = "ultra-low-latency"
+dlss_enabled = true
+rt_cores_enabled = true
+wine_optimizations = true
+
+[services.steam.gaming.audio]
+system = "pipewire"
+latency = "low"
+
+[services.lutris]
+image = "lutris/lutris:latest"
+ports = ["5900:5900"]
+volumes = [
+    "/home/user/lutris:/home/lutris",
+    "/home/user/games:/games"
+]
+
+[services.lutris.gaming.gpu]
+runtime = "nvbind"
+isolation_level = "shared"
+
+[services.lutris.gaming.wine]
+proton = "8.0"
+winver = "win10"
+prefix = "/games/wine-prefix"
