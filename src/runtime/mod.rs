@@ -4,6 +4,8 @@ use tokio::process::Command as AsyncCommand;
 use tracing::{debug, info, warn};
 
 pub mod environment;
+pub mod input;
+pub mod nvbind;
 pub mod oci;
 pub mod storage;
 

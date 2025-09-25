@@ -5,7 +5,11 @@ use tokio::process::Command as AsyncCommand;
 use tracing::{debug, info, warn};
 
 pub mod advanced_optimizations;
+pub mod audio;
+pub mod display_tech;
+pub mod frame_pacing;
 pub mod realtime;
+pub mod rtx_features;
 pub mod wayland;
 // Gaming commands enum for API usage
 #[derive(Debug, Clone)]

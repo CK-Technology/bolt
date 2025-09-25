@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
 pub mod ghostbay;
+pub mod oci_client;
 pub mod overlay;
 pub mod registry;
 pub mod s3;
@@ -218,58 +219,54 @@ impl StorageManager {
     async fn pull_docker_image(&mut self, name: &str, tag: &str) -> Result<String> {
         info!("🐳 Pulling Docker image: {}:{}", name, tag);
 
-        // Use registry client to pull from Docker Hub
-        let mut registry_client = registry::RegistryClient::new("registry-1.docker.io".to_string());
-        let image_ref = format!("{}:{}", name, tag);
+        // Create temporary directory for image download
+        let temp_dir = self.root_path.join("tmp").join(format!("pull-{}-{}", name.replace("/", "_"), tag));
+        std::fs::create_dir_all(&temp_dir)?;
 
-        let image_path = registry_client.pull_image(&image_ref).await?;
+        // Use OCI client to pull from Docker Hub
+        let oci_metadata = oci_client::pull_from_docker_hub(name, tag, &temp_dir).await?;
 
         let image_id = self.generate_image_id(name, tag);
 
-        // Mock Docker image
+        // Move rootfs to permanent location
+        let image_dir = self.root_path.join("images").join(&image_id);
+        std::fs::create_dir_all(&image_dir)?;
+
+        // Move the extracted rootfs
+        let final_rootfs = image_dir.join("rootfs");
+        if oci_metadata.rootfs_path.exists() {
+            if final_rootfs.exists() {
+                std::fs::remove_dir_all(&final_rootfs)?;
+            }
+            std::fs::rename(&oci_metadata.rootfs_path, &final_rootfs)?;
+        }
+
+        // Convert to Bolt metadata format
         let image_metadata = ImageMetadata {
             id: image_id.clone(),
             name: name.to_string(),
             tag: tag.to_string(),
-            digest: format!("sha256:{}", self.hash_string(&format!("{}:{}", name, tag))),
-            size: 200_000_000, // 200MB mock size
-            layers: vec!["base_layer".to_string(), "app_layer".to_string()],
+            digest: oci_metadata.digest,
+            size: oci_metadata.size,
+            layers: oci_metadata.layers,
             config: ImageConfig {
-                architecture: "amd64".to_string(),
-                os: "linux".to_string(),
-                env: vec![
-                    "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string(),
-                ],
-                cmd: match name {
-                    "nginx" => vec!["nginx", "-g", "daemon off;"]
-                        .iter()
-                        .map(|s| s.to_string())
-                        .collect(),
-                    "postgres" => vec!["postgres"].iter().map(|s| s.to_string()).collect(),
-                    _ => vec!["/bin/bash".to_string()],
-                },
-                entrypoint: vec![],
-                working_dir: "/".to_string(),
-                user: "root".to_string(),
-                exposed_ports: {
-                    let mut ports = HashMap::new();
-                    match name {
-                        "nginx" => {
-                            ports.insert("80/tcp".to_string(), serde_json::json!({}));
-                        }
-                        "postgres" => {
-                            ports.insert("5432/tcp".to_string(), serde_json::json!({}));
-                        }
-                        _ => {}
-                    }
-                    ports
-                },
-                volumes: HashMap::new(),
+                architecture: oci_metadata.config.architecture,
+                os: oci_metadata.config.os,
+                env: oci_metadata.config.config.env,
+                cmd: oci_metadata.config.config.cmd,
+                entrypoint: oci_metadata.config.config.entrypoint,
+                working_dir: oci_metadata.config.config.working_dir,
+                user: oci_metadata.config.config.user,
+                exposed_ports: oci_metadata.config.config.exposed_ports,
+                volumes: oci_metadata.config.config.volumes,
             },
             created_at: chrono::Utc::now(),
         };
 
         self.images.insert(image_id.clone(), image_metadata);
+
+        // Clean up temporary directory
+        let _ = std::fs::remove_dir_all(&temp_dir);
 
         info!("✅ Docker image pulled successfully: {}", image_id);
         Ok(image_id)

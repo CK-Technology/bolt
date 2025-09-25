@@ -68,6 +68,7 @@ pub struct ResourceLimits {
     pub pids_limit: Option<u32>,   // max processes
     pub blkio_weight: Option<u16>, // 10-1000
     pub cpu_shares: Option<u32>,   // relative weight
+    pub io_limit: Option<u32>,     // IOPS limit
 }
 
 impl Default for SecurityProfile {
@@ -95,6 +96,7 @@ impl Default for ResourceLimits {
             pids_limit: Some(1024),                // 1024 processes
             blkio_weight: Some(500),               // medium I/O priority
             cpu_shares: Some(1024),                // standard weight
+            io_limit: None,                        // no I/O limit by default
         }
     }
 }

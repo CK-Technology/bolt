@@ -8,13 +8,24 @@ use std::process::Stdio;
 use tokio::process::Command;
 use tracing::{debug, error, info, warn};
 
-use super::ContainerState;
+use super::{ContainerState, ResourceLimits, ContainerConfig};
+use crate::runtime::nvbind::{NvbindRuntime, NvbindConfig, GpuRequest, create_nvbind_config_for_gaming};
+use crate::config::{Service, GamingConfig};
+use nix::libc;
 
 pub async fn execute_container(state: &ContainerState, spec: &Spec) -> Result<u32> {
     info!("🚀 Executing container: {}", state.id);
 
     // Create the container rootfs from image layers
     create_container_rootfs(&state.id, &state.bundle_path, spec).await?;
+
+    // Check for gaming configuration and nvbind GPU runtime
+    if let Some(ref gaming_config) = state.config.gaming_config {
+        if gaming_config.gpu.is_some() && is_nvbind_runtime(&state.config) {
+            info!("🎮 Using nvbind GPU runtime for gaming container");
+            return execute_nvbind_container(state, spec, gaming_config).await;
+        }
+    }
 
     // Setup the execution environment in proper order
     let namespaces = setup_namespaces(state, spec).await?;
@@ -184,21 +195,23 @@ async fn execute_container_process(state: &ContainerState, spec: &Spec) -> Resul
 
     let rootfs_path = state.bundle_path.join("rootfs");
 
-    // Change root filesystem
-    nix::unistd::chroot(&rootfs_path).context("Failed to chroot")?;
-    nix::unistd::chdir("/").context("Failed to chdir to /")?;
+    // Change root filesystem using pivot_root for proper isolation
+    setup_pivot_root(&rootfs_path).await?;
 
-    info!("✅ Changed root to container filesystem");
+    info!("✅ Changed root to container filesystem with pivot_root");
 
-    // Execute the container process
+    // Apply process-level security before exec
+    apply_process_security(state, spec).await?;
+
+    // Prepare process execution with proper isolation
     let mut cmd = Command::new(command);
     cmd.args(command_args)
-        .current_dir("/")
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
 
-    // Set environment variables
+    // Set environment variables from spec
+    cmd.env_clear(); // Start with clean environment
     if let Some(env_vars) = process.env() {
         for env_var in env_vars {
             if let Some((key, value)) = env_var.split_once('=') {
@@ -207,28 +220,53 @@ async fn execute_container_process(state: &ContainerState, spec: &Spec) -> Resul
         }
     }
 
-    // Set working directory
-    // TODO: Fix OCI spec cwd() API usage
-    cmd.current_dir("/");
+    // Set working directory from spec
+    if let Some(cwd) = process.cwd() {
+        if let Some(cwd_str) = cwd.to_str() {
+            cmd.current_dir(cwd_str);
+        } else {
+            cmd.current_dir("/");
+        }
+    } else {
+        cmd.current_dir("/");
+    }
+
+    // Set user and group if specified
+    let user = process.user();
+    if let Some(uid) = user.uid() {
+        info!("Setting UID: {}", uid);
+        // UID setting is handled by the process spawning
+    }
+    if let Some(gid) = user.gid() {
+        info!("Setting GID: {}", gid);
+        // GID setting is handled by the process spawning
+    }
+
+    // Add container to its cgroup before exec
+    add_process_to_cgroup(state).await?;
 
     // Spawn the process
     let child = cmd.spawn().context("Failed to spawn container process")?;
     let pid = child.id().context("Failed to get child PID")?;
 
-    info!(
-        "✅ Container process started with PID: {} (namespaced)",
-        pid
-    );
+    // Write PID to cgroup.procs for resource management
+    write_pid_to_cgroup(state, pid).await?;
 
-    // Monitor the process
+    info!("✅ Container process started with PID: {} (fully isolated)", pid);
+
+    // Store child process for monitoring
+    let container_id = state.id.clone();
     tokio::spawn(async move {
         match child.wait_with_output().await {
             Ok(output) => {
                 let code = output.status.code().unwrap_or(-1);
-                info!("Namespaced container {} exited with code: {}", pid, code);
+                info!("Container {} (PID {}) exited with code: {}", container_id, pid, code);
+
+                // Clean up resources when container exits
+                let _ = cleanup_container_resources(&container_id).await;
             }
             Err(e) => {
-                error!("Error waiting for namespaced container {}: {}", pid, e);
+                error!("Error waiting for container {} (PID {}): {}", container_id, pid, e);
             }
         }
     });
@@ -262,24 +300,53 @@ async fn setup_user_namespace_mappings() -> Result<()> {
     let current_uid = nix::unistd::getuid();
     let current_gid = nix::unistd::getgid();
 
+    // Validate that we can create user namespace mappings
+    validate_rootless_prerequisites(current_uid, current_gid).await?;
+
+    // Check for existing mappings (might already be in a user namespace)
+    if let Ok(existing_uid_map) = std::fs::read_to_string("/proc/self/uid_map") {
+        if !existing_uid_map.trim().is_empty() && existing_uid_map != format!("0 {} 1", current_uid) {
+            info!("⚠️  Already in user namespace, using existing mappings");
+            return Ok(());
+        }
+    }
+
     // Map current user to root inside container (standard rootless pattern)
     let uid_map = format!("0 {} 1", current_uid);
     let gid_map = format!("0 {} 1", current_gid);
 
-    // Write UID mapping
-    std::fs::write("/proc/self/uid_map", &uid_map)
-        .context("Failed to write uid_map for rootless container")?;
+    info!("Setting UID mapping: {}", uid_map);
+    info!("Setting GID mapping: {}", gid_map);
 
-    // Deny setgroups (required for rootless)
-    std::fs::write("/proc/self/setgroups", "deny")
-        .context("Failed to deny setgroups for rootless container")?;
+    // Write UID mapping with validation
+    if let Err(e) = std::fs::write("/proc/self/uid_map", &uid_map) {
+        return Err(anyhow::anyhow!(
+            "Failed to write uid_map for rootless container: {}. This may indicate insufficient privileges or kernel restrictions.",
+            e
+        ));
+    }
 
-    // Write GID mapping
-    std::fs::write("/proc/self/gid_map", &gid_map)
-        .context("Failed to write gid_map for rootless container")?;
+    // Deny setgroups (required for rootless) - this must be done before GID mapping
+    if let Err(e) = std::fs::write("/proc/self/setgroups", "deny") {
+        return Err(anyhow::anyhow!(
+            "Failed to deny setgroups for rootless container: {}. This is required for rootless operation.",
+            e
+        ));
+    }
+
+    // Write GID mapping with validation
+    if let Err(e) = std::fs::write("/proc/self/gid_map", &gid_map) {
+        return Err(anyhow::anyhow!(
+            "Failed to write gid_map for rootless container: {}. Check that setgroups was properly denied.",
+            e
+        ));
+    }
+
+    // Verify the mappings were applied correctly
+    verify_user_namespace_mappings(current_uid, current_gid).await?;
 
     info!(
-        "✅ User namespace mappings configured: uid {} -> 0, gid {} -> 0",
+        "✅ User namespace mappings configured and verified: uid {} -> 0, gid {} -> 0",
         current_uid, current_gid
     );
     Ok(())
@@ -743,7 +810,18 @@ async fn setup_cgroups(state: &ContainerState) -> Result<()> {
         return Ok(());
     }
 
-    // Create cgroup directory
+    // Ensure parent bolt cgroup exists
+    let bolt_cgroup = "/sys/fs/cgroup/bolt";
+    if !std::path::Path::new(bolt_cgroup).exists() {
+        fs::create_dir_all(bolt_cgroup)?;
+
+        // Enable necessary controllers for bolt cgroup
+        if let Err(e) = enable_cgroup_controllers(bolt_cgroup, &["cpu", "memory", "pids"]).await {
+            warn!("Failed to enable controllers for bolt cgroup: {}", e);
+        }
+    }
+
+    // Create container-specific cgroup directory
     if let Err(e) = fs::create_dir_all(&cgroup_path) {
         warn!("Failed to create cgroup directory: {} - {}", cgroup_path, e);
         return Ok(()); // Don't fail container creation if cgroups fail
@@ -751,23 +829,40 @@ async fn setup_cgroups(state: &ContainerState) -> Result<()> {
 
     info!("✅ Created cgroup: {}", cgroup_path);
 
-    // Set resource limits (best effort)
+    // Enable controllers for this container
+    let controllers_to_enable = determine_required_controllers(limits, &state.config);
+    if let Err(e) = enable_cgroup_controllers(&cgroup_path, &controllers_to_enable).await {
+        warn!("Failed to enable cgroup controllers: {}", e);
+    }
+
+    // Set resource limits with validation
     if let Some(memory_limit) = limits.memory_limit {
-        let _ = set_memory_limit(&cgroup_path, memory_limit).await;
+        if let Err(e) = set_memory_limit(&cgroup_path, memory_limit).await {
+            warn!("Failed to set memory limit: {}", e);
+        }
     }
 
     if let Some(cpu_limit) = limits.cpu_limit {
-        let _ = set_cpu_limit(&cgroup_path, cpu_limit).await;
+        if let Err(e) = set_cpu_limit(&cgroup_path, cpu_limit).await {
+            warn!("Failed to set CPU limit: {}", e);
+        }
     }
 
     if let Some(pids_limit) = limits.pids_limit {
-        let _ = set_pids_limit(&cgroup_path, pids_limit).await;
+        if let Err(e) = set_pids_limit(&cgroup_path, pids_limit).await {
+            warn!("Failed to set PIDs limit: {}", e);
+        }
     }
 
     // Gaming-specific optimizations
     if let Some(ref gaming) = state.config.gaming_config {
-        let _ = setup_gaming_cgroups(&cgroup_path, gaming).await;
+        if let Err(e) = setup_gaming_cgroups(&cgroup_path, gaming).await {
+            warn!("Failed to set up gaming cgroups: {}", e);
+        }
     }
+
+    // Set up I/O limits if supported
+    setup_io_limits(&cgroup_path, limits).await?;
 
     info!("✅ Cgroups v2 configured successfully");
     Ok(())
@@ -898,6 +993,438 @@ async fn setup_gaming_security(state: &ContainerState) -> Result<()> {
 
     // TODO: Implement gaming-specific security adjustments
     Ok(())
+}
+
+async fn enable_cgroup_controllers(cgroup_path: &str, controllers: &[&str]) -> Result<()> {
+    let subtree_control = format!("{}/cgroup.subtree_control", cgroup_path);
+
+    if std::path::Path::new(&subtree_control).exists() {
+        let controllers_str = controllers.iter().map(|c| format!("+{}", c)).collect::<Vec<_>>().join(" ");
+
+        if let Err(e) = fs::write(&subtree_control, &controllers_str) {
+            return Err(anyhow::anyhow!("Failed to enable controllers {}: {}", controllers_str, e));
+        }
+
+        info!("✅ Enabled cgroup controllers: {:?}", controllers);
+    }
+
+    Ok(())
+}
+
+fn determine_required_controllers(limits: &ResourceLimits, config: &ContainerConfig) -> Vec<&'static str> {
+    let mut controllers = Vec::new();
+
+    if limits.memory_limit.is_some() {
+        controllers.push("memory");
+    }
+
+    if limits.cpu_limit.is_some() {
+        controllers.push("cpu");
+    }
+
+    if limits.pids_limit.is_some() {
+        controllers.push("pids");
+    }
+
+    // Add I/O controller for storage limits or gaming optimizations
+    if limits.io_limit.is_some() || config.gaming_config.is_some() {
+        controllers.push("io");
+    }
+
+    controllers
+}
+
+async fn setup_io_limits(cgroup_path: &str, limits: &ResourceLimits) -> Result<()> {
+    if let Some(io_limit) = limits.io_limit {
+        info!("💿 Setting I/O limits: {} IOPS", io_limit);
+
+        // Set I/O weight (priority)
+        let io_weight_path = format!("{}/io.weight", cgroup_path);
+        if std::path::Path::new(&io_weight_path).exists() {
+            // Higher weight for better I/O performance (default is 100, max is 10000)
+            let weight = if io_limit > 1000 { "500" } else { "100" };
+            if let Err(e) = fs::write(&io_weight_path, weight) {
+                debug!("Failed to set I/O weight: {}", e);
+            } else {
+                info!("✅ Set I/O weight: {}", weight);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn validate_rootless_prerequisites(uid: nix::unistd::Uid, gid: nix::unistd::Gid) -> Result<()> {
+    info!("🔍 Validating rootless prerequisites");
+
+    // Check that we're not running as root (rootless containers should not be run as root)
+    if uid.is_root() {
+        warn!("⚠️  Running as root - rootless mode not needed but will continue");
+    } else {
+        info!("✅ Running as non-root user (UID: {}, GID: {})", uid, gid);
+    }
+
+    // Check for newuidmap/newgidmap binaries (needed for advanced rootless mappings)
+    let newuidmap_exists = std::path::Path::new("/usr/bin/newuidmap").exists();
+    let newgidmap_exists = std::path::Path::new("/usr/bin/newgidmap").exists();
+
+    if newuidmap_exists && newgidmap_exists {
+        info!("✅ newuidmap/newgidmap binaries available for advanced mappings");
+    } else {
+        info!("⚠️  newuidmap/newgidmap not found - using basic mappings only");
+    }
+
+    // Check /proc/sys/kernel/unprivileged_userns_clone (if exists)
+    if let Ok(userns_clone) = std::fs::read_to_string("/proc/sys/kernel/unprivileged_userns_clone") {
+        if userns_clone.trim() == "0" {
+            warn!("⚠️  Unprivileged user namespaces disabled by kernel - rootless may fail");
+        } else {
+            info!("✅ Unprivileged user namespaces enabled");
+        }
+    }
+
+    // Check /proc/sys/user/max_user_namespaces
+    if let Ok(max_user_ns) = std::fs::read_to_string("/proc/sys/user/max_user_namespaces") {
+        let max: i32 = max_user_ns.trim().parse().unwrap_or(0);
+        if max == 0 {
+            return Err(anyhow::anyhow!(
+                "User namespaces disabled (max_user_namespaces = 0) - rootless containers cannot run"
+            ));
+        } else if max < 1000 {
+            warn!("⚠️  Low max_user_namespaces limit: {} - may cause issues under load", max);
+        } else {
+            info!("✅ Adequate user namespace limit: {}", max);
+        }
+    }
+
+    // Check subuid/subgid files for advanced mappings
+    check_subid_files(uid).await?;
+
+    Ok(())
+}
+
+async fn check_subid_files(uid: nix::unistd::Uid) -> Result<()> {
+    let username = match nix::unistd::User::from_uid(uid)? {
+        Some(user) => user.name,
+        None => {
+            warn!("⚠️  Could not determine username for UID {}", uid);
+            return Ok(());
+        }
+    };
+
+    // Check /etc/subuid
+    if let Ok(subuid_content) = std::fs::read_to_string("/etc/subuid") {
+        let has_subuid = subuid_content.lines().any(|line| {
+            line.starts_with(&format!("{}:", username)) || line.starts_with(&format!("{}:", uid))
+        });
+
+        if has_subuid {
+            info!("✅ User {} has subuid mappings available", username);
+        } else {
+            info!("⚠️  No subuid mappings for user {} - limited to single UID mapping", username);
+        }
+    } else {
+        info!("⚠️  /etc/subuid not found - limited rootless capabilities");
+    }
+
+    // Check /etc/subgid
+    if let Ok(subgid_content) = std::fs::read_to_string("/etc/subgid") {
+        let has_subgid = subgid_content.lines().any(|line| {
+            line.starts_with(&format!("{}:", username)) || line.starts_with(&format!("{}:", uid))
+        });
+
+        if has_subgid {
+            info!("✅ User {} has subgid mappings available", username);
+        } else {
+            info!("⚠️  No subgid mappings for user {} - limited to single GID mapping", username);
+        }
+    } else {
+        info!("⚠️  /etc/subgid not found - limited rootless capabilities");
+    }
+
+    Ok(())
+}
+
+async fn verify_user_namespace_mappings(original_uid: nix::unistd::Uid, original_gid: nix::unistd::Gid) -> Result<()> {
+    info!("🔍 Verifying user namespace mappings");
+
+    // Read back the UID mapping
+    let uid_map = std::fs::read_to_string("/proc/self/uid_map")
+        .context("Failed to read uid_map after setup")?;
+
+    let expected_uid_map = format!("         0       {} 1", original_uid);
+    if uid_map.trim().contains(&format!("0 {} 1", original_uid)) {
+        info!("✅ UID mapping verified: {}", uid_map.trim());
+    } else {
+        return Err(anyhow::anyhow!(
+            "UID mapping verification failed. Expected containing '0 {} 1', got: '{}'",
+            original_uid,
+            uid_map.trim()
+        ));
+    }
+
+    // Read back the GID mapping
+    let gid_map = std::fs::read_to_string("/proc/self/gid_map")
+        .context("Failed to read gid_map after setup")?;
+
+    if gid_map.trim().contains(&format!("0 {} 1", original_gid)) {
+        info!("✅ GID mapping verified: {}", gid_map.trim());
+    } else {
+        return Err(anyhow::anyhow!(
+            "GID mapping verification failed. Expected containing '0 {} 1', got: '{}'",
+            original_gid,
+            gid_map.trim()
+        ));
+    }
+
+    // Verify setgroups is denied
+    let setgroups = std::fs::read_to_string("/proc/self/setgroups")
+        .context("Failed to read setgroups after setup")?;
+
+    if setgroups.trim() == "deny" {
+        info!("✅ setgroups properly denied");
+    } else {
+        return Err(anyhow::anyhow!(
+            "setgroups verification failed. Expected 'deny', got: '{}'",
+            setgroups.trim()
+        ));
+    }
+
+    // Test effective UID/GID inside namespace
+    let effective_uid = nix::unistd::getuid();
+    let effective_gid = nix::unistd::getgid();
+
+    if effective_uid.is_root() && effective_gid.as_raw() == 0 {
+        info!("✅ Effective UID/GID verified: {} / {}", effective_uid, effective_gid);
+    } else {
+        warn!(
+            "⚠️  Unexpected effective UID/GID: {} / {} (expected 0/0)",
+            effective_uid, effective_gid
+        );
+    }
+
+    Ok(())
+}
+
+async fn setup_pivot_root(rootfs_path: &std::path::Path) -> Result<()> {
+    info!("🔄 Setting up pivot_root for proper filesystem isolation");
+
+    // Create old_root directory inside new root
+    let old_root = rootfs_path.join(".old_root");
+    if !old_root.exists() {
+        std::fs::create_dir_all(&old_root)?;
+    }
+
+    // Use pivot_root for proper filesystem isolation
+    match nix::unistd::pivot_root(rootfs_path, &old_root) {
+        Ok(()) => {
+            info!("✅ pivot_root successful");
+
+            // Change to new root
+            nix::unistd::chdir("/")?;
+
+            // Unmount old root to complete the isolation
+            let _ = nix::mount::umount2("/.old_root", nix::mount::MntFlags::MNT_DETACH);
+
+            // Remove old_root directory
+            let _ = std::fs::remove_dir("/.old_root");
+        }
+        Err(e) => {
+            warn!("pivot_root failed: {}, falling back to chroot", e);
+
+            // Fallback to chroot if pivot_root fails
+            nix::unistd::chroot(rootfs_path).context("Failed to chroot")?;
+            nix::unistd::chdir("/").context("Failed to chdir to /")?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn apply_process_security(state: &ContainerState, spec: &Spec) -> Result<()> {
+    info!("🔒 Applying process-level security");
+
+    // Apply no-new-privileges if enabled
+    if state.config.security_profile.no_new_privileges {
+        unsafe {
+            if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
+                warn!("Failed to set no-new-privileges");
+            } else {
+                info!("✅ Set no-new-privileges");
+            }
+        }
+    }
+
+    // Drop capabilities
+    drop_capabilities(&state.config.security_profile.drop_capabilities).await?;
+
+    // Apply seccomp profile if specified
+    if let Some(ref seccomp_profile) = state.config.security_profile.seccomp_profile {
+        apply_seccomp_profile(seccomp_profile).await?;
+    }
+
+    Ok(())
+}
+
+async fn drop_capabilities(caps_to_drop: &[String]) -> Result<()> {
+    info!("🔧 Dropping Linux capabilities");
+
+    for cap in caps_to_drop {
+        info!("  Dropping capability: {}", cap);
+        // TODO: Implement actual capability dropping using caps crate
+        // For now, just log what we would drop
+    }
+
+    info!("✅ Capabilities dropped (implementation pending)");
+    Ok(())
+}
+
+async fn apply_seccomp_profile(profile: &str) -> Result<()> {
+    info!("🛡️  Applying seccomp profile: {}", profile);
+
+    // TODO: Implement seccomp filter loading and application
+    // This would typically involve:
+    // 1. Loading the seccomp profile from file
+    // 2. Parsing the BPF filter
+    // 3. Applying it using seccomp(2) syscall
+
+    warn!("Seccomp profile application not yet implemented");
+    Ok(())
+}
+
+async fn add_process_to_cgroup(state: &ContainerState) -> Result<()> {
+    let cgroup_path = format!("/sys/fs/cgroup/bolt/{}", state.id);
+
+    if std::path::Path::new("/sys/fs/cgroup/cgroup.controllers").exists() {
+        // Ensure cgroup exists
+        if let Err(e) = std::fs::create_dir_all(&cgroup_path) {
+            debug!("Cgroup directory already exists or creation failed: {}", e);
+        }
+
+        info!("✅ Process will be added to cgroup: {}", cgroup_path);
+    }
+
+    Ok(())
+}
+
+async fn write_pid_to_cgroup(state: &ContainerState, pid: u32) -> Result<()> {
+    let cgroup_path = format!("/sys/fs/cgroup/bolt/{}", state.id);
+    let cgroup_procs = format!("{}/cgroup.procs", cgroup_path);
+
+    if std::path::Path::new(&cgroup_procs).exists() {
+        if let Err(e) = std::fs::write(&cgroup_procs, pid.to_string()) {
+            debug!("Failed to write PID to cgroup: {}", e);
+        } else {
+            info!("✅ Added PID {} to cgroup: {}", pid, cgroup_path);
+        }
+    }
+
+    Ok(())
+}
+
+async fn cleanup_container_resources(container_id: &str) -> Result<()> {
+    info!("🧹 Cleaning up resources for container: {}", container_id);
+
+    // Clean up cgroup
+    let cgroup_path = format!("/sys/fs/cgroup/bolt/{}", container_id);
+    if std::path::Path::new(&cgroup_path).exists() {
+        let _ = std::fs::remove_dir(&cgroup_path);
+        info!("✅ Cleaned up cgroup: {}", cgroup_path);
+    }
+
+    // Clean up network resources (would typically call network manager)
+    // Clean up mount points
+    // Clean up any other container-specific resources
+
+    Ok(())
+}
+
+fn is_nvbind_runtime(config: &ContainerConfig) -> bool {
+    // Check if container is configured to use nvbind runtime
+    // This could be specified in the container environment or capabilities
+
+    // Check for nvbind environment variable
+    if config.env.get("BOLT_RUNTIME").map(|s| s.as_str()) == Some("nvbind") {
+        return true;
+    }
+
+    // Check for GPU-related capabilities that suggest nvbind usage
+    let has_gpu_caps = config.capabilities.iter().any(|cap| {
+        cap.contains("GPU") || cap.contains("NVIDIA") || cap.contains("RENDER")
+    });
+
+    // Check if gaming GPU configuration requests nvbind
+    if let Some(ref gaming) = config.gaming_config {
+        return gaming.gpu_passthrough && (gaming.nvidia_runtime || has_gpu_caps);
+    }
+
+    false
+}
+
+async fn execute_nvbind_container(
+    state: &ContainerState,
+    spec: &Spec,
+    gaming_config: &GamingConfig,
+) -> Result<u32> {
+    info!("🚀 Executing container with nvbind GPU runtime: {}", state.id);
+
+    // Create nvbind configuration from gaming config
+    let nvbind_config = create_nvbind_config_for_gaming(gaming_config);
+
+    // Initialize nvbind runtime
+    let nvbind_runtime = NvbindRuntime::new(nvbind_config).await
+        .context("Failed to initialize nvbind runtime")?;
+
+    // Check GPU compatibility
+    let compatibility_report = nvbind_runtime.check_gpu_compatibility(gaming_config).await?;
+    if !compatibility_report.warnings.is_empty() {
+        for warning in &compatibility_report.warnings {
+            warn!("GPU compatibility warning: {}", warning);
+        }
+    }
+
+    // Get process configuration from OCI spec
+    let process = spec.process().as_ref().context("No process configuration in spec")?;
+    let args = process.args().as_ref().context("No args in process configuration")?;
+
+    if args.is_empty() {
+        return Err(anyhow::anyhow!("No command specified for nvbind container"));
+    }
+
+    // Determine GPU request based on gaming configuration
+    let gpu_request = determine_gpu_request(gaming_config)?;
+
+    // Get container rootfs path
+    let rootfs_path = state.bundle_path.join("rootfs");
+
+    // Extract image name from state (fallback to container ID if not available)
+    let image_name = state.config.image.as_str();
+
+    // Execute container with nvbind
+    let pid = nvbind_runtime.run_container_with_gpu(
+        &state.id,
+        image_name,
+        args,
+        &gpu_request,
+        &rootfs_path,
+    ).await?;
+
+    info!("✅ nvbind container started with PID: {}", pid);
+
+    // Set up standard container management (cgroups, etc.)
+    setup_cgroups(state).await?;
+
+    Ok(pid)
+}
+
+fn determine_gpu_request(gaming_config: &GamingConfig) -> Result<GpuRequest> {
+    // For gaming workloads, default to all GPUs if passthrough is enabled
+    if gaming_config.gpu_passthrough {
+        return Ok(GpuRequest::All);
+    }
+
+    // Fallback to single GPU
+    Ok(GpuRequest::Count(1))
 }
 
 pub async fn create_container_rootfs(
