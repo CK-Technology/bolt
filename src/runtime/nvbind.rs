@@ -1,4 +1,6 @@
-use crate::runtime::input::{UltraLowLatencyInputHandler, GamingInputOptimizer, InputLatencyMetrics};
+use crate::runtime::input::{
+    GamingInputOptimizer, InputLatencyMetrics, UltraLowLatencyInputHandler,
+};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -8,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::process::Command as AsyncCommand;
 use tokio::sync::{RwLock, Semaphore};
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NvbindConfig {
@@ -142,18 +144,18 @@ pub struct AdvancedGpuRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GpuPerformanceProfile {
-    UltraLowLatency,    // <1μs context switches
-    Gaming,             // Gaming-optimized
-    Compute,            // Compute workloads
-    Balanced,           // Balance of performance and efficiency
+    UltraLowLatency, // <1μs context switches
+    Gaming,          // Gaming-optimized
+    Compute,         // Compute workloads
+    Balanced,        // Balance of performance and efficiency
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GpuIsolationLevel {
-    Exclusive,          // GPU exclusively for this container
-    Shared,             // Share GPU with other containers
-    TimeSliced,         // Time-sliced sharing
-    MIG,               // Multi-Instance GPU (if supported)
+    Exclusive,  // GPU exclusively for this container
+    Shared,     // Share GPU with other containers
+    TimeSliced, // Time-sliced sharing
+    MIG,        // Multi-Instance GPU (if supported)
 }
 
 #[derive(Debug, Clone)]
@@ -200,19 +202,28 @@ impl NvbindRuntime {
 
         // Initialize ultra-low latency input handler for gaming
         let input_handler = Arc::new(UltraLowLatencyInputHandler::new(5_000_000)); // 5ms target
-        input_handler.initialize().await
+        input_handler
+            .initialize()
+            .await
             .context("Failed to initialize input handler")?;
 
         // Enable gaming mode optimizations
-        input_handler.enable_gaming_mode().await
+        input_handler
+            .enable_gaming_mode()
+            .await
             .context("Failed to enable gaming mode")?;
 
         // Initialize gaming input optimizer
         let input_optimizer = Arc::new(GamingInputOptimizer::new(input_handler.clone()));
-        input_optimizer.optimize_for_gaming().await
+        input_optimizer
+            .optimize_for_gaming()
+            .await
             .context("Failed to optimize input for gaming")?;
 
-        info!("✅ Advanced nvbind runtime initialized with {} GPUs", available_gpus.len());
+        info!(
+            "✅ Advanced nvbind runtime initialized with {} GPUs",
+            available_gpus.len()
+        );
         info!("   🎯 Sub-microsecond context switching enabled");
         info!("   🎮 Gaming optimizations active");
         info!("   📊 Real-time performance monitoring enabled");
@@ -238,19 +249,24 @@ impl NvbindRuntime {
         gpu_request: &GpuRequest,
         container_rootfs: &Path,
     ) -> Result<u32> {
-        info!("🎮 Running container with nvbind GPU passthrough: {}", container_id);
+        info!(
+            "🎮 Running container with nvbind GPU passthrough: {}",
+            container_id
+        );
 
         // Validate GPU request
         let selected_gpus = self.validate_and_select_gpus(gpu_request).await?;
 
         // Build nvbind command
-        let mut nvbind_cmd = self.build_nvbind_command(
-            container_id,
-            image_name,
-            command,
-            &selected_gpus,
-            container_rootfs,
-        ).await?;
+        let mut nvbind_cmd = self
+            .build_nvbind_command(
+                container_id,
+                image_name,
+                command,
+                &selected_gpus,
+                container_rootfs,
+            )
+            .await?;
 
         info!("🔧 Executing nvbind command: {:?}", nvbind_cmd);
 
@@ -269,7 +285,10 @@ impl NvbindRuntime {
             match child.wait_with_output().await {
                 Ok(output) => {
                     let exit_code = output.status.code().unwrap_or(-1);
-                    info!("nvbind container {} exited with code: {}", container_id_clone, exit_code);
+                    info!(
+                        "nvbind container {} exited with code: {}",
+                        container_id_clone, exit_code
+                    );
 
                     if !output.stderr.is_empty() {
                         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -277,7 +296,10 @@ impl NvbindRuntime {
                     }
                 }
                 Err(e) => {
-                    error!("Error waiting for nvbind container {}: {}", container_id_clone, e);
+                    error!(
+                        "Error waiting for nvbind container {}: {}",
+                        container_id_clone, e
+                    );
                 }
             }
         });
@@ -398,7 +420,10 @@ impl NvbindRuntime {
         &self.available_gpus
     }
 
-    pub async fn check_gpu_compatibility(&self, container_config: &crate::config::GamingConfig) -> Result<CompatibilityReport> {
+    pub async fn check_gpu_compatibility(
+        &self,
+        container_config: &crate::config::GamingConfig,
+    ) -> Result<CompatibilityReport> {
         info!("🔍 Checking GPU compatibility for gaming configuration");
 
         let mut report = CompatibilityReport {
@@ -412,7 +437,9 @@ impl NvbindRuntime {
             if let Some(ref nvidia) = gpu_config.nvidia {
                 if let Some(dlss_required) = nvidia.dlss {
                     if dlss_required && !self.has_dlss_support() {
-                        report.warnings.push("DLSS requested but no compatible GPU found".to_string());
+                        report
+                            .warnings
+                            .push("DLSS requested but no compatible GPU found".to_string());
                     }
                 }
             }
@@ -421,17 +448,24 @@ impl NvbindRuntime {
         // Check driver compatibility
         let driver_status = self.check_driver_status().await?;
         if !driver_status.is_optimal {
-            report.warnings.push(format!("Driver status: {}", driver_status.message));
+            report
+                .warnings
+                .push(format!("Driver status: {}", driver_status.message));
         }
 
-        info!("✅ GPU compatibility check complete: {} warnings", report.warnings.len());
+        info!(
+            "✅ GPU compatibility check complete: {} warnings",
+            report.warnings.len()
+        );
         Ok(report)
     }
 
     fn has_dlss_support(&self) -> bool {
         // Check for RTX series GPUs that support DLSS
         self.available_gpus.iter().any(|gpu| {
-            gpu.name.contains("RTX") || gpu.name.contains("Tesla") || gpu.name.contains("Quadro RTX")
+            gpu.name.contains("RTX")
+                || gpu.name.contains("Tesla")
+                || gpu.name.contains("Quadro RTX")
         })
     }
 
@@ -494,8 +528,10 @@ impl NvbindRuntime {
         if target_met {
             info!("✅ Gaming latency target achieved: <10ms");
         } else {
-            warn!("⚠️  Gaming latency target missed: avg={:.2}ms, p99={:.2}ms",
-                  avg_latency_ms, p99_latency_ms);
+            warn!(
+                "⚠️  Gaming latency target missed: avg={:.2}ms, p99={:.2}ms",
+                avg_latency_ms, p99_latency_ms
+            );
         }
 
         Ok(target_met)
@@ -505,15 +541,21 @@ impl NvbindRuntime {
         info!("🏆 Configuring competitive gaming mode");
 
         // Apply the most aggressive optimizations
-        self.input_optimizer.optimize_for_gaming().await
+        self.input_optimizer
+            .optimize_for_gaming()
+            .await
             .context("Failed to apply competitive gaming optimizations")?;
 
         // Set ultra-aggressive polling rate for competitive gaming
-        self.input_handler.set_polling_rate(2000).await
+        self.input_handler
+            .set_polling_rate(2000)
+            .await
             .context("Failed to set competitive polling rate")?;
 
         // Configure for minimal latency across all systems
-        self.input_handler.configure_minimal_latency().await
+        self.input_handler
+            .configure_minimal_latency()
+            .await
             .context("Failed to configure minimal latency")?;
 
         info!("✅ Competitive gaming mode configured");
@@ -591,14 +633,20 @@ async fn discover_gpus(config: &NvbindConfig) -> Result<Vec<GpuInfo>> {
         for gpu_json in gpu_data {
             let gpu_info = GpuInfo {
                 id: gpu_json["id"].as_str().unwrap_or("unknown").to_string(),
-                name: gpu_json["name"].as_str().unwrap_or("Unknown GPU").to_string(),
+                name: gpu_json["name"]
+                    .as_str()
+                    .unwrap_or("Unknown GPU")
+                    .to_string(),
                 memory_mb: gpu_json["memory_mb"].as_u64().unwrap_or(0),
                 compute_capability: gpu_json["compute_capability"].as_str().map(String::from),
                 driver_version: gpu_json["driver_version"].as_str().map(String::from),
                 uuid: gpu_json["uuid"].as_str().map(String::from),
             };
 
-            info!("  🖥️  Found GPU: {} ({}MB)", gpu_info.name, gpu_info.memory_mb);
+            info!(
+                "  🖥️  Found GPU: {} ({}MB)",
+                gpu_info.name, gpu_info.memory_mb
+            );
             gpus.push(gpu_info);
         }
 
@@ -661,7 +709,10 @@ impl GpuScheduler {
         container_id: &str,
         gpu_request: &AdvancedGpuRequest,
     ) -> Result<Vec<String>> {
-        info!("🎯 Allocating GPU for ultra-low latency container: {}", container_id);
+        info!(
+            "🎯 Allocating GPU for ultra-low latency container: {}",
+            container_id
+        );
 
         let _permit = self.scheduling_semaphore.acquire().await?;
         let mut contexts = self.gpu_contexts.write().await;
@@ -672,7 +723,12 @@ impl GpuScheduler {
             GpuRequest::All => {
                 for (gpu_id, context) in contexts.iter_mut() {
                     if self.can_allocate_context(context, gpu_request).await? {
-                        self.configure_ultra_low_latency_context(context, container_id, gpu_request).await?;
+                        self.configure_ultra_low_latency_context(
+                            context,
+                            container_id,
+                            gpu_request,
+                        )
+                        .await?;
                         allocated_gpus.push(gpu_id.clone());
                     }
                 }
@@ -684,7 +740,12 @@ impl GpuScheduler {
                         break;
                     }
                     if self.can_allocate_context(context, gpu_request).await? {
-                        self.configure_ultra_low_latency_context(context, container_id, gpu_request).await?;
+                        self.configure_ultra_low_latency_context(
+                            context,
+                            container_id,
+                            gpu_request,
+                        )
+                        .await?;
                         allocated_gpus.push(gpu_id.clone());
                         allocated_count += 1;
                     }
@@ -694,7 +755,12 @@ impl GpuScheduler {
                 for gpu_id in gpu_ids {
                     if let Some(context) = contexts.get_mut(gpu_id) {
                         if self.can_allocate_context(context, gpu_request).await? {
-                            self.configure_ultra_low_latency_context(context, container_id, gpu_request).await?;
+                            self.configure_ultra_low_latency_context(
+                                context,
+                                container_id,
+                                gpu_request,
+                            )
+                            .await?;
                             allocated_gpus.push(gpu_id.clone());
                         }
                     }
@@ -702,15 +768,20 @@ impl GpuScheduler {
             }
         }
 
-        info!("✅ Allocated {} GPU(s) with sub-microsecond context switching", allocated_gpus.len());
+        info!(
+            "✅ Allocated {} GPU(s) with sub-microsecond context switching",
+            allocated_gpus.len()
+        );
         Ok(allocated_gpus)
     }
 
-    async fn can_allocate_context(&self, context: &GpuContext, request: &AdvancedGpuRequest) -> Result<bool> {
+    async fn can_allocate_context(
+        &self,
+        context: &GpuContext,
+        request: &AdvancedGpuRequest,
+    ) -> Result<bool> {
         match request.isolation_level {
-            GpuIsolationLevel::Exclusive => {
-                Ok(context.container_id.is_none())
-            }
+            GpuIsolationLevel::Exclusive => Ok(context.container_id.is_none()),
             GpuIsolationLevel::Shared => {
                 Ok(true) // Can always share
             }
@@ -731,7 +802,10 @@ impl GpuScheduler {
         container_id: &str,
         request: &AdvancedGpuRequest,
     ) -> Result<()> {
-        info!("⚡ Configuring ultra-low latency GPU context for {}", container_id);
+        info!(
+            "⚡ Configuring ultra-low latency GPU context for {}",
+            container_id
+        );
 
         context.container_id = Some(container_id.to_string());
         context.priority = request.context_priority;
@@ -818,8 +892,10 @@ impl GpuPerformanceMonitor {
 
         for (gpu_id, metric) in metrics_guard.iter_mut() {
             // Simulate real GPU metrics (in production, this would call nvbind/nvidia-ml-py)
-            metric.utilization_percent = (metric.utilization_percent + rand::random::<f32>() * 10.0).min(100.0);
-            metric.memory_used_mb = (metric.memory_used_mb + rand::random::<u64>() % 100).min(24000);
+            metric.utilization_percent =
+                (metric.utilization_percent + rand::random::<f32>() * 10.0).min(100.0);
+            metric.memory_used_mb =
+                (metric.memory_used_mb + rand::random::<u64>() % 100).min(24000);
             metric.temperature_c = 60 + rand::random::<u32>() % 20;
             metric.power_draw_w = 200 + rand::random::<u32>() % 100;
             metric.frame_time_us = 8333 + rand::random::<u64>() % 5000; // ~120fps target
@@ -880,7 +956,8 @@ impl GpuMemoryManager {
             if available < size_mb {
                 return Err(anyhow::anyhow!(
                     "Insufficient GPU memory: requested {}MB, available {}MB",
-                    size_mb, available
+                    size_mb,
+                    available
                 ));
             }
 
@@ -895,7 +972,10 @@ impl GpuMemoryManager {
             pool.allocated_mb += size_mb;
             pool.allocations.insert(allocation_id.clone(), allocation);
 
-            info!("✅ Allocated {}MB GPU memory for container {}", size_mb, container_id);
+            info!(
+                "✅ Allocated {}MB GPU memory for container {}",
+                size_mb, container_id
+            );
             Ok(allocation_id)
         } else {
             Err(anyhow::anyhow!("GPU {} not found", gpu_id))
@@ -904,7 +984,9 @@ impl GpuMemoryManager {
 
     pub async fn get_memory_usage(&self, gpu_id: &str) -> Option<(u64, u64)> {
         let pools = self.memory_pools.read().await;
-        pools.get(gpu_id).map(|pool| (pool.allocated_mb, pool.total_mb))
+        pools
+            .get(gpu_id)
+            .map(|pool| (pool.allocated_mb, pool.total_mb))
     }
 }
 
@@ -912,14 +994,16 @@ impl GpuMemoryManager {
 mod rand {
     pub fn random<T>() -> T
     where
-        T: From<u8>
+        T: From<u8>,
     {
         // Simple pseudorandom for demo - in production use proper rand crate
         T::from(42)
     }
 }
 
-pub fn create_nvbind_config_for_gaming(gaming_config: &crate::config::GamingConfig) -> NvbindConfig {
+pub fn create_nvbind_config_for_gaming(
+    gaming_config: &crate::config::GamingConfig,
+) -> NvbindConfig {
     let mut config = NvbindConfig::default();
 
     // Set performance profile for gaming
@@ -932,14 +1016,20 @@ pub fn create_nvbind_config_for_gaming(gaming_config: &crate::config::GamingConf
 
     // Add NVIDIA-specific optimizations if nvidia runtime is enabled
     if gaming_config.nvidia_runtime {
-        config.env_vars.insert("NVIDIA_VISIBLE_DEVICES".to_string(), "all".to_string());
-        config.env_vars.insert("NVIDIA_DRIVER_CAPABILITIES".to_string(), "all".to_string());
+        config
+            .env_vars
+            .insert("NVIDIA_VISIBLE_DEVICES".to_string(), "all".to_string());
+        config
+            .env_vars
+            .insert("NVIDIA_DRIVER_CAPABILITIES".to_string(), "all".to_string());
         config.driver_mode = DriverMode::NvidiaProrietary;
     }
 
     // Add AMD-specific optimizations if amd runtime is enabled
     if gaming_config.amd_runtime {
-        config.env_vars.insert("ROC_VISIBLE_DEVICES".to_string(), "all".to_string());
+        config
+            .env_vars
+            .insert("ROC_VISIBLE_DEVICES".to_string(), "all".to_string());
     }
 
     // Enable rootless for gaming containers
@@ -947,8 +1037,14 @@ pub fn create_nvbind_config_for_gaming(gaming_config: &crate::config::GamingConf
 
     // Enable audio passthrough if requested
     if gaming_config.audio_passthrough {
-        config.env_vars.insert("PULSE_RUNTIME_PATH".to_string(), "/run/user/1000/pulse".to_string());
-        config.env_vars.insert("PIPEWIRE_RUNTIME_DIR".to_string(), "/run/user/1000/pipewire-0".to_string());
+        config.env_vars.insert(
+            "PULSE_RUNTIME_PATH".to_string(),
+            "/run/user/1000/pulse".to_string(),
+        );
+        config.env_vars.insert(
+            "PIPEWIRE_RUNTIME_DIR".to_string(),
+            "/run/user/1000/pipewire-0".to_string(),
+        );
     }
 
     config

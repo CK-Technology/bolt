@@ -170,19 +170,15 @@ impl DevWorkflowManager {
         info!("   Security Scanning: {}", config.security_scanning);
 
         // Initialize AI Assistant
-        let ai_assistant = Arc::new(
-            ai_assistant::AIAssistant::new(config.ai_assistance_enabled).await?
-        );
+        let ai_assistant =
+            Arc::new(ai_assistant::AIAssistant::new(config.ai_assistance_enabled).await?);
 
         // Initialize Dependency Cache
-        let dependency_cache = Arc::new(
-            dependency_cache::IntelligentDependencyCache::new().await?
-        );
+        let dependency_cache = Arc::new(dependency_cache::IntelligentDependencyCache::new().await?);
 
         // Initialize Hot Reload Manager
-        let hot_reload = Arc::new(
-            hot_reload::HotReloadManager::new(config.ultra_fast_hot_reload).await?
-        );
+        let hot_reload =
+            Arc::new(hot_reload::HotReloadManager::new(config.ultra_fast_hot_reload).await?);
 
         info!("✅ Advanced Developer Workflow Manager initialized");
 
@@ -209,8 +205,9 @@ impl DevWorkflowManager {
         let env_id = format!("bolt-dev-{}", uuid::Uuid::new_v4().to_string()[..8]);
 
         // Determine optimal configuration based on project type
-        let (language_stack, frameworks, ai_features, resource_limits) =
-            self.determine_optimal_config(&project_type, &performance_tier).await;
+        let (language_stack, frameworks, ai_features, resource_limits) = self
+            .determine_optimal_config(&project_type, &performance_tier)
+            .await;
 
         let environment = DevEnvironment {
             id: env_id.clone(),
@@ -229,22 +226,30 @@ impl DevWorkflowManager {
 
         // Set up AI assistance for this environment
         if self.config.ai_assistance_enabled {
-            self.ai_assistant.setup_environment(&env_id, &ai_features).await?;
+            self.ai_assistant
+                .setup_environment(&env_id, &ai_features)
+                .await?;
         }
 
         // Pre-cache dependencies based on project type
         if self.config.intelligent_caching {
-            self.dependency_cache.pre_cache_for_project(&project_type, &language_stack).await?;
+            self.dependency_cache
+                .pre_cache_for_project(&project_type, &language_stack)
+                .await?;
         }
 
         // Set up hot reload
         if self.config.ultra_fast_hot_reload {
-            self.hot_reload.setup_environment(&env_id, &language_stack).await?;
+            self.hot_reload
+                .setup_environment(&env_id, &language_stack)
+                .await?;
         }
 
         // Configure IDE integration
         if self.config.ide_integration {
-            self.ide_integration.setup_environment(&env_id, &language_stack).await?;
+            self.ide_integration
+                .setup_environment(&env_id, &language_stack)
+                .await?;
         }
 
         // Start performance profiling
@@ -254,7 +259,9 @@ impl DevWorkflowManager {
 
         // Initialize security scanning
         if self.config.security_scanning {
-            self.security_scanner.setup_environment(&env_id, &SecurityLevel::Enhanced).await?;
+            self.security_scanner
+                .setup_environment(&env_id, &SecurityLevel::Enhanced)
+                .await?;
         }
 
         // Store the environment
@@ -267,7 +274,10 @@ impl DevWorkflowManager {
         info!("   Languages: {:?}", language_stack);
         info!("   Frameworks: {:?}", frameworks);
         info!("   AI Features: {} enabled", ai_features.len());
-        info!("   Resources: {}C/{}GB RAM", resource_limits.cpu_cores, resource_limits.memory_gb);
+        info!(
+            "   Resources: {}C/{}GB RAM",
+            resource_limits.cpu_cores, resource_limits.memory_gb
+        );
 
         Ok(env_id)
     }
@@ -279,24 +289,55 @@ impl DevWorkflowManager {
     ) -> (Vec<String>, Vec<String>, Vec<AIFeature>, ResourceLimits) {
         let (language_stack, frameworks) = match project_type {
             ProjectType::WebApp => (
-                vec!["typescript".to_string(), "javascript".to_string(), "html".to_string(), "css".to_string()],
-                vec!["react".to_string(), "next.js".to_string(), "node.js".to_string(), "express".to_string()],
+                vec![
+                    "typescript".to_string(),
+                    "javascript".to_string(),
+                    "html".to_string(),
+                    "css".to_string(),
+                ],
+                vec![
+                    "react".to_string(),
+                    "next.js".to_string(),
+                    "node.js".to_string(),
+                    "express".to_string(),
+                ],
             ),
             ProjectType::MachineLearning => (
                 vec!["python".to_string(), "cuda".to_string()],
-                vec!["pytorch".to_string(), "tensorflow".to_string(), "jupyter".to_string(), "numpy".to_string()],
+                vec![
+                    "pytorch".to_string(),
+                    "tensorflow".to_string(),
+                    "jupyter".to_string(),
+                    "numpy".to_string(),
+                ],
             ),
             ProjectType::Blockchain => (
-                vec!["solidity".to_string(), "rust".to_string(), "typescript".to_string()],
-                vec!["hardhat".to_string(), "web3.js".to_string(), "ethers.js".to_string()],
+                vec![
+                    "solidity".to_string(),
+                    "rust".to_string(),
+                    "typescript".to_string(),
+                ],
+                vec![
+                    "hardhat".to_string(),
+                    "web3.js".to_string(),
+                    "ethers.js".to_string(),
+                ],
             ),
             ProjectType::GameDev => (
                 vec!["c++".to_string(), "c#".to_string(), "hlsl".to_string()],
-                vec!["unreal".to_string(), "unity".to_string(), "vulkan".to_string()],
+                vec![
+                    "unreal".to_string(),
+                    "unity".to_string(),
+                    "vulkan".to_string(),
+                ],
             ),
             ProjectType::Microservices => (
                 vec!["go".to_string(), "rust".to_string(), "java".to_string()],
-                vec!["kubernetes".to_string(), "docker".to_string(), "grpc".to_string()],
+                vec![
+                    "kubernetes".to_string(),
+                    "docker".to_string(),
+                    "grpc".to_string(),
+                ],
             ),
             _ => (
                 vec!["typescript".to_string(), "python".to_string()],
@@ -378,7 +419,9 @@ impl DevWorkflowManager {
         self.hot_reload.enable_ultra_fast_mode(env_id).await?;
 
         // Enable predictive compilation
-        self.dependency_cache.enable_predictive_compilation(env_id).await?;
+        self.dependency_cache
+            .enable_predictive_compilation(env_id)
+            .await?;
 
         // Enable real-time AI suggestions
         self.ai_assistant.enable_real_time_mode(env_id).await?;
@@ -398,28 +441,42 @@ impl DevWorkflowManager {
     /// Generate development environment container configuration
     pub async fn generate_container_config(&self, env_id: &str) -> Result<HashMap<String, String>> {
         let environments = self.active_environments.read().await;
-        let environment = environments.get(env_id)
-            .ok_or_else(|| BoltError::Runtime(
-                crate::error::RuntimeError::OciError {
-                    message: format!("Environment {} not found", env_id),
-                }
-            ))?;
+        let environment = environments.get(env_id).ok_or_else(|| {
+            BoltError::Runtime(crate::error::RuntimeError::OciError {
+                message: format!("Environment {} not found", env_id),
+            })
+        })?;
 
         let mut env_vars = HashMap::new();
 
         // Basic environment configuration
         env_vars.insert("BOLT_DEV_ENV_ID".to_string(), env_id.to_string());
         env_vars.insert("BOLT_DEV_ENV_NAME".to_string(), environment.name.clone());
-        env_vars.insert("BOLT_PROJECT_TYPE".to_string(), format!("{:?}", environment.project_type));
+        env_vars.insert(
+            "BOLT_PROJECT_TYPE".to_string(),
+            format!("{:?}", environment.project_type),
+        );
 
         // Language and framework configuration
-        env_vars.insert("SUPPORTED_LANGUAGES".to_string(), environment.language_stack.join(","));
+        env_vars.insert(
+            "SUPPORTED_LANGUAGES".to_string(),
+            environment.language_stack.join(","),
+        );
         env_vars.insert("FRAMEWORKS".to_string(), environment.frameworks.join(","));
 
         // Performance configuration
-        env_vars.insert("CPU_CORES".to_string(), environment.resource_limits.cpu_cores.to_string());
-        env_vars.insert("MEMORY_GB".to_string(), environment.resource_limits.memory_gb.to_string());
-        env_vars.insert("DISK_GB".to_string(), environment.resource_limits.disk_gb.to_string());
+        env_vars.insert(
+            "CPU_CORES".to_string(),
+            environment.resource_limits.cpu_cores.to_string(),
+        );
+        env_vars.insert(
+            "MEMORY_GB".to_string(),
+            environment.resource_limits.memory_gb.to_string(),
+        );
+        env_vars.insert(
+            "DISK_GB".to_string(),
+            environment.resource_limits.disk_gb.to_string(),
+        );
 
         if environment.resource_limits.gpu_enabled {
             env_vars.insert("GPU_ENABLED".to_string(), "1".to_string());
@@ -429,20 +486,38 @@ impl DevWorkflowManager {
         }
 
         // AI features configuration
-        env_vars.insert("AI_FEATURES_ENABLED".to_string(), (!environment.ai_features.is_empty()).to_string());
+        env_vars.insert(
+            "AI_FEATURES_ENABLED".to_string(),
+            (!environment.ai_features.is_empty()).to_string(),
+        );
         for feature in &environment.ai_features {
             let feature_key = format!("AI_FEATURE_{:?}", feature).to_uppercase();
             env_vars.insert(feature_key, "1".to_string());
         }
 
         // Development workflow features
-        env_vars.insert("HOT_RELOAD_ENABLED".to_string(), environment.hot_reload_enabled.to_string());
-        env_vars.insert("SECURITY_LEVEL".to_string(), format!("{:?}", environment.security_level));
+        env_vars.insert(
+            "HOT_RELOAD_ENABLED".to_string(),
+            environment.hot_reload_enabled.to_string(),
+        );
+        env_vars.insert(
+            "SECURITY_LEVEL".to_string(),
+            format!("{:?}", environment.security_level),
+        );
 
         // Advanced Bolt features
-        env_vars.insert("BOLT_INTELLIGENT_CACHING".to_string(), self.config.intelligent_caching.to_string());
-        env_vars.insert("BOLT_PERFORMANCE_PROFILING".to_string(), self.config.performance_profiling.to_string());
-        env_vars.insert("BOLT_PREDICTIVE_TESTING".to_string(), self.config.predictive_testing.to_string());
+        env_vars.insert(
+            "BOLT_INTELLIGENT_CACHING".to_string(),
+            self.config.intelligent_caching.to_string(),
+        );
+        env_vars.insert(
+            "BOLT_PERFORMANCE_PROFILING".to_string(),
+            self.config.performance_profiling.to_string(),
+        );
+        env_vars.insert(
+            "BOLT_PREDICTIVE_TESTING".to_string(),
+            self.config.predictive_testing.to_string(),
+        );
 
         Ok(env_vars)
     }
@@ -452,12 +527,11 @@ impl DevWorkflowManager {
         info!("📊 Generating comprehensive dev metrics for: {}", env_id);
 
         let environments = self.active_environments.read().await;
-        let environment = environments.get(env_id)
-            .ok_or_else(|| BoltError::Runtime(
-                crate::error::RuntimeError::OciError {
-                    message: format!("Environment {} not found", env_id),
-                }
-            ))?;
+        let environment = environments.get(env_id).ok_or_else(|| {
+            BoltError::Runtime(crate::error::RuntimeError::OciError {
+                message: format!("Environment {} not found", env_id),
+            })
+        })?;
 
         // Get metrics from various subsystems
         let ai_metrics = self.ai_assistant.get_metrics(env_id).await?;
@@ -537,7 +611,11 @@ pub struct ResourceUtilization {
 mod uuid {
     pub struct Uuid;
     impl Uuid {
-        pub fn new_v4() -> Self { Uuid }
-        pub fn to_string(&self) -> String { "12345678-1234-1234-1234-123456789abc".to_string() }
+        pub fn new_v4() -> Self {
+            Uuid
+        }
+        pub fn to_string(&self) -> String {
+            "12345678-1234-1234-1234-123456789abc".to_string()
+        }
     }
 }

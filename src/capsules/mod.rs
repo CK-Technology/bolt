@@ -546,21 +546,14 @@ impl CapsuleManager {
             .gaming_config
             .as_ref()
             .map(|gc| GamingCapsuleConfig {
-                gpu_passthrough: gc.gpu.is_some(),
-                audio_passthrough: gc.audio.is_some(),
+                gpu_passthrough: gc.gpu_enabled,
+                audio_passthrough: gc.audio_enabled,
                 input_devices: vec!["/dev/input".to_string()],
                 display_server: DisplayServer::Both,
                 performance_mode: PerformanceMode::Gaming,
                 anti_cheat_compat: true,
                 steam_integration: true,
-                wine_config: gc.wine.as_ref().map(|w| WineConfig {
-                    version: w.version.clone().unwrap_or_else(|| "latest".to_string()),
-                    prefix_path: w.prefix.clone().unwrap_or_else(|| "/wine".to_string()),
-                    windows_version: w.winver.clone().unwrap_or_else(|| "win10".to_string()),
-                    dxvk_enabled: true,
-                    esync_enabled: true,
-                    fsync_enabled: true,
-                }),
+                wine_config: None, // TODO: Add wine config to GamingConfig
             });
 
         Ok(CapsuleConfig {

@@ -2,7 +2,7 @@ use crate::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{RwLock, Mutex};
+use tokio::sync::{Mutex, RwLock};
 use tokio::time::interval;
 use tracing::{debug, info, warn};
 
@@ -95,7 +95,9 @@ impl HotReloadManager {
         };
 
         // Set up file watchers based on language stack
-        let file_watcher = self.create_file_watcher_for_languages(language_stack).await?;
+        let file_watcher = self
+            .create_file_watcher_for_languages(language_stack)
+            .await?;
 
         {
             let mut environments = self.active_environments.write().await;
@@ -229,7 +231,9 @@ impl HotReloadManager {
         Ok(())
     }
 
-    async fn detect_file_changes(watcher: &mut FileWatcher) -> Result<Vec<(String, ChangeType, String)>> {
+    async fn detect_file_changes(
+        watcher: &mut FileWatcher,
+    ) -> Result<Vec<(String, ChangeType, String)>> {
         let mut changes = Vec::new();
 
         // Simulate file change detection (in production would use inotify/kqueue)
@@ -279,8 +283,11 @@ impl HotReloadManager {
                     match Self::execute_hot_reload(&task).await {
                         Ok(_) => {
                             let reload_time = start_time.elapsed();
-                            debug!("🔥 Hot reload completed in {:.2}ms: {}",
-                                  reload_time.as_millis() as f64, task.file_path);
+                            debug!(
+                                "🔥 Hot reload completed in {:.2}ms: {}",
+                                reload_time.as_millis() as f64,
+                                task.file_path
+                            );
 
                             // Update metrics
                             let mut environments = active_environments.write().await;
@@ -293,8 +300,9 @@ impl HotReloadManager {
                                 if state.total_reloads == 1 {
                                     state.average_reload_time_ms = reload_ms;
                                 } else {
-                                    state.average_reload_time_ms =
-                                        (state.average_reload_time_ms * (state.total_reloads - 1) as f64 + reload_ms)
+                                    state.average_reload_time_ms = (state.average_reload_time_ms
+                                        * (state.total_reloads - 1) as f64
+                                        + reload_ms)
                                         / state.total_reloads as f64;
                                 }
                             }
@@ -305,9 +313,12 @@ impl HotReloadManager {
                             // Update failure metrics
                             let mut environments = active_environments.write().await;
                             if let Some(state) = environments.get_mut(&task.env_id) {
-                                let success_count = (state.reload_success_rate / 100.0 * state.total_reloads as f64) as u64;
+                                let success_count = (state.reload_success_rate / 100.0
+                                    * state.total_reloads as f64)
+                                    as u64;
                                 state.total_reloads += 1;
-                                state.reload_success_rate = (success_count as f64 / state.total_reloads as f64) * 100.0;
+                                state.reload_success_rate =
+                                    (success_count as f64 / state.total_reloads as f64) * 100.0;
                             }
                         }
                     }
@@ -321,21 +332,11 @@ impl HotReloadManager {
     async fn execute_hot_reload(task: &ReloadTask) -> Result<()> {
         // Execute language-specific hot reload
         match task.language.as_str() {
-            "typescript" | "javascript" => {
-                Self::hot_reload_javascript(&task.file_path).await
-            }
-            "rust" => {
-                Self::hot_reload_rust(&task.file_path).await
-            }
-            "python" => {
-                Self::hot_reload_python(&task.file_path).await
-            }
-            "go" => {
-                Self::hot_reload_go(&task.file_path).await
-            }
-            _ => {
-                Self::hot_reload_generic(&task.file_path).await
-            }
+            "typescript" | "javascript" => Self::hot_reload_javascript(&task.file_path).await,
+            "rust" => Self::hot_reload_rust(&task.file_path).await,
+            "python" => Self::hot_reload_python(&task.file_path).await,
+            "go" => Self::hot_reload_go(&task.file_path).await,
+            _ => Self::hot_reload_generic(&task.file_path).await,
         }
     }
 
@@ -423,7 +424,8 @@ impl HotReloadManager {
 
     pub async fn get_metrics(&self, env_id: &str) -> Result<HotReloadMetrics> {
         let environments = self.active_environments.read().await;
-        let state = environments.get(env_id)
+        let state = environments
+            .get(env_id)
             .ok_or_else(|| anyhow::anyhow!("Environment {} not found", env_id))?;
 
         Ok(HotReloadMetrics {
@@ -458,9 +460,7 @@ impl HotReloadManager {
             total_environments,
             total_reloads,
             global_average_reload_ms: global_average,
-            ultra_fast_environments: environments.values()
-                .filter(|s| s.ultra_fast_mode)
-                .count(),
+            ultra_fast_environments: environments.values().filter(|s| s.ultra_fast_mode).count(),
         })
     }
 }

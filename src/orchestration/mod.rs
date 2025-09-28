@@ -6,10 +6,10 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
+pub mod auto_scaling;
 pub mod cluster_management;
 pub mod load_balancing;
 pub mod service_mesh;
-pub mod auto_scaling;
 
 /// Enterprise-Grade Orchestration Manager
 /// Surpasses Kubernetes with intelligent automation and performance optimizations
@@ -282,11 +282,20 @@ impl Default for OrchestrationConfig {
 impl OrchestrationManager {
     pub async fn new(config: OrchestrationConfig) -> Result<Self> {
         info!("🎭 Initializing Enterprise-Grade Orchestration Manager");
-        info!("   Intelligent Scheduling: {}", config.intelligent_scheduling);
+        info!(
+            "   Intelligent Scheduling: {}",
+            config.intelligent_scheduling
+        );
         info!("   Predictive Scaling: {}", config.predictive_scaling);
-        info!("   Zero-Downtime Deployments: {}", config.zero_downtime_deployments);
+        info!(
+            "   Zero-Downtime Deployments: {}",
+            config.zero_downtime_deployments
+        );
         info!("   Service Mesh: {}", config.service_mesh_enabled);
-        info!("   AI Resource Optimization: {}", config.ai_resource_optimization);
+        info!(
+            "   AI Resource Optimization: {}",
+            config.ai_resource_optimization
+        );
         info!("   Max Cluster Size: {} nodes", config.max_cluster_size);
 
         // Initialize cluster state
@@ -320,19 +329,13 @@ impl OrchestrationManager {
         }));
 
         // Initialize load balancer
-        let load_balancer = Arc::new(
-            load_balancing::IntelligentLoadBalancer::new().await?
-        );
+        let load_balancer = Arc::new(load_balancing::IntelligentLoadBalancer::new().await?);
 
         // Initialize auto scaler
-        let auto_scaler = Arc::new(
-            auto_scaling::PredictiveAutoScaler::new().await?
-        );
+        let auto_scaler = Arc::new(auto_scaling::PredictiveAutoScaler::new().await?);
 
         // Initialize service mesh
-        let service_mesh = Arc::new(
-            service_mesh::BoltServiceMesh::new().await?
-        );
+        let service_mesh = Arc::new(service_mesh::BoltServiceMesh::new().await?);
 
         info!("✅ Enterprise Orchestration Manager initialized");
 
@@ -348,22 +351,31 @@ impl OrchestrationManager {
 
     /// Deploy service with intelligent scheduling
     pub async fn deploy_service(&self, deployment: ServiceDeployment) -> Result<String> {
-        info!("🚀 Deploying service with intelligent orchestration: {}", deployment.name);
+        info!(
+            "🚀 Deploying service with intelligent orchestration: {}",
+            deployment.name
+        );
 
         // Analyze resource requirements
         let optimal_placement = self.find_optimal_placement(&deployment).await?;
 
         // Schedule deployment with zero-downtime strategy
-        let deployment_id = self.execute_zero_downtime_deployment(deployment, optimal_placement).await?;
+        let deployment_id = self
+            .execute_zero_downtime_deployment(deployment, optimal_placement)
+            .await?;
 
         // Configure service mesh routing
         if self.config.service_mesh_enabled {
-            self.service_mesh.configure_service_routing(&deployment_id).await?;
+            self.service_mesh
+                .configure_service_routing(&deployment_id)
+                .await?;
         }
 
         // Set up predictive scaling
         if self.config.predictive_scaling {
-            self.auto_scaler.configure_predictive_scaling(&deployment_id).await?;
+            self.auto_scaler
+                .configure_predictive_scaling(&deployment_id)
+                .await?;
         }
 
         info!("✅ Service deployed successfully: {}", deployment_id);
@@ -379,7 +391,10 @@ impl OrchestrationManager {
         let mut candidate_nodes = Vec::new();
 
         for node in &cluster_state.nodes {
-            if self.node_meets_requirements(node, &deployment.resource_requirements).await {
+            if self
+                .node_meets_requirements(node, &deployment.resource_requirements)
+                .await
+            {
                 let score = self.calculate_placement_score(node, deployment).await;
                 candidate_nodes.push((node.id.clone(), score));
             }
@@ -394,26 +409,41 @@ impl OrchestrationManager {
             .map(|(node_id, _score)| node_id)
             .collect();
 
-        info!("   Selected {} nodes for optimal placement", selected_nodes.len());
+        info!(
+            "   Selected {} nodes for optimal placement",
+            selected_nodes.len()
+        );
         Ok(selected_nodes)
     }
 
-    async fn node_meets_requirements(&self, node: &ClusterNode, requirements: &ResourceRequirements) -> bool {
+    async fn node_meets_requirements(
+        &self,
+        node: &ClusterNode,
+        requirements: &ResourceRequirements,
+    ) -> bool {
         // Check if node has sufficient resources
-        let available_cpu = node.capacity.cpu_cores as f64 * (1.0 - node.utilization.cpu_percent / 100.0);
-        let available_memory = node.capacity.memory_gb as f64 * (1.0 - node.utilization.memory_percent / 100.0);
+        let available_cpu =
+            node.capacity.cpu_cores as f64 * (1.0 - node.utilization.cpu_percent / 100.0);
+        let available_memory =
+            node.capacity.memory_gb as f64 * (1.0 - node.utilization.memory_percent / 100.0);
 
-        available_cpu >= requirements.cpu_cores &&
-        available_memory >= requirements.memory_gb &&
-        (!requirements.gpu_required || node.capacity.gpu_count > 0)
+        available_cpu >= requirements.cpu_cores
+            && available_memory >= requirements.memory_gb
+            && (!requirements.gpu_required || node.capacity.gpu_count > 0)
     }
 
-    async fn calculate_placement_score(&self, node: &ClusterNode, deployment: &ServiceDeployment) -> f64 {
+    async fn calculate_placement_score(
+        &self,
+        node: &ClusterNode,
+        deployment: &ServiceDeployment,
+    ) -> f64 {
         let mut score = 100.0;
 
         // Resource efficiency score
-        let cpu_utilization_after = (node.utilization.cpu_percent +
-            (deployment.resource_requirements.cpu_cores / node.capacity.cpu_cores as f64 * 100.0)) / 100.0;
+        let cpu_utilization_after = (node.utilization.cpu_percent
+            + (deployment.resource_requirements.cpu_cores / node.capacity.cpu_cores as f64
+                * 100.0))
+            / 100.0;
         if cpu_utilization_after > 0.8 {
             score -= 20.0; // Penalize high utilization
         }
@@ -422,7 +452,9 @@ impl OrchestrationManager {
         for specialization in &node.specializations {
             match (&deployment.service_type, specialization) {
                 (ServiceType::Gaming, NodeSpecialization::Gaming) => score += 25.0,
-                (ServiceType::MachineLearning, NodeSpecialization::MachineLearning) => score += 25.0,
+                (ServiceType::MachineLearning, NodeSpecialization::MachineLearning) => {
+                    score += 25.0
+                }
                 (ServiceType::Database, NodeSpecialization::Database) => score += 20.0,
                 _ => {}
             }
@@ -440,16 +472,27 @@ impl OrchestrationManager {
         score
     }
 
-    async fn execute_zero_downtime_deployment(&self, deployment: ServiceDeployment, nodes: Vec<String>) -> Result<String> {
+    async fn execute_zero_downtime_deployment(
+        &self,
+        deployment: ServiceDeployment,
+        nodes: Vec<String>,
+    ) -> Result<String> {
         info!("🎯 Executing zero-downtime deployment strategy");
 
-        let deployment_id = format!("deploy-{}-{}", deployment.name,
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs());
+        let deployment_id = format!(
+            "deploy-{}-{}",
+            deployment.name,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        );
 
         // Blue-Green deployment strategy
         match deployment.deployment_strategy {
             DeploymentStrategy::BlueGreen => {
-                self.execute_blue_green_deployment(&deployment, &nodes).await?;
+                self.execute_blue_green_deployment(&deployment, &nodes)
+                    .await?;
             }
             DeploymentStrategy::RollingUpdate => {
                 self.execute_rolling_update(&deployment, &nodes).await?;
@@ -462,7 +505,11 @@ impl OrchestrationManager {
         Ok(deployment_id)
     }
 
-    async fn execute_blue_green_deployment(&self, deployment: &ServiceDeployment, nodes: &[String]) -> Result<()> {
+    async fn execute_blue_green_deployment(
+        &self,
+        deployment: &ServiceDeployment,
+        nodes: &[String],
+    ) -> Result<()> {
         info!("💙💚 Executing Blue-Green deployment");
 
         // 1. Deploy new version (Green) alongside current (Blue)
@@ -486,14 +533,21 @@ impl OrchestrationManager {
         Ok(())
     }
 
-    async fn execute_rolling_update(&self, deployment: &ServiceDeployment, nodes: &[String]) -> Result<()> {
+    async fn execute_rolling_update(
+        &self,
+        deployment: &ServiceDeployment,
+        nodes: &[String],
+    ) -> Result<()> {
         info!("🔄 Executing Rolling Update deployment");
 
         let replicas_per_batch = (deployment.replicas as f64 * 0.25).ceil() as u32; // 25% at a time
 
         for batch in 0..((deployment.replicas + replicas_per_batch - 1) / replicas_per_batch) {
-            info!("   📦 Deploying batch {} of {}", batch + 1,
-                  (deployment.replicas + replicas_per_batch - 1) / replicas_per_batch);
+            info!(
+                "   📦 Deploying batch {} of {}",
+                batch + 1,
+                (deployment.replicas + replicas_per_batch - 1) / replicas_per_batch
+            );
 
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             info!("   ✅ Batch {} deployed and healthy", batch + 1);
@@ -502,7 +556,11 @@ impl OrchestrationManager {
         Ok(())
     }
 
-    async fn execute_canary_deployment(&self, deployment: &ServiceDeployment, nodes: &[String]) -> Result<()> {
+    async fn execute_canary_deployment(
+        &self,
+        deployment: &ServiceDeployment,
+        nodes: &[String],
+    ) -> Result<()> {
         info!("🐤 Executing Canary deployment");
 
         // 1. Deploy 5% of traffic to new version
@@ -530,12 +588,16 @@ impl OrchestrationManager {
         let service_registry = self.service_registry.read().await;
 
         let total_nodes = cluster_state.nodes.len();
-        let healthy_nodes = cluster_state.nodes.iter()
+        let healthy_nodes = cluster_state
+            .nodes
+            .iter()
             .filter(|n| matches!(n.status, NodeStatus::Ready))
             .count();
 
         let total_services = service_registry.services.len();
-        let healthy_services = service_registry.services.values()
+        let healthy_services = service_registry
+            .services
+            .values()
             .filter(|s| matches!(s.health_status.status, HealthStatus::Healthy))
             .count();
 
@@ -547,7 +609,7 @@ impl OrchestrationManager {
             healthy_services,
             resource_utilization: cluster_state.utilization.clone(),
             average_response_time_ms: 45.2, // Simulated
-            deployment_success_rate: 99.7, // Simulated
+            deployment_success_rate: 99.7,  // Simulated
             zero_downtime_deployments: 156, // Simulated
         })
     }

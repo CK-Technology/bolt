@@ -5,9 +5,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::process::Command as AsyncCommand;
-use tokio::sync::{RwLock, Mutex};
+use tokio::sync::{Mutex, RwLock};
 use tokio::time::interval;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FramePacingConfig {
@@ -148,11 +148,13 @@ impl FramePacingManager {
 
         // Detect display information
         let display_info = Self::detect_display_info().await?;
-        info!("   Display: {} ({}Hz, {}x{})",
-              display_info.display_name,
-              display_info.refresh_rate_hz,
-              display_info.resolution.0,
-              display_info.resolution.1);
+        info!(
+            "   Display: {} ({}Hz, {}x{})",
+            display_info.display_name,
+            display_info.refresh_rate_hz,
+            display_info.resolution.0,
+            display_info.resolution.1
+        );
 
         if display_info.adaptive_sync_supported {
             info!("   ✅ Adaptive Sync (G-Sync/FreeSync) supported");
@@ -167,7 +169,10 @@ impl FramePacingManager {
             dropped_frames: 0,
             stutters_per_second: 0.0,
             input_lag_ms: 0.0,
-            vsync_active: matches!(config.vsync_mode, VSyncMode::On | VSyncMode::Adaptive | VSyncMode::Enhanced),
+            vsync_active: matches!(
+                config.vsync_mode,
+                VSyncMode::On | VSyncMode::Adaptive | VSyncMode::Enhanced
+            ),
             adaptive_sync_active: config.adaptive_sync && display_info.adaptive_sync_supported,
             last_updated: Instant::now(),
         };
@@ -232,15 +237,13 @@ impl FramePacingManager {
     }
 
     async fn is_wayland_session() -> bool {
-        std::env::var("WAYLAND_DISPLAY").is_ok() ||
-        std::env::var("XDG_SESSION_TYPE").map_or(false, |t| t == "wayland")
+        std::env::var("WAYLAND_DISPLAY").is_ok()
+            || std::env::var("XDG_SESSION_TYPE").map_or(false, |t| t == "wayland")
     }
 
     async fn get_wayland_display_info() -> Result<DisplayInfo> {
         // Use wlr-randr or similar Wayland tool
-        let output = AsyncCommand::new("wlr-randr")
-            .output()
-            .await;
+        let output = AsyncCommand::new("wlr-randr").output().await;
 
         match output {
             Ok(output) if output.status.success() => {
@@ -264,7 +267,8 @@ impl FramePacingManager {
                     let parts: Vec<&str> = mode_part.split('@').collect();
                     if parts.len() == 2 {
                         // Parse resolution
-                        if let Some(res_part) = parts[0].split('x').collect::<Vec<&str>>().get(0..2) {
+                        if let Some(res_part) = parts[0].split('x').collect::<Vec<&str>>().get(0..2)
+                        {
                             if let (Ok(w), Ok(h)) = (res_part[0].parse(), res_part[1].parse()) {
                                 resolution = (w, h);
                             }
@@ -284,7 +288,7 @@ impl FramePacingManager {
             refresh_rate_hz: refresh_rate,
             resolution,
             adaptive_sync_supported: true, // Assume modern Wayland supports it
-            hdr_supported: false, // Conservative default
+            hdr_supported: false,          // Conservative default
             variable_refresh_rate: Some((48, refresh_rate)), // Common VRR range
             display_name,
         })
@@ -346,8 +350,11 @@ impl FramePacingManager {
             }
 
             // Check for VRR/Adaptive sync
-            if line.contains("Variable refresh rate") || line.contains("VRR") ||
-               line.contains("FreeSync") || line.contains("G-SYNC") {
+            if line.contains("Variable refresh rate")
+                || line.contains("VRR")
+                || line.contains("FreeSync")
+                || line.contains("G-SYNC")
+            {
                 adaptive_sync_supported = true;
             }
         }
@@ -357,7 +364,11 @@ impl FramePacingManager {
             resolution,
             adaptive_sync_supported,
             hdr_supported: false, // Would need additional detection
-            variable_refresh_rate: if adaptive_sync_supported { Some((48, refresh_rate)) } else { None },
+            variable_refresh_rate: if adaptive_sync_supported {
+                Some((48, refresh_rate))
+            } else {
+                None
+            },
             display_name,
         })
     }
@@ -377,7 +388,8 @@ impl FramePacingManager {
                 interval.tick().await;
 
                 // Update frame metrics (simulated - in real implementation would hook into graphics API)
-                if let Err(e) = Self::update_frame_metrics(&frame_metrics, &pacing_controller).await {
+                if let Err(e) = Self::update_frame_metrics(&frame_metrics, &pacing_controller).await
+                {
                     debug!("Error updating frame metrics: {}", e);
                 }
 
@@ -389,7 +401,8 @@ impl FramePacingManager {
                         }
                     }
                     FramePacingStrategy::MotionAdaptive => {
-                        if let Err(e) = Self::apply_motion_adaptive_pacing(&pacing_controller).await {
+                        if let Err(e) = Self::apply_motion_adaptive_pacing(&pacing_controller).await
+                        {
                             debug!("Error applying motion adaptive pacing: {}", e);
                         }
                     }
@@ -397,7 +410,8 @@ impl FramePacingManager {
                 }
 
                 // Adjust VSync if needed
-                if let Err(e) = Self::adjust_adaptive_vsync(&vsync_controller, &frame_metrics).await {
+                if let Err(e) = Self::adjust_adaptive_vsync(&vsync_controller, &frame_metrics).await
+                {
                     debug!("Error adjusting adaptive VSync: {}", e);
                 }
             }
@@ -437,7 +451,11 @@ impl FramePacingManager {
         {
             let mut metrics = frame_metrics.write().await;
             metrics.current_fps = current_fps;
-            metrics.frame_time_ms = if current_fps > 0.0 { 1000.0 / current_fps } else { 0.0 };
+            metrics.frame_time_ms = if current_fps > 0.0 {
+                1000.0 / current_fps
+            } else {
+                0.0
+            };
             metrics.last_updated = now;
 
             // Simulate frame time variance (would be measured in real implementation)
@@ -452,13 +470,15 @@ impl FramePacingManager {
         let history = pacing_controller.frame_history.lock().await;
 
         if history.len() >= 3 {
-            let recent_times: Vec<Duration> = history.windows(2)
+            let recent_times: Vec<Duration> = history
+                .windows(2)
                 .map(|window| window[1].duration_since(window[0]))
                 .collect();
 
             if recent_times.len() >= 2 {
                 // Predict next frame time based on trend
-                let avg_frame_time = recent_times.iter().sum::<Duration>() / recent_times.len() as u32;
+                let avg_frame_time =
+                    recent_times.iter().sum::<Duration>() / recent_times.len() as u32;
 
                 let mut prediction_buffer = pacing_controller.prediction_buffer.lock().await;
                 prediction_buffer.push(avg_frame_time);
@@ -468,7 +488,8 @@ impl FramePacingManager {
                 }
 
                 // Adjust target frame time based on prediction
-                let predicted_frame_time = prediction_buffer.iter().sum::<Duration>() / prediction_buffer.len() as u32;
+                let predicted_frame_time =
+                    prediction_buffer.iter().sum::<Duration>() / prediction_buffer.len() as u32;
                 *pacing_controller.target_frame_time.lock().await = predicted_frame_time;
             }
         }
@@ -476,7 +497,9 @@ impl FramePacingManager {
         Ok(())
     }
 
-    async fn apply_motion_adaptive_pacing(_pacing_controller: &Arc<PacingController>) -> Result<()> {
+    async fn apply_motion_adaptive_pacing(
+        _pacing_controller: &Arc<PacingController>,
+    ) -> Result<()> {
         // Motion-adaptive pacing would analyze game motion and adjust accordingly
         // This is a placeholder for more advanced motion detection
         Ok(())
@@ -510,8 +533,14 @@ impl FramePacingManager {
         Ok(())
     }
 
-    pub async fn configure_container_frame_pacing(&self, container_id: &str) -> Result<HashMap<String, String>> {
-        info!("🎬 Configuring frame pacing for container: {}", container_id);
+    pub async fn configure_container_frame_pacing(
+        &self,
+        container_id: &str,
+    ) -> Result<HashMap<String, String>> {
+        info!(
+            "🎬 Configuring frame pacing for container: {}",
+            container_id
+        );
 
         let mut env_vars = HashMap::new();
 
@@ -537,13 +566,25 @@ impl FramePacingManager {
             FramePacingStrategy::MotionAdaptive => "3",
             FramePacingStrategy::AIAssisted => "4",
         };
-        env_vars.insert("FRAME_PACING_STRATEGY".to_string(), strategy_value.to_string());
+        env_vars.insert(
+            "FRAME_PACING_STRATEGY".to_string(),
+            strategy_value.to_string(),
+        );
 
         // Display information
         let display_info = self.display_info.read().await;
-        env_vars.insert("DISPLAY_REFRESH_RATE".to_string(), display_info.refresh_rate_hz.to_string());
-        env_vars.insert("DISPLAY_RESOLUTION_X".to_string(), display_info.resolution.0.to_string());
-        env_vars.insert("DISPLAY_RESOLUTION_Y".to_string(), display_info.resolution.1.to_string());
+        env_vars.insert(
+            "DISPLAY_REFRESH_RATE".to_string(),
+            display_info.refresh_rate_hz.to_string(),
+        );
+        env_vars.insert(
+            "DISPLAY_RESOLUTION_X".to_string(),
+            display_info.resolution.0.to_string(),
+        );
+        env_vars.insert(
+            "DISPLAY_RESOLUTION_Y".to_string(),
+            display_info.resolution.1.to_string(),
+        );
 
         // Adaptive sync configuration
         if self.config.adaptive_sync && display_info.adaptive_sync_supported {
@@ -575,7 +616,10 @@ impl FramePacingManager {
             RateLimitMethod::Driver => "driver",
             RateLimitMethod::Hybrid => "hybrid",
         };
-        env_vars.insert("RATE_LIMIT_METHOD".to_string(), rate_limit_value.to_string());
+        env_vars.insert(
+            "RATE_LIMIT_METHOD".to_string(),
+            rate_limit_value.to_string(),
+        );
 
         // Frame interpolation
         if self.config.frame_interpolation {
@@ -583,7 +627,10 @@ impl FramePacingManager {
             warn!("Frame interpolation enabled - may increase input latency");
         }
 
-        info!("✅ Frame pacing configured with {} parameters", env_vars.len());
+        info!(
+            "✅ Frame pacing configured with {} parameters",
+            env_vars.len()
+        );
         Ok(env_vars)
     }
 
@@ -624,8 +671,14 @@ impl FramePacingManager {
         Ok(())
     }
 
-    pub async fn verify_frame_pacing_performance(&self, container_id: &str) -> Result<FramePacingPerformanceReport> {
-        info!("📊 Verifying frame pacing performance for container: {}", container_id);
+    pub async fn verify_frame_pacing_performance(
+        &self,
+        container_id: &str,
+    ) -> Result<FramePacingPerformanceReport> {
+        info!(
+            "📊 Verifying frame pacing performance for container: {}",
+            container_id
+        );
 
         let metrics = self.get_frame_metrics().await;
         let display_info = self.get_display_info().await;
@@ -639,15 +692,16 @@ impl FramePacingManager {
         let stuttering_acceptable = metrics.stutters_per_second < 1.0; // Less than 1 stutter per second
         let frame_time_consistent = metrics.frame_time_variance < 2.0; // Less than 2ms variance
 
-        let overall_performance = if target_achieved && stuttering_acceptable && frame_time_consistent {
-            "Excellent"
-        } else if target_achieved && stuttering_acceptable {
-            "Good"
-        } else if target_achieved {
-            "Fair"
-        } else {
-            "Poor"
-        };
+        let overall_performance =
+            if target_achieved && stuttering_acceptable && frame_time_consistent {
+                "Excellent"
+            } else if target_achieved && stuttering_acceptable {
+                "Good"
+            } else if target_achieved {
+                "Fair"
+            } else {
+                "Poor"
+            };
 
         let report = FramePacingPerformanceReport {
             current_fps: metrics.current_fps,
@@ -663,8 +717,14 @@ impl FramePacingManager {
         };
 
         info!("📈 Frame Pacing Performance Report:");
-        info!("   Current FPS: {:.1} (target: {})", report.current_fps, report.target_fps);
-        info!("   Frame Time: {:.2}ms (variance: {:.2}ms)", report.frame_time_ms, report.frame_time_variance);
+        info!(
+            "   Current FPS: {:.1} (target: {})",
+            report.current_fps, report.target_fps
+        );
+        info!(
+            "   Frame Time: {:.2}ms (variance: {:.2}ms)",
+            report.frame_time_ms, report.frame_time_variance
+        );
         info!("   Stutters: {:.2}/sec", report.stutters_per_second);
         info!("   Input Lag: {:.2}ms", report.input_lag_ms);
         info!("   Overall Performance: {}", report.overall_performance);

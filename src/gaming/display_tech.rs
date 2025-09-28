@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::process::Command as AsyncCommand;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DisplayTechConfig {
@@ -109,7 +109,10 @@ impl DisplayTechManager {
     pub async fn new(config: DisplayTechConfig) -> Result<Self> {
         info!("🖥️ Initializing Display Technology Manager");
         info!("   VRR: {} ({:?})", config.vrr_enabled, config.vrr_range);
-        info!("   HDR: {} ({:?}, {} nits)", config.hdr_enabled, config.hdr_colorspace, config.hdr_peak_brightness);
+        info!(
+            "   HDR: {} ({:?}, {} nits)",
+            config.hdr_enabled, config.hdr_colorspace, config.hdr_peak_brightness
+        );
         info!("   Color Depth: {:?}", config.color_depth);
 
         // Detect connected displays
@@ -117,7 +120,10 @@ impl DisplayTechManager {
         info!("   Detected {} display(s)", detected_displays.len());
 
         for display in &detected_displays {
-            info!("   📺 {}: {}x{}@{}Hz", display.name, display.resolution.0, display.resolution.1, display.refresh_rate);
+            info!(
+                "   📺 {}: {}x{}@{}Hz",
+                display.name, display.resolution.0, display.resolution.1, display.refresh_rate
+            );
             if display.vrr_supported {
                 info!("      VRR: {:?}Hz", display.vrr_range);
             }
@@ -127,7 +133,8 @@ impl DisplayTechManager {
         }
 
         // Initialize VRR controller
-        let vrr_displays: Vec<String> = detected_displays.iter()
+        let vrr_displays: Vec<String> = detected_displays
+            .iter()
             .filter(|d| d.vrr_supported)
             .map(|d| d.name.clone())
             .collect();
@@ -139,7 +146,8 @@ impl DisplayTechManager {
         });
 
         // Initialize HDR controller
-        let hdr_displays: Vec<String> = detected_displays.iter()
+        let hdr_displays: Vec<String> = detected_displays
+            .iter()
             .filter(|d| d.hdr_supported)
             .map(|d| d.name.clone())
             .collect();
@@ -213,9 +221,7 @@ impl DisplayTechManager {
     }
 
     async fn detect_wayland_displays() -> Result<Vec<DisplayDevice>> {
-        let output = AsyncCommand::new("wlr-randr")
-            .output()
-            .await?;
+        let output = AsyncCommand::new("wlr-randr").output().await?;
 
         if !output.status.success() {
             return Err(anyhow::anyhow!("wlr-randr failed"));
@@ -301,7 +307,11 @@ impl DisplayTechManager {
                     displays.push(display);
                 }
 
-                let name = line.split_whitespace().next().unwrap_or("Unknown").to_string();
+                let name = line
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("Unknown")
+                    .to_string();
                 current_display = Some(DisplayDevice {
                     name: name.clone(),
                     connector: name,
@@ -312,9 +322,9 @@ impl DisplayTechManager {
                     hdr_supported: false,
                     hdr_formats: Vec::new(),
                     color_depth: 8,
-                    is_gaming_monitor: line.to_lowercase().contains("gaming") ||
-                                      line.to_lowercase().contains("rog") ||
-                                      line.to_lowercase().contains("predator"),
+                    is_gaming_monitor: line.to_lowercase().contains("gaming")
+                        || line.to_lowercase().contains("rog")
+                        || line.to_lowercase().contains("predator"),
                     manufacturer: "Unknown".to_string(),
                     model: "Unknown".to_string(),
                 });
@@ -370,7 +380,7 @@ impl DisplayTechManager {
                             name: name_str.to_string(),
                             connector: name_str.to_string(),
                             resolution: (1920, 1080), // Default
-                            refresh_rate: 60, // Default
+                            refresh_rate: 60,         // Default
                             vrr_supported: false,
                             vrr_range: None,
                             hdr_supported: false,
@@ -455,9 +465,8 @@ impl DisplayTechManager {
         *self.vrr_controller.enabled.write().await = true;
 
         let displays = self.detected_displays.read().await;
-        let vrr_displays: Vec<&DisplayDevice> = displays.iter()
-            .filter(|d| d.vrr_supported)
-            .collect();
+        let vrr_displays: Vec<&DisplayDevice> =
+            displays.iter().filter(|d| d.vrr_supported).collect();
 
         if vrr_displays.is_empty() {
             warn!("No VRR-capable displays found");
@@ -529,9 +538,8 @@ impl DisplayTechManager {
         *self.hdr_controller.enabled.write().await = true;
 
         let displays = self.detected_displays.read().await;
-        let hdr_displays: Vec<&DisplayDevice> = displays.iter()
-            .filter(|d| d.hdr_supported)
-            .collect();
+        let hdr_displays: Vec<&DisplayDevice> =
+            displays.iter().filter(|d| d.hdr_supported).collect();
 
         if hdr_displays.is_empty() {
             warn!("No HDR-capable displays found");
@@ -564,7 +572,10 @@ impl DisplayTechManager {
             HDRColorSpace::Auto => "Auto",
         };
 
-        info!("      Colorspace: {}, Brightness: {} nits", colorspace, self.config.hdr_peak_brightness);
+        info!(
+            "      Colorspace: {}, Brightness: {} nits",
+            colorspace, self.config.hdr_peak_brightness
+        );
 
         // Try to set HDR mode via different methods
         if let Err(e) = self.set_hdr_wayland(&display.name, colorspace).await {
@@ -581,7 +592,14 @@ impl DisplayTechManager {
     async fn set_hdr_wayland(&self, display_name: &str, colorspace: &str) -> Result<()> {
         // Set HDR via wlr-randr (if supported)
         let output = AsyncCommand::new("wlr-randr")
-            .args(&["--output", display_name, "--hdr", "on", "--colorspace", colorspace])
+            .args(&[
+                "--output",
+                display_name,
+                "--hdr",
+                "on",
+                "--colorspace",
+                colorspace,
+            ])
             .output()
             .await?;
 
@@ -625,7 +643,10 @@ impl DisplayTechManager {
             std::env::set_var("KWIN_HDR", "1");
             std::env::set_var("MESA_VK_ENABLE_HDR", "1");
             std::env::set_var("VK_HDR_SURFACE_EXTENSION", "1");
-            std::env::set_var("HDR_PEAK_BRIGHTNESS", &self.config.hdr_peak_brightness.to_string());
+            std::env::set_var(
+                "HDR_PEAK_BRIGHTNESS",
+                &self.config.hdr_peak_brightness.to_string(),
+            );
 
             match self.config.hdr_colorspace {
                 HDRColorSpace::Rec2020 => {
@@ -641,8 +662,14 @@ impl DisplayTechManager {
         Ok(())
     }
 
-    pub async fn configure_container_display_tech(&self, container_id: &str) -> Result<HashMap<String, String>> {
-        info!("🖥️ Configuring display technology for container: {}", container_id);
+    pub async fn configure_container_display_tech(
+        &self,
+        container_id: &str,
+    ) -> Result<HashMap<String, String>> {
+        info!(
+            "🖥️ Configuring display technology for container: {}",
+            container_id
+        );
 
         let mut env_vars = HashMap::new();
 
@@ -663,7 +690,10 @@ impl DisplayTechManager {
         if hdr_enabled {
             env_vars.insert("KWIN_HDR".to_string(), "1".to_string());
             env_vars.insert("MESA_VK_ENABLE_HDR".to_string(), "1".to_string());
-            env_vars.insert("HDR_PEAK_BRIGHTNESS".to_string(), self.config.hdr_peak_brightness.to_string());
+            env_vars.insert(
+                "HDR_PEAK_BRIGHTNESS".to_string(),
+                self.config.hdr_peak_brightness.to_string(),
+            );
 
             let colorspace = match self.config.hdr_colorspace {
                 HDRColorSpace::Rec709 => "Rec709",
@@ -687,9 +717,18 @@ impl DisplayTechManager {
         // Display information for games
         let displays = self.detected_displays.read().await;
         if let Some(primary_display) = displays.first() {
-            env_vars.insert("PRIMARY_DISPLAY_WIDTH".to_string(), primary_display.resolution.0.to_string());
-            env_vars.insert("PRIMARY_DISPLAY_HEIGHT".to_string(), primary_display.resolution.1.to_string());
-            env_vars.insert("PRIMARY_DISPLAY_REFRESH".to_string(), primary_display.refresh_rate.to_string());
+            env_vars.insert(
+                "PRIMARY_DISPLAY_WIDTH".to_string(),
+                primary_display.resolution.0.to_string(),
+            );
+            env_vars.insert(
+                "PRIMARY_DISPLAY_HEIGHT".to_string(),
+                primary_display.resolution.1.to_string(),
+            );
+            env_vars.insert(
+                "PRIMARY_DISPLAY_REFRESH".to_string(),
+                primary_display.refresh_rate.to_string(),
+            );
 
             if let Some((min_vrr, max_vrr)) = primary_display.vrr_range {
                 env_vars.insert("VRR_MIN_RATE".to_string(), min_vrr.to_string());
@@ -697,7 +736,10 @@ impl DisplayTechManager {
             }
         }
 
-        info!("✅ Display technology configured with {} parameters", env_vars.len());
+        info!(
+            "✅ Display technology configured with {} parameters",
+            env_vars.len()
+        );
         Ok(env_vars)
     }
 
@@ -705,16 +747,28 @@ impl DisplayTechManager {
         self.detected_displays.read().await.clone()
     }
 
-    pub async fn verify_display_tech_performance(&self, container_id: &str) -> Result<DisplayTechReport> {
-        info!("📊 Verifying display technology performance for container: {}", container_id);
+    pub async fn verify_display_tech_performance(
+        &self,
+        container_id: &str,
+    ) -> Result<DisplayTechReport> {
+        info!(
+            "📊 Verifying display technology performance for container: {}",
+            container_id
+        );
 
         let vrr_enabled = *self.vrr_controller.enabled.read().await;
         let hdr_enabled = *self.hdr_controller.enabled.read().await;
 
         let displays = self.detected_displays.read().await;
         let gaming_displays = displays.iter().filter(|d| d.is_gaming_monitor).count();
-        let vrr_displays = displays.iter().filter(|d| d.vrr_supported && vrr_enabled).count();
-        let hdr_displays = displays.iter().filter(|d| d.hdr_supported && hdr_enabled).count();
+        let vrr_displays = displays
+            .iter()
+            .filter(|d| d.vrr_supported && vrr_enabled)
+            .count();
+        let hdr_displays = displays
+            .iter()
+            .filter(|d| d.hdr_supported && hdr_enabled)
+            .count();
 
         let report = DisplayTechReport {
             vrr_active: vrr_enabled,
@@ -726,14 +780,27 @@ impl DisplayTechManager {
             peak_brightness_nits: self.config.hdr_peak_brightness,
             colorspace: self.config.hdr_colorspace.clone(),
             performance_score: Self::calculate_performance_score(
-                vrr_enabled, hdr_enabled, gaming_displays, vrr_displays, hdr_displays
+                vrr_enabled,
+                hdr_enabled,
+                gaming_displays,
+                vrr_displays,
+                hdr_displays,
             ),
         };
 
         info!("📈 Display Technology Report:");
-        info!("   VRR: {} ({} displays)", report.vrr_active, report.vrr_displays_active);
-        info!("   HDR: {} ({} displays, {} nits)", report.hdr_active, report.hdr_displays_active, report.peak_brightness_nits);
-        info!("   Gaming Displays: {}/{}", report.gaming_displays_detected, report.total_displays);
+        info!(
+            "   VRR: {} ({} displays)",
+            report.vrr_active, report.vrr_displays_active
+        );
+        info!(
+            "   HDR: {} ({} displays, {} nits)",
+            report.hdr_active, report.hdr_displays_active, report.peak_brightness_nits
+        );
+        info!(
+            "   Gaming Displays: {}/{}",
+            report.gaming_displays_detected, report.total_displays
+        );
         info!("   Performance Score: {}/100", report.performance_score);
 
         Ok(report)

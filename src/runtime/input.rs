@@ -6,8 +6,8 @@ use std::io::{BufRead, BufReader, Read};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use std::time::{Duration, Instant};
+use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
@@ -164,29 +164,26 @@ impl UltraLowLatencyInputHandler {
 
         let input_dir = Path::new("/dev/input");
         if !input_dir.exists() {
-            return Err(BoltError::Runtime(
-                crate::error::RuntimeError::OciError {
-                    message: "Input device directory /dev/input not found".to_string(),
-                }
-            ));
+            return Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
+                message: "Input device directory /dev/input not found".to_string(),
+            }));
         }
 
-        let entries = std::fs::read_dir(input_dir)
-            .map_err(|e| BoltError::Runtime(
-                crate::error::RuntimeError::OciError {
-                    message: format!("Failed to read input directory: {}", e),
-                }
-            ))?;
+        let entries = std::fs::read_dir(input_dir).map_err(|e| {
+            BoltError::Runtime(crate::error::RuntimeError::OciError {
+                message: format!("Failed to read input directory: {}", e),
+            })
+        })?;
 
         let mut devices = self.devices.lock().await;
         let mut device_count = 0;
 
         for entry in entries {
-            let entry = entry.map_err(|e| BoltError::Runtime(
-                crate::error::RuntimeError::OciError {
+            let entry = entry.map_err(|e| {
+                BoltError::Runtime(crate::error::RuntimeError::OciError {
                     message: format!("Failed to read directory entry: {}", e),
-                }
-            ))?;
+                })
+            })?;
 
             let path = entry.path();
             let filename = path.file_name().unwrap().to_string_lossy();
@@ -196,7 +193,10 @@ impl UltraLowLatencyInputHandler {
                 if let Ok(device) = self.analyze_input_device(&path).await {
                     info!("   Found: {} ({})", device.name, device.path);
                     debug!("     Type: {:?}", device.device_type);
-                    debug!("     Vendor: 0x{:04x}, Product: 0x{:04x}", device.vendor_id, device.product_id);
+                    debug!(
+                        "     Vendor: 0x{:04x}, Product: 0x{:04x}",
+                        device.vendor_id, device.product_id
+                    );
 
                     devices.insert(device.path.clone(), device);
                     device_count += 1;
@@ -223,7 +223,8 @@ impl UltraLowLatencyInputHandler {
         };
 
         // Read device name from sysfs if available
-        let event_num = device_path.file_name()
+        let event_num = device_path
+            .file_name()
             .and_then(|n| n.to_str())
             .and_then(|n| n.strip_prefix("event"))
             .and_then(|n| n.parse::<u32>().ok());
@@ -268,9 +269,12 @@ impl UltraLowLatencyInputHandler {
             InputDeviceType::Keyboard
         } else if name_lower.contains("mouse") || name_lower.contains("trackball") {
             InputDeviceType::Mouse
-        } else if name_lower.contains("gamepad") || name_lower.contains("controller")
-               || name_lower.contains("xbox") || name_lower.contains("playstation")
-               || name_lower.contains("dualshock") {
+        } else if name_lower.contains("gamepad")
+            || name_lower.contains("controller")
+            || name_lower.contains("xbox")
+            || name_lower.contains("playstation")
+            || name_lower.contains("dualshock")
+        {
             InputDeviceType::Gamepad
         } else if name_lower.contains("joystick") || name_lower.contains("stick") {
             InputDeviceType::Joystick
@@ -301,7 +305,14 @@ impl UltraLowLatencyInputHandler {
                     let devices_guard = devices.lock().await;
                     for (_path, device) in devices_guard.iter() {
                         // Simulate event processing (in real implementation, this would read from device fd)
-                        if let Err(e) = Self::process_device_events(device, &sender, &latency_metrics, target_latency).await {
+                        if let Err(e) = Self::process_device_events(
+                            device,
+                            &sender,
+                            &latency_metrics,
+                            target_latency,
+                        )
+                        .await
+                        {
                             debug!("Error processing events for {}: {}", device.name, e);
                         }
                     }
@@ -348,19 +359,40 @@ impl UltraLowLatencyInputHandler {
                 if metrics.event_count > 0 {
                     info!("🎮 Input Latency Metrics:");
                     info!("   Events processed: {}", metrics.event_count);
-                    info!("   Average latency: {:.2}μs", metrics.avg_latency_ns as f64 / 1000.0);
-                    info!("   Min latency: {:.2}μs", metrics.min_latency_ns as f64 / 1000.0);
-                    info!("   Max latency: {:.2}μs", metrics.max_latency_ns as f64 / 1000.0);
-                    info!("   P95 latency: {:.2}μs", metrics.p95_latency_ns as f64 / 1000.0);
-                    info!("   P99 latency: {:.2}μs", metrics.p99_latency_ns as f64 / 1000.0);
+                    info!(
+                        "   Average latency: {:.2}μs",
+                        metrics.avg_latency_ns as f64 / 1000.0
+                    );
+                    info!(
+                        "   Min latency: {:.2}μs",
+                        metrics.min_latency_ns as f64 / 1000.0
+                    );
+                    info!(
+                        "   Max latency: {:.2}μs",
+                        metrics.max_latency_ns as f64 / 1000.0
+                    );
+                    info!(
+                        "   P95 latency: {:.2}μs",
+                        metrics.p95_latency_ns as f64 / 1000.0
+                    );
+                    info!(
+                        "   P99 latency: {:.2}μs",
+                        metrics.p99_latency_ns as f64 / 1000.0
+                    );
 
                     let target_ms = target_latency / 1_000_000;
                     let avg_ms = metrics.avg_latency_ns / 1_000_000;
 
                     if avg_ms <= target_ms {
-                        info!("   ✅ Target latency achieved: {}ms <= {}ms", avg_ms, target_ms);
+                        info!(
+                            "   ✅ Target latency achieved: {}ms <= {}ms",
+                            avg_ms, target_ms
+                        );
                     } else {
-                        warn!("   ⚠️  Target latency missed: {}ms > {}ms", avg_ms, target_ms);
+                        warn!(
+                            "   ⚠️  Target latency missed: {}ms > {}ms",
+                            avg_ms, target_ms
+                        );
                     }
                 }
             }
@@ -437,9 +469,16 @@ impl UltraLowLatencyInputHandler {
     }
 
     pub async fn get_gaming_devices(&self) -> Vec<InputDevice> {
-        self.devices.lock().await
+        self.devices
+            .lock()
+            .await
             .values()
-            .filter(|d| matches!(d.device_type, InputDeviceType::Gamepad | InputDeviceType::Joystick))
+            .filter(|d| {
+                matches!(
+                    d.device_type,
+                    InputDeviceType::Gamepad | InputDeviceType::Joystick
+                )
+            })
             .cloned()
             .collect()
     }

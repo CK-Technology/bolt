@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::fs;
 use tokio::process::Command as AsyncCommand;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioConfig {
@@ -84,9 +84,9 @@ impl Default for AudioConfig {
         Self {
             subsystem: AudioSubsystem::Auto,
             low_latency_mode: true,
-            buffer_size: 128, // Low latency for gaming
+            buffer_size: 128,   // Low latency for gaming
             sample_rate: 48000, // Gaming standard
-            bit_depth: 24, // High quality
+            bit_depth: 24,      // High quality
             passthrough_enabled: true,
             gaming_optimizations: true,
             device_name: None,
@@ -98,8 +98,14 @@ impl AudioManager {
     pub async fn new(config: AudioConfig) -> Result<Self> {
         info!("🎵 Initializing Audio Manager");
         info!("   Subsystem: {:?}", config.subsystem);
-        info!("   Low Latency: {} (buffer: {})", config.low_latency_mode, config.buffer_size);
-        info!("   Sample Rate: {}Hz, Bit Depth: {}bit", config.sample_rate, config.bit_depth);
+        info!(
+            "   Low Latency: {} (buffer: {})",
+            config.low_latency_mode, config.buffer_size
+        );
+        info!(
+            "   Sample Rate: {}Hz, Bit Depth: {}bit",
+            config.sample_rate, config.bit_depth
+        );
 
         // Detect available audio subsystem
         let detected_subsystem = Self::detect_audio_subsystem(&config).await?;
@@ -137,8 +143,7 @@ impl AudioManager {
                 else if Self::is_alsa_available().await {
                     info!("✅ ALSA detected and available");
                     Ok(AudioSubsystem::ALSA)
-                }
-                else {
+                } else {
                     warn!("No suitable audio subsystem found, using ALSA");
                     Ok(AudioSubsystem::ALSA)
                 }
@@ -278,10 +283,7 @@ impl AudioManager {
     }
 
     async fn discover_alsa_devices() -> Result<Vec<AudioDevice>> {
-        let output = AsyncCommand::new("aplay")
-            .args(&["-l"])
-            .output()
-            .await;
+        let output = AsyncCommand::new("aplay").args(&["-l"]).output().await;
 
         match output {
             Ok(output) if output.status.success() => {
@@ -318,8 +320,7 @@ impl AudioManager {
     }
 
     async fn setup_runtime_paths(subsystem: &AudioSubsystem) -> Result<AudioRuntimePaths> {
-        let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
-            .unwrap_or_else(|_| "/tmp".to_string());
+        let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
         let runtime_path = PathBuf::from(&runtime_dir);
 
         let paths = match subsystem {
@@ -349,7 +350,10 @@ impl AudioManager {
         Ok(paths)
     }
 
-    pub async fn configure_container_audio(&self, container_id: &str) -> Result<AudioContainerConfig> {
+    pub async fn configure_container_audio(
+        &self,
+        container_id: &str,
+    ) -> Result<AudioContainerConfig> {
         info!("🎵 Configuring audio for container: {}", container_id);
 
         let subsystem = self.detected_subsystem.read().await;
@@ -362,13 +366,16 @@ impl AudioManager {
         // Configure based on detected subsystem
         match &*subsystem {
             AudioSubsystem::PipeWire => {
-                self.configure_pipewire_container(&mut env_vars, &mut volumes, &paths).await;
+                self.configure_pipewire_container(&mut env_vars, &mut volumes, &paths)
+                    .await;
             }
             AudioSubsystem::PulseAudio => {
-                self.configure_pulseaudio_container(&mut env_vars, &mut volumes, &paths).await;
+                self.configure_pulseaudio_container(&mut env_vars, &mut volumes, &paths)
+                    .await;
             }
             AudioSubsystem::ALSA => {
-                self.configure_alsa_container(&mut env_vars, &mut volumes, &mut devices).await;
+                self.configure_alsa_container(&mut env_vars, &mut volumes, &mut devices)
+                    .await;
             }
             _ => {}
         }
@@ -383,8 +390,12 @@ impl AudioManager {
             self.apply_low_latency_optimizations(&mut env_vars).await;
         }
 
-        info!("✅ Audio configuration complete: {} env vars, {} volumes, {} devices",
-              env_vars.len(), volumes.len(), devices.len());
+        info!(
+            "✅ Audio configuration complete: {} env vars, {} volumes, {} devices",
+            env_vars.len(),
+            volumes.len(),
+            devices.len()
+        );
 
         Ok(AudioContainerConfig {
             env_vars,
@@ -403,21 +414,34 @@ impl AudioManager {
         info!("📻 Configuring PipeWire container audio");
 
         // PipeWire environment variables
-        env_vars.insert("PIPEWIRE_RUNTIME_DIR".to_string(),
-                       paths.runtime_dir.to_string_lossy().to_string());
+        env_vars.insert(
+            "PIPEWIRE_RUNTIME_DIR".to_string(),
+            paths.runtime_dir.to_string_lossy().to_string(),
+        );
 
         if let Some(pipewire_runtime) = &paths.pipewire_runtime {
             env_vars.insert("XDG_RUNTIME_DIR".to_string(), pipewire_runtime.clone());
         }
 
         // PipeWire socket and config mounts
-        volumes.push(format!("{}:/tmp/pipewire-runtime:rw",
-                           paths.runtime_dir.to_string_lossy()));
+        volumes.push(format!(
+            "{}:/tmp/pipewire-runtime:rw",
+            paths.runtime_dir.to_string_lossy()
+        ));
 
         // PipeWire-specific optimizations
-        env_vars.insert("PIPEWIRE_LATENCY".to_string(), self.config.buffer_size.to_string());
-        env_vars.insert("PIPEWIRE_QUANTUM".to_string(), (self.config.buffer_size / 2).to_string());
-        env_vars.insert("PIPEWIRE_RATE".to_string(), self.config.sample_rate.to_string());
+        env_vars.insert(
+            "PIPEWIRE_LATENCY".to_string(),
+            self.config.buffer_size.to_string(),
+        );
+        env_vars.insert(
+            "PIPEWIRE_QUANTUM".to_string(),
+            (self.config.buffer_size / 2).to_string(),
+        );
+        env_vars.insert(
+            "PIPEWIRE_RATE".to_string(),
+            self.config.sample_rate.to_string(),
+        );
     }
 
     async fn configure_pulseaudio_container(
@@ -433,12 +457,20 @@ impl AudioManager {
             env_vars.insert("PULSE_SERVER".to_string(), pulse_server.clone());
         }
 
-        env_vars.insert("PULSE_RUNTIME_PATH".to_string(),
-                       paths.runtime_dir.join("pulse").to_string_lossy().to_string());
+        env_vars.insert(
+            "PULSE_RUNTIME_PATH".to_string(),
+            paths
+                .runtime_dir
+                .join("pulse")
+                .to_string_lossy()
+                .to_string(),
+        );
 
         // PulseAudio socket mount
-        volumes.push(format!("{}:/tmp/pulse-socket:rw",
-                           paths.socket_path.to_string_lossy()));
+        volumes.push(format!(
+            "{}:/tmp/pulse-socket:rw",
+            paths.socket_path.to_string_lossy()
+        ));
 
         // PulseAudio-specific optimizations
         env_vars.insert("PULSE_LATENCY_MSEC".to_string(), "20".to_string()); // 20ms latency
@@ -490,7 +522,10 @@ impl AudioManager {
         info!("⚡ Applying low-latency audio optimizations");
 
         // Low-latency buffer settings
-        env_vars.insert("AUDIO_BUFFER_SIZE".to_string(), self.config.buffer_size.to_string());
+        env_vars.insert(
+            "AUDIO_BUFFER_SIZE".to_string(),
+            self.config.buffer_size.to_string(),
+        );
         env_vars.insert("AUDIO_PERIODS".to_string(), "2".to_string()); // Minimize buffering
 
         // High-priority audio processing
@@ -540,8 +575,10 @@ impl AudioManager {
         config.gaming_optimizations = true;
         config.passthrough_enabled = true;
 
-        info!("✅ Optimal gaming audio: {}Hz, {}bit, {} buffer",
-              config.sample_rate, config.bit_depth, config.buffer_size);
+        info!(
+            "✅ Optimal gaming audio: {}Hz, {}bit, {} buffer",
+            config.sample_rate, config.bit_depth, config.buffer_size
+        );
 
         config
     }
@@ -553,9 +590,15 @@ impl AudioManager {
 
         // Estimate latency based on configuration and subsystem
         let estimated_latency_ms = match &*subsystem {
-            AudioSubsystem::PipeWire => (self.config.buffer_size as f64 / self.config.sample_rate as f64) * 1000.0 + 2.0,
-            AudioSubsystem::PulseAudio => (self.config.buffer_size as f64 / self.config.sample_rate as f64) * 1000.0 + 5.0,
-            AudioSubsystem::ALSA => (self.config.buffer_size as f64 / self.config.sample_rate as f64) * 1000.0 + 1.0,
+            AudioSubsystem::PipeWire => {
+                (self.config.buffer_size as f64 / self.config.sample_rate as f64) * 1000.0 + 2.0
+            }
+            AudioSubsystem::PulseAudio => {
+                (self.config.buffer_size as f64 / self.config.sample_rate as f64) * 1000.0 + 5.0
+            }
+            AudioSubsystem::ALSA => {
+                (self.config.buffer_size as f64 / self.config.sample_rate as f64) * 1000.0 + 1.0
+            }
             _ => 50.0, // Conservative estimate
         };
 
@@ -571,16 +614,32 @@ impl AudioManager {
 
         info!("📈 Audio Latency Metrics:");
         info!("   Subsystem: {:?}", metrics.subsystem);
-        info!("   Estimated Latency: {:.1}ms", metrics.estimated_latency_ms);
-        info!("   Buffer: {} samples @ {}Hz", metrics.buffer_size, metrics.sample_rate);
+        info!(
+            "   Estimated Latency: {:.1}ms",
+            metrics.estimated_latency_ms
+        );
+        info!(
+            "   Buffer: {} samples @ {}Hz",
+            metrics.buffer_size, metrics.sample_rate
+        );
         info!("   Gaming Optimized: {}", metrics.is_gaming_optimized);
 
         // Check if latency target is met
-        let target_latency_ms = if self.config.gaming_optimizations { 10.0 } else { 20.0 };
-        if estimated_latency_ms <= target_latency_ms {
-            info!("✅ Audio latency target achieved: {:.1}ms <= {:.1}ms", estimated_latency_ms, target_latency_ms);
+        let target_latency_ms = if self.config.gaming_optimizations {
+            10.0
         } else {
-            warn!("⚠️  Audio latency target missed: {:.1}ms > {:.1}ms", estimated_latency_ms, target_latency_ms);
+            20.0
+        };
+        if estimated_latency_ms <= target_latency_ms {
+            info!(
+                "✅ Audio latency target achieved: {:.1}ms <= {:.1}ms",
+                estimated_latency_ms, target_latency_ms
+            );
+        } else {
+            warn!(
+                "⚠️  Audio latency target missed: {:.1}ms > {:.1}ms",
+                estimated_latency_ms, target_latency_ms
+            );
         }
 
         Ok(metrics)

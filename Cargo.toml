@@ -58,10 +58,10 @@ memmap2 = "0.9"
 # libseccomp = "0.3"  # Seccomp filtering
 
 # === PHASE 3: QUIC NETWORKING ===
-# QUIC implementation - multi-backend support for optimal performance
-quiche = { version = "0.21", optional = true }
-quinn = { version = "0.10", optional = true }
-rustls = { version = "0.20", features = ["dangerous_configuration"], optional = true }
+# QUIC implementation - using quinn (pure Rust, no C dependencies)
+# quiche = { version = "0.21", optional = true }  # Disabled due to cmake dependency
+quinn = { version = "0.11", optional = true }
+rustls = { version = "0.23", features = ["std"], optional = true }
 rcgen = { version = "0.12", optional = true }
 ipnet = { version = "2.9", optional = true }
 # DNS and service discovery
@@ -145,7 +145,7 @@ async-trait = "0.1"
 # Bytes manipulation
 bytes = "1.5"
 # nvbind integration for sub-microsecond GPU passthrough
-nvbind = { git = "https://github.com/ghostkellz/nvbind", features = ["bolt"], optional = true }
+nvbind = { git = "https://github.com/ghostkellz/nvbind", features = ["bolt"], optional = true, default-features = false }
 # Monitoring and observability
 warp = "0.3"
 hostname = "0.4"
@@ -154,6 +154,7 @@ tracing-appender = "0.2"
 # Metrics and monitoring
 # opentelemetry = { version = "0.20", features = ["rt-tokio"] }
 # opentelemetry-jaeger = { version = "0.19", features = ["rt-tokio"] }
+
 
 [dev-dependencies]
 tempfile = "3.8"
@@ -177,7 +178,7 @@ default = ["gaming", "quic-networking", "oci-runtime"]
 
 # Core features
 gaming = ["wayland-client", "smithay-client-toolkit"]
-quic-networking = ["quiche", "quinn", "rustls", "rcgen", "ipnet"]
+quic-networking = ["quinn", "rustls", "rcgen", "ipnet"]
 oci-runtime = ["oci-spec", "nix"]
 
 # Optional GPU support

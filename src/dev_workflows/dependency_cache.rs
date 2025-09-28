@@ -1,7 +1,7 @@
+use super::ProjectType;
 use crate::Result;
 use std::collections::HashMap;
 use tracing::info;
-use super::ProjectType;
 
 #[derive(Debug)]
 pub struct IntelligentDependencyCache {
@@ -14,7 +14,11 @@ impl IntelligentDependencyCache {
         Ok(Self {})
     }
 
-    pub async fn pre_cache_for_project(&self, _project_type: &ProjectType, _languages: &[String]) -> Result<()> {
+    pub async fn pre_cache_for_project(
+        &self,
+        _project_type: &ProjectType,
+        _languages: &[String],
+    ) -> Result<()> {
         info!("📦 Pre-caching dependencies for project");
         Ok(())
     }
@@ -86,9 +90,9 @@ pub mod performance_profiling {
 }
 
 pub mod security_scanning {
+    use super::super::SecurityLevel;
     use crate::Result;
     use tracing::info;
-    use super::super::SecurityLevel;
 
     #[derive(Debug)]
     pub struct SecurityScanner;

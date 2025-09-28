@@ -7,7 +7,7 @@ use std::process::Command;
 use std::sync::Arc;
 use tokio::process::Command as AsyncCommand;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RTXFeatureConfig {
@@ -112,7 +112,10 @@ impl RTXFeatureConfig {
 
         // Driver-level optimizations
         env_vars.insert("__GL_SHADER_DISK_CACHE".to_string(), "1".to_string());
-        env_vars.insert("__GL_SHADER_DISK_CACHE_PATH".to_string(), "/tmp/bolt_shader_cache".to_string());
+        env_vars.insert(
+            "__GL_SHADER_DISK_CACHE_PATH".to_string(),
+            "/tmp/bolt_shader_cache".to_string(),
+        );
         env_vars.insert("__GL_THREADED_OPTIMIZATIONS".to_string(), "1".to_string());
 
         env_vars
@@ -122,20 +125,32 @@ impl RTXFeatureConfig {
 impl RTXFeatureManager {
     pub async fn new(config: RTXFeatureConfig) -> Result<Self> {
         info!("🎮 Initializing RTX Feature Manager");
-        info!("   DLSS: {} ({:?})", config.dlss_enabled, config.dlss_quality);
-        info!("   Ray Tracing: {} ({:?})", config.ray_tracing_enabled, config.ray_tracing_quality);
+        info!(
+            "   DLSS: {} ({:?})",
+            config.dlss_enabled, config.dlss_quality
+        );
+        info!(
+            "   Ray Tracing: {} ({:?})",
+            config.ray_tracing_enabled, config.ray_tracing_quality
+        );
         info!("   Reflex: {}", config.reflex_enabled);
         info!("   Broadcast: {}", config.broadcast_enabled);
 
         // Detect driver version
         let driver_version = Self::detect_driver_version().await?;
-        info!("   Driver Version: {}", driver_version.as_deref().unwrap_or("Unknown"));
+        info!(
+            "   Driver Version: {}",
+            driver_version.as_deref().unwrap_or("Unknown")
+        );
 
         // Probe RTX capabilities
         let capabilities = Self::probe_rtx_capabilities(&driver_version).await?;
 
         info!("✅ RTX capabilities detected:");
-        info!("   DLSS Support: {} (DLSS3: {})", capabilities.dlss_supported, capabilities.dlss3_supported);
+        info!(
+            "   DLSS Support: {} (DLSS3: {})",
+            capabilities.dlss_supported, capabilities.dlss3_supported
+        );
         info!("   Ray Tracing: {}", capabilities.ray_tracing_supported);
         info!("   Reflex: {}", capabilities.reflex_supported);
         info!("   VRAM: {}MB", capabilities.vram_mb);
@@ -172,13 +187,16 @@ impl RTXFeatureManager {
         let gpu_info = Self::query_gpu_info().await?;
 
         let driver_ver = driver_version.as_deref().unwrap_or("0.0");
-        let driver_major: u32 = driver_ver.split('.').next()
+        let driver_major: u32 = driver_ver
+            .split('.')
+            .next()
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
 
         // Determine capabilities based on GPU name and driver version
         let gpu_name = gpu_info.get("name").map(|s| s.as_str()).unwrap_or("");
-        let vram_mb = gpu_info.get("memory.total")
+        let vram_mb = gpu_info
+            .get("memory.total")
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
 
@@ -203,17 +221,16 @@ impl RTXFeatureManager {
         let output = AsyncCommand::new("nvidia-smi")
             .args(&[
                 "--query-gpu=name,memory.total,compute_cap",
-                "--format=csv,noheader,nounits"
+                "--format=csv,noheader,nounits",
             ])
             .output()
             .await?;
 
         if !output.status.success() {
-            return Err(BoltError::Runtime(
-                crate::error::RuntimeError::OciError {
-                    message: "Failed to query GPU information".to_string(),
-                }
-            ).into());
+            return Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
+                message: "Failed to query GPU information".to_string(),
+            })
+            .into());
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -235,16 +252,17 @@ impl RTXFeatureManager {
         let gpu_lower = gpu_name.to_lowercase();
 
         // DLSS 2.0+ support (RTX 20 series and newer)
-        let dlss_supported = (gpu_lower.contains("rtx 20") ||
-                             gpu_lower.contains("rtx 30") ||
-                             gpu_lower.contains("rtx 40") ||
-                             gpu_lower.contains("rtx 50") ||
-                             gpu_lower.contains("tesla") ||
-                             gpu_lower.contains("quadro rtx")) && driver_major >= 460;
+        let dlss_supported = (gpu_lower.contains("rtx 20")
+            || gpu_lower.contains("rtx 30")
+            || gpu_lower.contains("rtx 40")
+            || gpu_lower.contains("rtx 50")
+            || gpu_lower.contains("tesla")
+            || gpu_lower.contains("quadro rtx"))
+            && driver_major >= 460;
 
         // DLSS 3.0+ support (RTX 40 series and newer)
-        let dlss3_supported = (gpu_lower.contains("rtx 40") ||
-                              gpu_lower.contains("rtx 50")) && driver_major >= 520;
+        let dlss3_supported =
+            (gpu_lower.contains("rtx 40") || gpu_lower.contains("rtx 50")) && driver_major >= 520;
 
         (dlss_supported, dlss3_supported)
     }
@@ -253,19 +271,20 @@ impl RTXFeatureManager {
         let gpu_lower = gpu_name.to_lowercase();
 
         // Hardware ray tracing support (RTX series, select GTX 16xx)
-        gpu_lower.contains("rtx") ||
-        gpu_lower.contains("gtx 1660") ||
-        gpu_lower.contains("gtx 1650")
+        gpu_lower.contains("rtx")
+            || gpu_lower.contains("gtx 1660")
+            || gpu_lower.contains("gtx 1650")
     }
 
     fn check_reflex_support(gpu_name: &str, driver_major: u32) -> bool {
         let gpu_lower = gpu_name.to_lowercase();
 
         // NVIDIA Reflex support (GTX 900 series and newer with recent drivers)
-        (gpu_lower.contains("gtx 9") ||
-         gpu_lower.contains("gtx 10") ||
-         gpu_lower.contains("gtx 16") ||
-         gpu_lower.contains("rtx")) && driver_major >= 460
+        (gpu_lower.contains("gtx 9")
+            || gpu_lower.contains("gtx 10")
+            || gpu_lower.contains("gtx 16")
+            || gpu_lower.contains("rtx"))
+            && driver_major >= 460
     }
 
     fn check_broadcast_support(gpu_name: &str) -> bool {
@@ -295,41 +314,58 @@ impl RTXFeatureManager {
         }
     }
 
-    pub async fn configure_container_rtx_environment(&self, container_id: &str) -> Result<HashMap<String, String>> {
-        info!("🎮 Configuring RTX environment for container: {}", container_id);
+    pub async fn configure_container_rtx_environment(
+        &self,
+        container_id: &str,
+    ) -> Result<HashMap<String, String>> {
+        info!(
+            "🎮 Configuring RTX environment for container: {}",
+            container_id
+        );
 
         let capabilities = self.supported_features.read().await;
         let mut env_vars = self.config.rtx_env_vars.clone();
 
         // Configure DLSS
         if self.config.dlss_enabled && capabilities.dlss_supported {
-            self.configure_dlss_environment(&mut env_vars, &capabilities).await;
+            self.configure_dlss_environment(&mut env_vars, &capabilities)
+                .await;
         } else if self.config.dlss_enabled {
             warn!("DLSS requested but GPU doesn't support it");
         }
 
         // Configure Ray Tracing
         if self.config.ray_tracing_enabled && capabilities.ray_tracing_supported {
-            self.configure_ray_tracing_environment(&mut env_vars, &capabilities).await;
+            self.configure_ray_tracing_environment(&mut env_vars, &capabilities)
+                .await;
         } else if self.config.ray_tracing_enabled {
             warn!("Ray Tracing requested but GPU doesn't support it");
         }
 
         // Configure Reflex
         if self.config.reflex_enabled && capabilities.reflex_supported {
-            self.configure_reflex_environment(&mut env_vars, &capabilities).await;
+            self.configure_reflex_environment(&mut env_vars, &capabilities)
+                .await;
         }
 
         // Configure Broadcast
         if self.config.broadcast_enabled && capabilities.broadcast_supported {
-            self.configure_broadcast_environment(&mut env_vars, &capabilities).await;
+            self.configure_broadcast_environment(&mut env_vars, &capabilities)
+                .await;
         }
 
-        info!("✅ RTX environment configured with {} variables", env_vars.len());
+        info!(
+            "✅ RTX environment configured with {} variables",
+            env_vars.len()
+        );
         Ok(env_vars)
     }
 
-    async fn configure_dlss_environment(&self, env_vars: &mut HashMap<String, String>, capabilities: &RTXCapabilities) {
+    async fn configure_dlss_environment(
+        &self,
+        env_vars: &mut HashMap<String, String>,
+        capabilities: &RTXCapabilities,
+    ) {
         info!("🚀 Configuring DLSS environment");
 
         match self.config.dlss_quality {
@@ -351,7 +387,11 @@ impl RTXFeatureManager {
             }
             DLSSQuality::Auto => {
                 // Auto-select based on VRAM and resolution
-                let quality_mode = if capabilities.vram_mb >= 12000 { "4" } else { "2" };
+                let quality_mode = if capabilities.vram_mb >= 12000 {
+                    "4"
+                } else {
+                    "2"
+                };
                 env_vars.insert("DLSS_QUALITY_MODE".to_string(), quality_mode.to_string());
                 env_vars.insert("DLSS_AUTO_SELECT".to_string(), "1".to_string());
             }
@@ -367,7 +407,11 @@ impl RTXFeatureManager {
         env_vars.insert("DLSS_MEMORY_POOL_SIZE".to_string(), "512".to_string()); // 512MB
     }
 
-    async fn configure_ray_tracing_environment(&self, env_vars: &mut HashMap<String, String>, _capabilities: &RTXCapabilities) {
+    async fn configure_ray_tracing_environment(
+        &self,
+        env_vars: &mut HashMap<String, String>,
+        _capabilities: &RTXCapabilities,
+    ) {
         info!("🌟 Configuring Ray Tracing environment");
 
         match self.config.ray_tracing_quality {
@@ -397,7 +441,11 @@ impl RTXFeatureManager {
         env_vars.insert("RTX_BVH_OPTIMIZATION".to_string(), "1".to_string());
     }
 
-    async fn configure_reflex_environment(&self, env_vars: &mut HashMap<String, String>, _capabilities: &RTXCapabilities) {
+    async fn configure_reflex_environment(
+        &self,
+        env_vars: &mut HashMap<String, String>,
+        _capabilities: &RTXCapabilities,
+    ) {
         info!("⚡ Configuring NVIDIA Reflex environment");
 
         env_vars.insert("NVIDIA_REFLEX_MODE".to_string(), "2".to_string()); // Ultra low latency
@@ -406,7 +454,11 @@ impl RTXFeatureManager {
         env_vars.insert("REFLEX_PC_LATENCY_PING".to_string(), "1".to_string());
     }
 
-    async fn configure_broadcast_environment(&self, env_vars: &mut HashMap<String, String>, _capabilities: &RTXCapabilities) {
+    async fn configure_broadcast_environment(
+        &self,
+        env_vars: &mut HashMap<String, String>,
+        _capabilities: &RTXCapabilities,
+    ) {
         info!("📺 Configuring NVIDIA Broadcast environment");
 
         env_vars.insert("NVIDIA_BROADCAST_ENABLE".to_string(), "1".to_string());
@@ -419,8 +471,15 @@ impl RTXFeatureManager {
         self.supported_features.read().await.clone()
     }
 
-    pub async fn get_recommended_settings_for_game(&self, game_name: &str, target_fps: u32) -> Result<RTXFeatureConfig> {
-        info!("🎯 Getting recommended RTX settings for: {} (target: {}fps)", game_name, target_fps);
+    pub async fn get_recommended_settings_for_game(
+        &self,
+        game_name: &str,
+        target_fps: u32,
+    ) -> Result<RTXFeatureConfig> {
+        info!(
+            "🎯 Getting recommended RTX settings for: {} (target: {}fps)",
+            game_name, target_fps
+        );
 
         let capabilities = self.supported_features.read().await;
         let mut config = self.config.clone();
@@ -428,7 +487,11 @@ impl RTXFeatureManager {
         // Game-specific optimizations
         match game_name.to_lowercase().as_str() {
             name if name.contains("cyberpunk") => {
-                config.dlss_quality = if target_fps >= 120 { DLSSQuality::Performance } else { DLSSQuality::Quality };
+                config.dlss_quality = if target_fps >= 120 {
+                    DLSSQuality::Performance
+                } else {
+                    DLSSQuality::Quality
+                };
                 config.ray_tracing_quality = RayTracingQuality::Medium;
             }
             name if name.contains("metro") => {
@@ -441,36 +504,75 @@ impl RTXFeatureManager {
             }
             _ => {
                 // Auto-configure based on target FPS and VRAM
-                config.dlss_quality = if target_fps >= 144 { DLSSQuality::Performance } else { DLSSQuality::Balanced };
-                config.ray_tracing_quality = if capabilities.vram_mb >= 10000 { RayTracingQuality::High } else { RayTracingQuality::Medium };
+                config.dlss_quality = if target_fps >= 144 {
+                    DLSSQuality::Performance
+                } else {
+                    DLSSQuality::Balanced
+                };
+                config.ray_tracing_quality = if capabilities.vram_mb >= 10000 {
+                    RayTracingQuality::High
+                } else {
+                    RayTracingQuality::Medium
+                };
             }
         }
 
-        info!("✅ Recommended settings: DLSS={:?}, RT={:?}", config.dlss_quality, config.ray_tracing_quality);
+        info!(
+            "✅ Recommended settings: DLSS={:?}, RT={:?}",
+            config.dlss_quality, config.ray_tracing_quality
+        );
         Ok(config)
     }
 
-    pub async fn verify_rtx_performance(&self, container_id: &str) -> Result<RTXPerformanceMetrics> {
-        info!("📊 Verifying RTX performance for container: {}", container_id);
+    pub async fn verify_rtx_performance(
+        &self,
+        container_id: &str,
+    ) -> Result<RTXPerformanceMetrics> {
+        info!(
+            "📊 Verifying RTX performance for container: {}",
+            container_id
+        );
 
         let metrics = RTXPerformanceMetrics {
             dlss_active: self.config.dlss_enabled,
             ray_tracing_active: self.config.ray_tracing_enabled,
-            reflex_latency_ns: if self.config.reflex_enabled { Some(5_000_000) } else { None }, // 5ms
+            reflex_latency_ns: if self.config.reflex_enabled {
+                Some(5_000_000)
+            } else {
+                None
+            }, // 5ms
             gpu_utilization_percent: 85.0,
             vram_usage_mb: 8500,
             fps: 120,
             frame_time_ms: 8.33,
-            dlss_performance_gain: if self.config.dlss_enabled { Some(1.6) } else { None },
+            dlss_performance_gain: if self.config.dlss_enabled {
+                Some(1.6)
+            } else {
+                None
+            },
         };
 
         info!("📈 RTX Performance Metrics:");
-        info!("   DLSS Active: {} (gain: {}x)", metrics.dlss_active,
-              metrics.dlss_performance_gain.map_or("N/A".to_string(), |g| format!("{:.1}", g)));
+        info!(
+            "   DLSS Active: {} (gain: {}x)",
+            metrics.dlss_active,
+            metrics
+                .dlss_performance_gain
+                .map_or("N/A".to_string(), |g| format!("{:.1}", g))
+        );
         info!("   Ray Tracing: {}", metrics.ray_tracing_active);
-        info!("   Reflex Latency: {:?}ms", metrics.reflex_latency_ns.map(|ns| ns as f64 / 1_000_000.0));
-        info!("   FPS: {} ({:.2}ms frame time)", metrics.fps, metrics.frame_time_ms);
-        info!("   GPU Usage: {:.1}% ({} MB VRAM)", metrics.gpu_utilization_percent, metrics.vram_usage_mb);
+        info!(
+            "   Reflex Latency: {:?}ms",
+            metrics.reflex_latency_ns.map(|ns| ns as f64 / 1_000_000.0)
+        );
+        info!(
+            "   FPS: {} ({:.2}ms frame time)",
+            metrics.fps, metrics.frame_time_ms
+        );
+        info!(
+            "   GPU Usage: {:.1}% ({} MB VRAM)",
+            metrics.gpu_utilization_percent, metrics.vram_usage_mb
+        );
 
         Ok(metrics)
     }
@@ -491,10 +593,16 @@ pub struct RTXPerformanceMetrics {
 // GhostForge integration helpers
 impl RTXFeatureManager {
     /// Configure RTX features specifically for GhostForge managed games
-    pub async fn configure_for_ghostforge(&self, game_title: &str, wine_prefix: &Path) -> Result<HashMap<String, String>> {
+    pub async fn configure_for_ghostforge(
+        &self,
+        game_title: &str,
+        wine_prefix: &Path,
+    ) -> Result<HashMap<String, String>> {
         info!("👻 Configuring RTX for GhostForge game: {}", game_title);
 
-        let mut env_vars = self.configure_container_rtx_environment("ghostforge").await?;
+        let mut env_vars = self
+            .configure_container_rtx_environment("ghostforge")
+            .await?;
 
         // GhostForge-specific optimizations
         env_vars.insert("WINE_DLSS_ENABLE".to_string(), "1".to_string());
@@ -503,8 +611,10 @@ impl RTXFeatureManager {
 
         // Wine prefix for shader cache
         if let Some(prefix_str) = wine_prefix.to_str() {
-            env_vars.insert("WINE_SHADER_CACHE_DIR".to_string(),
-                           format!("{}/drive_c/bolt_shader_cache", prefix_str));
+            env_vars.insert(
+                "WINE_SHADER_CACHE_DIR".to_string(),
+                format!("{}/drive_c/bolt_shader_cache", prefix_str),
+            );
         }
 
         info!("✅ GhostForge RTX configuration complete");

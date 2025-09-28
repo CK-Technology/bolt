@@ -167,14 +167,15 @@ impl BoltRuntime {
         runtime::restart_container(container, timeout).await
     }
 
-    /// Start Surge orchestration
+    /// Start Surge orchestration with native runtime
     pub async fn surge_up(
         &self,
         services: &[String],
         detach: bool,
         force_recreate: bool,
     ) -> Result<()> {
-        surge::up(&self.config, services, detach, force_recreate).await
+        // Use the new native runtime integration
+        surge::up_with_native_runtime(&self.config, services, detach, force_recreate).await
     }
 
     /// Stop Surge services

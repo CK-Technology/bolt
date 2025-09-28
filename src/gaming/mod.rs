@@ -297,9 +297,7 @@ async fn configure_wine_environment() -> Result<()> {
     for (key, value) in wine_config {
         info!("  🔧 Setting {}: {}", key, value);
         unsafe {
-            unsafe {
-                std::env::set_var(key, value);
-            }
+            std::env::set_var(key, value);
         }
     }
 

@@ -163,7 +163,12 @@ impl AIAssistant {
         Ok(())
     }
 
-    pub async fn get_code_suggestions(&self, env_id: &str, code_context: &str, cursor_position: usize) -> Result<Vec<CodeSuggestion>> {
+    pub async fn get_code_suggestions(
+        &self,
+        env_id: &str,
+        code_context: &str,
+        cursor_position: usize,
+    ) -> Result<Vec<CodeSuggestion>> {
         if !self.enabled {
             return Ok(Vec::new());
         }
@@ -236,7 +241,12 @@ impl AIAssistant {
         Ok(bugs)
     }
 
-    pub async fn generate_tests(&self, env_id: &str, function_signature: &str, code_body: &str) -> Result<Vec<TestCase>> {
+    pub async fn generate_tests(
+        &self,
+        env_id: &str,
+        function_signature: &str,
+        code_body: &str,
+    ) -> Result<Vec<TestCase>> {
         if !self.enabled {
             return Ok(Vec::new());
         }
@@ -247,26 +257,32 @@ impl AIAssistant {
         let tests = vec![
             TestCase {
                 name: "test_successful_execution".to_string(),
-                test_code: format!(r#"
+                test_code: format!(
+                    r#"
 #[tokio::test]
 async fn test_successful_execution() {{
     let result = {}().await;
     assert!(result.is_ok());
 }}
-"#, function_signature),
+"#,
+                    function_signature
+                ),
                 test_type: TestType::Unit,
                 coverage_estimate: 0.75,
             },
             TestCase {
                 name: "test_error_handling".to_string(),
-                test_code: format!(r#"
+                test_code: format!(
+                    r#"
 #[tokio::test]
 async fn test_error_handling() {{
     // Test error conditions
     let result = {}_with_invalid_input().await;
     assert!(result.is_err());
 }}
-"#, function_signature),
+"#,
+                    function_signature
+                ),
                 test_type: TestType::Unit,
                 coverage_estimate: 0.85,
             },
@@ -276,12 +292,19 @@ async fn test_error_handling() {{
         Ok(tests)
     }
 
-    pub async fn suggest_performance_optimizations(&self, env_id: &str, code: &str) -> Result<Vec<PerformanceOptimization>> {
+    pub async fn suggest_performance_optimizations(
+        &self,
+        env_id: &str,
+        code: &str,
+    ) -> Result<Vec<PerformanceOptimization>> {
         if !self.enabled {
             return Ok(Vec::new());
         }
 
-        info!("⚡ Analyzing performance optimization opportunities in: {}", env_id);
+        info!(
+            "⚡ Analyzing performance optimization opportunities in: {}",
+            env_id
+        );
 
         let optimizations = vec![
             PerformanceOptimization {
@@ -289,32 +312,41 @@ async fn test_error_handling() {{
                 optimization_type: OptimizationType::Caching,
                 description: "Consider caching expensive computation result".to_string(),
                 estimated_improvement: "30-50% faster execution".to_string(),
-                code_suggestion: Some("let cached_result = cache.get_or_insert(key, || expensive_computation());".to_string()),
+                code_suggestion: Some(
+                    "let cached_result = cache.get_or_insert(key, || expensive_computation());"
+                        .to_string(),
+                ),
             },
             PerformanceOptimization {
                 line: 78,
                 optimization_type: OptimizationType::Vectorization,
                 description: "Loop can be vectorized for better performance".to_string(),
                 estimated_improvement: "2-3x faster on modern CPUs".to_string(),
-                code_suggestion: Some("Use SIMD instructions or rayon for parallel processing".to_string()),
+                code_suggestion: Some(
+                    "Use SIMD instructions or rayon for parallel processing".to_string(),
+                ),
             },
         ];
 
-        info!("   Found {} optimization opportunities", optimizations.len());
+        info!(
+            "   Found {} optimization opportunities",
+            optimizations.len()
+        );
         Ok(optimizations)
     }
 
     pub async fn get_metrics(&self, env_id: &str) -> Result<AIMetrics> {
         let environments = self.active_environments.read().await;
-        let state = environments.get(env_id)
+        let state = environments
+            .get(env_id)
             .ok_or_else(|| anyhow::anyhow!("Environment {} not found", env_id))?;
 
         Ok(AIMetrics {
             suggestions_provided: state.suggestions_provided,
             completion_accuracy_percent: state.completion_accuracy * 100.0,
-            bugs_detected: 15, // Simulated
-            security_issues_found: 3, // Simulated
-            tests_generated: 25, // Simulated
+            bugs_detected: 15,          // Simulated
+            security_issues_found: 3,   // Simulated
+            tests_generated: 25,        // Simulated
             refactoring_suggestions: 8, // Simulated
         })
     }

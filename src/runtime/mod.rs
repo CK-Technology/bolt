@@ -4,10 +4,16 @@ use tokio::process::Command as AsyncCommand;
 use tracing::{debug, info, warn};
 
 pub mod environment;
+pub mod gpu_integration;
 pub mod input;
+pub mod native;
+pub mod networking;
 pub mod nvbind;
 pub mod oci;
+pub mod performance;
+pub mod security;
 pub mod storage;
+pub mod unified;
 
 #[cfg(feature = "gaming")]
 pub mod gpu;
@@ -54,7 +60,9 @@ pub async fn run_container(
         run_bolt_capsule(image, name, ports, env, volumes, detach).await
     } else {
         info!("Using OCI image format");
-        run_oci_container(image, name, ports, env, volumes, detach).await
+        let runtime = detect_container_runtime().await?;
+        run_oci_container_delegate(&runtime, image, name, ports, env, volumes, detach).await?;
+        Ok(())
     }
 }
 
@@ -78,14 +86,16 @@ pub async fn run_bolt_capsule(
     Ok(())
 }
 
-pub async fn run_oci_container(
+// Delegation functions for fallback compatibility
+pub async fn run_oci_container_delegate(
+    runtime: &str,
     image: &str,
     name: Option<&str>,
     ports: &[String],
     env: &[String],
     volumes: &[String],
     detach: bool,
-) -> Result<()> {
+) -> Result<String> {
     info!("🐳 Starting OCI container: {}", image);
 
     debug!("Container config:");
@@ -98,9 +108,8 @@ pub async fn run_oci_container(
     debug!("  Volumes: {:?}", volumes);
     debug!("  Detached: {}", detach);
 
-    // Build podman/docker command
-    let runtime = detect_container_runtime().await?;
-    let mut cmd = AsyncCommand::new(&runtime);
+    // Use provided runtime
+    let mut cmd = AsyncCommand::new(runtime);
     cmd.arg("run");
 
     if detach {
@@ -142,10 +151,103 @@ pub async fn run_oci_container(
     let container_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
     info!("✅ Container started: {}", container_id);
 
+    Ok(container_id)
+}
+
+pub async fn stop_container_delegate(runtime: &str, id: &str) -> Result<()> {
+    info!("🛑 Stopping container: {}", id);
+
+    let mut cmd = AsyncCommand::new(runtime);
+    cmd.arg("stop").arg(id);
+
+    let output = cmd.output().await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(BoltError::Runtime(crate::error::RuntimeError::StartFailed {
+            reason: format!("Failed to stop container: {}", stderr),
+        }));
+    }
+
+    info!("✅ Container stopped: {}", id);
+    Ok(())
+}
+
+pub async fn remove_container_delegate(runtime: &str, id: &str, force: bool) -> Result<()> {
+    info!("🗑️  Removing container: {}", id);
+
+    let mut cmd = AsyncCommand::new(runtime);
+    cmd.arg("rm");
+    if force {
+        cmd.arg("-f");
+    }
+    cmd.arg(id);
+
+    let output = cmd.output().await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(BoltError::Runtime(crate::error::RuntimeError::StartFailed {
+            reason: format!("Failed to remove container: {}", stderr),
+        }));
+    }
+
+    info!("✅ Container removed: {}", id);
+    Ok(())
+}
+
+pub async fn list_containers_delegate(runtime: &str, all: bool) -> Result<Vec<native::NativeContainerInfo>> {
+    info!("📋 Listing containers...");
+
+    let mut cmd = AsyncCommand::new(runtime);
+    cmd.arg("ps");
+    if all {
+        cmd.arg("-a");
+    }
+    cmd.arg("--format").arg("json");
+
+    let output = cmd.output().await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(BoltError::Runtime(crate::error::RuntimeError::StartFailed {
+            reason: format!("Failed to list containers: {}", stderr),
+        }));
+    }
+
+    // Parse JSON output and convert to ContainerInfo
+    // This is a simplified implementation
+    let containers = Vec::new(); // TODO: Parse actual output
+    Ok(containers)
+}
+
+pub async fn pull_image_delegate(runtime: &str, image: &str) -> Result<()> {
+    info!("⬇️  Pulling image: {}", image);
+
+    let mut cmd = AsyncCommand::new(runtime);
+    cmd.arg("pull").arg(image);
+
+    let output = cmd.output().await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(BoltError::Runtime(crate::error::RuntimeError::StartFailed {
+            reason: format!("Failed to pull image: {}", stderr),
+        }));
+    }
+
+    info!("✅ Image pulled: {}", image);
     Ok(())
 }
 
 pub async fn build_image(path: &str, tag: Option<&str>, dockerfile: &str) -> Result<()> {
+    info!("🔨 Building image from path: {}", path);
+
+    let runtime = detect_container_runtime().await?;
+    build_image_delegate(&runtime, path, tag, dockerfile).await
+}
+
+pub async fn build_image_delegate(runtime: &str, path: &str, tag: Option<&str>, dockerfile: &str) -> Result<()> {
     info!("🔨 Building image from path: {}", path);
     debug!("Dockerfile: {}", dockerfile);
     if let Some(tag) = tag {
