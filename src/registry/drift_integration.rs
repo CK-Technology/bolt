@@ -367,17 +367,31 @@ impl DriftRegistryClient {
 
     fn parse_reference(image: &str) -> Result<(String, String)> {
         if let Some((repository, digest)) = image.split_once('@') {
-            return Ok((repository.to_string(), digest.to_string()));
+            let normalized_repo = Self::normalize_repository(repository);
+            return Ok((normalized_repo, digest.to_string()));
         }
 
         if let Some((repository, tag)) = image.rsplit_once(':') {
             if tag.contains('/') {
-                Ok((image.to_string(), "latest".to_string()))
+                let normalized_repo = Self::normalize_repository(image);
+                Ok((normalized_repo, "latest".to_string()))
             } else {
-                Ok((repository.to_string(), tag.to_string()))
+                let normalized_repo = Self::normalize_repository(repository);
+                Ok((normalized_repo, tag.to_string()))
             }
         } else {
-            Ok((image.to_string(), "latest".to_string()))
+            let normalized_repo = Self::normalize_repository(image);
+            Ok((normalized_repo, "latest".to_string()))
+        }
+    }
+
+    /// Normalize repository name for Docker Hub (add library/ prefix for official images)
+    fn normalize_repository(repository: &str) -> String {
+        // If no slash, it's an official Docker Hub image that needs library/ prefix
+        if !repository.contains('/') {
+            format!("library/{}", repository)
+        } else {
+            repository.to_string()
         }
     }
 
@@ -387,6 +401,13 @@ impl DriftRegistryClient {
 
     pub async fn resolve_manifest(&self, image: &str) -> Result<ResolvedManifest> {
         let (repository, reference) = Self::parse_reference(image)?;
+
+        // For Docker Hub, get bearer token first
+        let token = if self.endpoint.contains("docker.io") || self.endpoint.contains("registry-1.docker.io") {
+            Some(self.get_docker_hub_token(&repository).await?)
+        } else {
+            None
+        };
 
         if let Some(ref object_store) = self.object_store {
             match object_store.fetch_manifest(&repository, &reference).await {
@@ -438,8 +459,15 @@ impl DriftRegistryClient {
         debug!("Fetching manifest from {}", url);
 
         let accept_header = "application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json";
-        let response = self
-            .with_auth(self.client.get(&url).header(ACCEPT, accept_header))
+        let mut request = self.client.get(&url).header(ACCEPT, accept_header);
+
+        if let Some(ref token_value) = token {
+            request = request.bearer_auth(token_value);
+        } else {
+            request = self.with_auth(request);
+        }
+
+        let response = request
             .send()
             .await
             .with_context(|| format!("Failed to request manifest for {}", image))?;
@@ -517,11 +545,24 @@ impl DriftRegistryClient {
                 .with_context(|| format!("Failed to prepare directory {}", parent.display()))?;
         }
 
+        // Get Docker Hub token if needed
+        let token = if self.endpoint.contains("docker.io") || self.endpoint.contains("registry-1.docker.io") {
+            Some(self.get_docker_hub_token(repository).await?)
+        } else {
+            None
+        };
+
         let url = format!("{}/v2/{}/blobs/{}", self.endpoint, repository, digest);
         debug!("Downloading blob {} from {}", digest, url);
 
-        let response = self
-            .with_auth(self.client.get(&url))
+        let mut request = self.client.get(&url);
+        if let Some(ref token_value) = token {
+            request = request.bearer_auth(token_value);
+        } else {
+            request = self.with_auth(request);
+        }
+
+        let response = request
             .send()
             .await
             .with_context(|| format!("Failed to download blob {}", digest))?;
@@ -1092,13 +1133,52 @@ impl Default for GamingPackageConfig {
 impl DriftRegistryClient {
     /// Ensure the client is authenticated with the registry
     async fn ensure_authenticated(&self) -> Result<()> {
-        // For Docker Hub and public registries, no auth needed for public images
+        // Docker Hub requires token-based auth even for public images
         if self.endpoint.contains("docker.io") || self.endpoint.contains("registry-1.docker.io") {
+            // If we have credentials, they'll be used via with_auth()
+            // For anonymous access, Docker Hub uses bearer tokens
+            debug!("Docker Hub authentication will use bearer tokens from registry");
             return Ok(());
         }
 
         debug!("Registry authentication check for: {}", self.endpoint);
         Ok(())
+    }
+
+    /// Get Docker Hub bearer token for anonymous pulls
+    async fn get_docker_hub_token(&self, repository: &str) -> Result<String> {
+        let auth_url = format!(
+            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:{}:pull",
+            repository
+        );
+
+        debug!("Fetching Docker Hub token for repository: {}", repository);
+
+        let response = self
+            .client
+            .get(&auth_url)
+            .send()
+            .await
+            .context("Failed to request Docker Hub token")?;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!(
+                "Failed to get Docker Hub token: {}",
+                response.status()
+            ));
+        }
+
+        #[derive(Deserialize)]
+        struct TokenResponse {
+            token: String,
+        }
+
+        let token_response: TokenResponse = response
+            .json()
+            .await
+            .context("Failed to parse Docker Hub token response")?;
+
+        Ok(token_response.token)
     }
 
     /// Calculate SHA256 digest of a file

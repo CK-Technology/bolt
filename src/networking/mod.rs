@@ -479,10 +479,20 @@ impl NetworkManager {
 
     /// Create macvlan network
     async fn create_macvlan_network(&self, name: &str, subnet: &str) -> Result<()> {
-        info!("📡 Creating macvlan network");
+        info!("📡 Creating macvlan network with subnet: {}", subnet);
 
         let macvlan_name = format!("mv-{}", name);
         self.create_macvlan_interface(&macvlan_name, "eth0").await?;
+
+        // Assign subnet to macvlan interface
+        let output = tokio::process::Command::new("ip")
+            .args(["addr", "add", subnet, "dev", &macvlan_name])
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            warn!("Failed to assign subnet to macvlan: {}", String::from_utf8_lossy(&output.stderr));
+        }
 
         info!("  ✓ Macvlan network configured");
         Ok(())

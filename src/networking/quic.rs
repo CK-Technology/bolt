@@ -83,7 +83,22 @@ impl QUICServer {
     pub async fn new(network_config: NetworkConfig) -> Result<Self> {
         info!("🚀 Initializing QUIC server for container networking");
 
-        let config = QUICConfig::default();
+        let mut config = QUICConfig::default();
+
+        // Apply network config settings to QUIC config
+        if network_config.low_latency {
+            config.max_idle_timeout = 30;
+            config.keep_alive_interval = 5;
+            config.congestion_control = CongestionControl::BBR;
+            info!("  • Low-latency mode enabled (BBR, shorter timeouts)");
+        }
+
+        if network_config.bandwidth_optimization {
+            config.max_concurrent_streams = 1000;
+            config.congestion_control = CongestionControl::Cubic;
+            info!("  • Bandwidth optimization enabled (Cubic, more streams)");
+        }
+
         let bind_addr: SocketAddr = format!("{}:{}", config.bind_address, config.port).parse()?;
 
         info!("✅ QUIC server configured for: {}", bind_addr);

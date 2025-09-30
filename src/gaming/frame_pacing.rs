@@ -687,8 +687,15 @@ impl FramePacingManager {
         let metrics = self.get_frame_metrics().await;
         let display_info = self.get_display_info().await;
 
-        let target_achieved = if self.config.target_fps > 0 {
-            metrics.current_fps >= self.config.target_fps as f64 * 0.95 // 95% of target
+        // Use display refresh rate for adaptive targets if no target is set
+        let effective_target = if self.config.target_fps == 0 {
+            display_info.refresh_rate_hz
+        } else {
+            self.config.target_fps
+        };
+
+        let target_achieved = if effective_target > 0 {
+            metrics.current_fps >= effective_target as f64 * 0.95 // 95% of target
         } else {
             true // Unlimited FPS
         };

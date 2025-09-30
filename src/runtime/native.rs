@@ -308,7 +308,6 @@ impl BoltNativeRuntime {
                                 container_id, clean_err
                             );
                         }
-                        network_attached = false;
                     }
                     return Err(err);
                 }

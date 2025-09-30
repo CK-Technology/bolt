@@ -658,9 +658,6 @@ impl AdvancedGamingOptimizer {
             }
         };
 
-        #[cfg(not(feature = "nvidia-support"))]
-        let gpu_manager: Option<()> = None;
-
         Ok(Self {
             config,
             performance_profiles: Arc::new(RwLock::new(HashMap::new())),
