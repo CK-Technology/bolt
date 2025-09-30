@@ -293,7 +293,34 @@ impl SnapshotManager {
 
 /// Initialize snapshot manager from configuration
 pub async fn init_snapshot_manager() -> Result<SnapshotManager> {
-    let config = SnapshotConfig::default(); // TODO: Load from file
+    // Try to load config from file, fallback to default
+    let config_path = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("bolt")
+        .join("snapshots.toml");
+
+    let config = if config_path.exists() {
+        match tokio::fs::read_to_string(&config_path).await {
+            Ok(content) => match toml::from_str::<SnapshotConfig>(&content) {
+                Ok(cfg) => {
+                    info!("✅ Loaded snapshot config from: {}", config_path.display());
+                    cfg
+                }
+                Err(e) => {
+                    warn!("Failed to parse snapshot config: {}, using defaults", e);
+                    SnapshotConfig::default()
+                }
+            },
+            Err(e) => {
+                warn!("Failed to read snapshot config: {}, using defaults", e);
+                SnapshotConfig::default()
+            }
+        }
+    } else {
+        debug!("No snapshot config file found, using defaults");
+        SnapshotConfig::default()
+    };
+
     SnapshotManager::new(config)
 }
 

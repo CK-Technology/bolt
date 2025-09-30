@@ -285,7 +285,7 @@ impl BoltNativeRuntime {
         // Setup networking
         self.setup_container_networking(&container_id, &config)
             .await?;
-        let mut network_attached = self.container_networks.contains_key(&container_id);
+        let network_attached = self.container_networks.contains_key(&container_id);
 
         // Setup GPU if requested
         if let Some(ref gpu_config) = config.gpu_config {

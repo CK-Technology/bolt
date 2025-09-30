@@ -4,6 +4,7 @@ use anyhow::Result;
 use bolt::{BoltConfig, BoltRuntime, gaming, surge};
 use clap::Parser;
 use cli::{Cli, Commands, GamingCommands, NetworkCommands, SurgeCommands, VolumeCommands, compat};
+use std::path::PathBuf;
 use tracing::info;
 
 #[tokio::main]
@@ -598,8 +599,29 @@ async fn main() -> Result<()> {
                 }
                 cli::SnapshotCommands::Show { snapshot } => {
                     info!("Showing snapshot details for: {}", snapshot);
-                    // TODO: Implement snapshot details
-                    println!("Snapshot '{}' not found", snapshot);
+
+                    let snapshot_manager = bolt::capsules::snapshots::SnapshotManager::new().await?;
+                    let snapshots = snapshot_manager.list_snapshots().await?;
+
+                    if let Some(snap) = snapshots.iter().find(|s| s.name == snapshot) {
+                        println!("📸 Snapshot Details\n");
+                        println!("Name:        {}", snap.name);
+                        println!("Type:        {:?}", snap.snapshot_type);
+                        println!("Created:     {}", snap.created_at);
+                        println!("Path:        {}", snap.path.display());
+                        if let Some(ref desc) = snap.description {
+                            println!("Description: {}", desc);
+                        }
+
+                        // Show size if possible
+                        if let Ok(metadata) = tokio::fs::metadata(&snap.path).await {
+                            if metadata.is_dir() {
+                                println!("Status:      Ready");
+                            }
+                        }
+                    } else {
+                        println!("❌ Snapshot '{}' not found", snapshot);
+                    }
                 }
                 cli::SnapshotCommands::Rollback { snapshot, force } => {
                     info!("Rolling back to snapshot '{}' (force: {})", snapshot, force);
@@ -617,20 +639,121 @@ async fn main() -> Result<()> {
 
                     info!("✅ Snapshot '{}' deleted successfully", snapshot);
                 }
-                cli::SnapshotCommands::Cleanup { .. } => {
-                    info!("Cleaning up old snapshots");
-                    // TODO: Implement snapshot cleanup
-                    info!("✅ Snapshot cleanup completed");
+                cli::SnapshotCommands::Cleanup { dry_run, force } => {
+                    info!("Cleaning up old snapshots (dry_run: {}, force: {})", dry_run, force);
+
+                    let snapshot_manager = bolt::capsules::snapshots::SnapshotManager::new().await?;
+                    let snapshots = snapshot_manager.list_snapshots().await?;
+
+                    // Keep only last 10 snapshots, or manual snapshots
+                    let mut auto_snapshots: Vec<_> = snapshots
+                        .iter()
+                        .filter(|s| matches!(s.snapshot_type, bolt::capsules::snapshots::SnapshotType::Auto | bolt::capsules::snapshots::SnapshotType::Daily | bolt::capsules::snapshots::SnapshotType::Weekly))
+                        .collect();
+
+                    auto_snapshots.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+                    let to_delete = auto_snapshots.iter().skip(10);
+                    let mut deleted = 0;
+
+                    for snapshot in to_delete {
+                        if dry_run {
+                            println!("Would delete: {} ({})", snapshot.name, snapshot.created_at);
+                        } else {
+                            snapshot_manager.delete_snapshot(&snapshot.name).await?;
+                            println!("Deleted: {}", snapshot.name);
+                            deleted += 1;
+                        }
+                    }
+
+                    if dry_run {
+                        info!("✅ Dry run completed - no snapshots deleted");
+                    } else {
+                        info!("✅ Cleanup completed - {} snapshots deleted", deleted);
+                    }
                 }
-                cli::SnapshotCommands::Config { .. } => {
-                    info!("Managing snapshot configuration");
-                    // TODO: Implement snapshot configuration
-                    info!("✅ Snapshot configuration updated");
+                cli::SnapshotCommands::Config { verbose } => {
+                    info!("Showing snapshot configuration");
+
+                    // Load current config from SnapshotManager
+                    let config_path = dirs::config_dir()
+                        .unwrap_or_else(|| PathBuf::from("."))
+                        .join("bolt")
+                        .join("snapshots.toml");
+
+                    if config_path.exists() {
+                        let content = tokio::fs::read_to_string(&config_path).await?;
+                        if verbose {
+                            println!("📋 Snapshot Configuration\n");
+                            println!("{}", content);
+                        } else {
+                            println!("Configuration file: {}", config_path.display());
+                            println!("Run with --verbose to see full config");
+                        }
+                    } else {
+                        println!("⚙️  Using default snapshot configuration");
+                        println!("  • Auto snapshots: disabled");
+                        println!("  • Keep daily: 7 snapshots");
+                        println!("  • Keep weekly: 4 snapshots");
+                        println!("  • Storage: /var/lib/bolt/snapshots");
+                        println!("\nConfiguration file will be created at: {}", config_path.display());
+                    }
                 }
-                cli::SnapshotCommands::Auto { .. } => {
-                    info!("Managing automatic snapshots");
-                    // TODO: Implement automatic snapshots
-                    info!("✅ Automatic snapshot settings configured");
+                cli::SnapshotCommands::Auto { action } => {
+                    use cli::AutoAction;
+
+                    let config_path = dirs::config_dir()
+                        .unwrap_or_else(|| PathBuf::from("."))
+                        .join("bolt")
+                        .join("snapshots.toml");
+
+                    match action {
+                        AutoAction::Enable => {
+                            info!("Enabling automatic snapshots");
+
+                            // Create default config
+                            let config = r#"
+[auto_snapshot]
+enabled = true
+before_container_run = true
+before_build = true
+hourly = false
+daily = true
+
+[retention]
+keep_daily = 7
+keep_weekly = 4
+keep_monthly = 3
+"#;
+
+                            if let Some(parent) = config_path.parent() {
+                                tokio::fs::create_dir_all(parent).await?;
+                            }
+                            tokio::fs::write(&config_path, config).await?;
+
+                            println!("✅ Automatic snapshots enabled");
+                            println!("   Daily snapshots will be created");
+                            println!("   Config: {}", config_path.display());
+                        }
+                        AutoAction::Disable => {
+                            info!("Disabling automatic snapshots");
+
+                            if config_path.exists() {
+                                tokio::fs::remove_file(&config_path).await?;
+                                println!("✅ Automatic snapshots disabled");
+                            } else {
+                                println!("⚠️  Automatic snapshots already disabled");
+                            }
+                        }
+                        AutoAction::Status => {
+                            if config_path.exists() {
+                                println!("✅ Automatic snapshots: enabled");
+                                println!("   Config: {}", config_path.display());
+                            } else {
+                                println!("❌ Automatic snapshots: disabled");
+                            }
+                        }
+                    }
                 }
             }
         }

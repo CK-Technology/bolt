@@ -521,8 +521,28 @@ pub async fn list_containers_info(all: bool) -> Result<Vec<ContainerInfo>> {
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string(),
-                labels: HashMap::new(), // TODO: Parse from container labels
-                uptime: None,           // TODO: Calculate uptime
+                labels: value
+                    .get("Labels")
+                    .and_then(|v| v.as_object())
+                    .map(|obj| {
+                        obj.iter()
+                            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                uptime: value
+                    .get("CreatedAt")
+                    .and_then(|v| v.as_str())
+                    .and_then(|created_str| {
+                        chrono::DateTime::parse_from_rfc3339(created_str).ok()
+                    })
+                    .map(|created| {
+                        let now = chrono::Utc::now();
+                        let created_utc = created.with_timezone(&chrono::Utc);
+                        let duration = now.signed_duration_since(created_utc);
+                        let seconds = duration.num_seconds();
+                        format!("{}s", seconds)
+                    }),
                 command: value
                     .get("Command")
                     .and_then(|v| v.as_str())

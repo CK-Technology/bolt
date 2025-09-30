@@ -37,12 +37,46 @@ pub async fn submit_profile(
     let client = reqwest::Client::new();
     let user_config = UserConfig::load().unwrap_or_default();
 
+    // Auto-generate tags based on profile characteristics
+    let mut tags = vec!["gaming".to_string()];
+
+    // Add performance-related tags
+    if profile.name.to_lowercase().contains("performance") {
+        tags.push("high-performance".to_string());
+    }
+    if profile.name.to_lowercase().contains("latency") || profile.name.to_lowercase().contains("low-latency") {
+        tags.push("low-latency".to_string());
+    }
+
+    // Add platform tags
+    if profile.name.to_lowercase().contains("amd") || profile.description.to_lowercase().contains("amd") {
+        tags.push("amd".to_string());
+    }
+    if profile.name.to_lowercase().contains("nvidia") || profile.description.to_lowercase().contains("nvidia") {
+        tags.push("nvidia".to_string());
+    }
+
+    // Auto-detect compatible games from profile name/description
+    let mut compatible_games = Vec::new();
+    let game_keywords = [
+        "counter-strike", "cs2", "dota", "apex", "valorant",
+        "fortnite", "overwatch", "warzone", "minecraft", "wow"
+    ];
+
+    for keyword in &game_keywords {
+        if profile.name.to_lowercase().contains(keyword) ||
+           profile.description.to_lowercase().contains(keyword) {
+            compatible_games.push(keyword.to_string());
+            tags.push(format!("game-{}", keyword));
+        }
+    }
+
     let submission = ProfileSubmission {
         profile: profile.clone(),
         author_email: user_config.get_user_email_or_default(),
         description: profile.description.clone(),
-        tags: vec!["gaming".to_string()], // TODO: Auto-generate tags
-        compatible_games: vec![],         // TODO: Auto-detect compatible games
+        tags,
+        compatible_games,
     };
 
     let response = client
