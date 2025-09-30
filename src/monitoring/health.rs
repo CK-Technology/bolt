@@ -169,6 +169,8 @@ impl HealthChecker {
         let checks = &self.checks;
         let overall_status = &self.overall_status;
 
+        debug!("Starting health monitoring loop, current status: {:?}", overall_status);
+
         let mut interval = tokio::time::interval(Duration::from_secs(10));
 
         loop {

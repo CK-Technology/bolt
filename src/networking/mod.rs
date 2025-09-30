@@ -6,7 +6,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
-pub mod advanced_networking;
 pub mod bridge;
 pub mod ebpf;
 pub mod firewall_advanced;
@@ -15,7 +14,6 @@ pub mod quic_proxy;
 pub mod quic_real;
 
 // Re-export main networking types
-pub use advanced_networking::BoltAdvancedNetworking;
 pub use firewall_advanced::AdvancedFirewallManager;
 pub use quic_proxy::{ProxyRule, QUICProxyConfig, QUICSocketProxy};
 

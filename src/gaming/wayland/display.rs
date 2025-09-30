@@ -122,7 +122,8 @@ impl DisplayManager {
             // Accept Wayland client connections
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                // Accept client connections and handle Wayland protocol
+                // Would register new clients to the clients Arc<RwLock<HashMap>>
+                let _client_count = clients.read().await.len();
             }
         });
 

@@ -365,6 +365,7 @@ impl InputManager {
     }
 
     pub async fn record_input_latency(&mut self, latency: Duration) {
+        debug!("Recording input latency: {:?}", latency);
         self.latency_monitor.record_input_event();
     }
 

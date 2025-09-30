@@ -55,7 +55,7 @@ pub mod api {
     pub use crate::gaming::advanced_optimizations::{
         AdvancedGamingConfig, AdvancedGamingOptimizer, PerformanceProfile,
     };
-    pub use crate::networking::{AdvancedFirewallManager, BoltAdvancedNetworking, QUICSocketProxy};
+    pub use crate::networking::{AdvancedFirewallManager, QUICSocketProxy};
     pub use crate::nova_api::{
         BoltNovaRuntime, CapsuleHandle, CapsuleMetrics, NovaContainerConfig, NovaStatus,
     };

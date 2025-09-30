@@ -272,8 +272,8 @@ impl MigrationHelper {
             "docker-compose.*.yaml",
         ];
 
-        // Search in current directory (simplified without glob)
-        for pattern in &["docker-compose.yml", "docker-compose.yaml"] {
+        // Search in current directory using all patterns
+        for pattern in &compose_patterns[..4] {  // Skip wildcard patterns for now
             if std::path::Path::new(pattern).exists() {
                 let path = pattern.to_string();
                 if !analysis.compose_files.contains(&path) {

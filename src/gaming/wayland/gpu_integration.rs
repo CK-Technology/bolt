@@ -184,7 +184,7 @@ impl WaylandGpuIntegration {
         container_id: &str,
         vendor: GPUVendor,
     ) -> Result<()> {
-        info!("    🌊 Setting up Wayland GPU environment");
+        info!("    🌊 Setting up Wayland GPU environment for container {}", container_id);
 
         unsafe {
             // Core Wayland environment
@@ -232,7 +232,7 @@ impl WaylandGpuIntegration {
     }
 
     async fn setup_kde_wayland_optimizations(&self, container_id: &str) -> Result<()> {
-        info!("    🔷 Applying KDE/Plasma Wayland optimizations");
+        info!("    🔷 Applying KDE/Plasma Wayland optimizations for container {}", container_id);
 
         unsafe {
             // KDE/Plasma specific optimizations

@@ -1,7 +1,6 @@
 use crate::{BoltError, Result};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
-use std::collections::HashMap;
 use std::time::SystemTime;
 use tokio::process::Command as AsyncCommand;
 use tracing::{debug, info, warn};

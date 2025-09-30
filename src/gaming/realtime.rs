@@ -335,12 +335,31 @@ impl RealtimeOptimizer {
     }
 
     async fn get_cpu_count(&self) -> Result<u32> {
-        // Count online CPUs
+        // Count online CPUs from /sys
         let online_cpus = fs::read_to_string("/sys/devices/system/cpu/online")?;
 
-        // Parse range (e.g., "0-7" or "0-3,6-7")
-        // For simplicity, assume 8 CPUs
-        Ok(8)
+        // Parse CPU range (e.g., "0-7" -> 8 CPUs, "0-3,6-7" -> 6 CPUs)
+        let count = online_cpus
+            .trim()
+            .split(',')
+            .map(|range| {
+                if range.contains('-') {
+                    let parts: Vec<&str> = range.split('-').collect();
+                    if parts.len() == 2 {
+                        let start: u32 = parts[0].parse().unwrap_or(0);
+                        let end: u32 = parts[1].parse().unwrap_or(0);
+                        end - start + 1
+                    } else {
+                        1
+                    }
+                } else {
+                    1
+                }
+            })
+            .sum();
+
+        debug!("Detected {} online CPUs from: {}", count, online_cpus.trim());
+        Ok(count)
     }
 
     async fn setup_gaming_governor(&mut self) -> Result<()> {
