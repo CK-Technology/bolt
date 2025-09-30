@@ -220,6 +220,32 @@ pub struct PackageManifest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifestList {
+    #[serde(rename = "schemaVersion")]
+    pub schema_version: u32,
+    #[serde(rename = "mediaType")]
+    pub media_type: String,
+    pub manifests: Vec<ManifestDescriptor>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifestDescriptor {
+    #[serde(rename = "mediaType")]
+    pub media_type: String,
+    pub digest: String,
+    pub size: u64,
+    pub platform: Platform,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Platform {
+    pub architecture: String,
+    pub os: String,
+    #[serde(default)]
+    pub variant: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlobDescriptor {
     #[serde(rename = "mediaType")]
     pub media_type: String,
@@ -509,8 +535,17 @@ impl DriftRegistryClient {
             }
         }
 
-        let manifest: PackageManifest =
-            serde_json::from_slice(&bytes).context("Failed to deserialize manifest payload")?;
+        // Check if this is a manifest list (multi-arch)
+        let manifest = if let Ok(manifest_list) = serde_json::from_slice::<ManifestList>(&bytes) {
+            // It's a manifest list - select the right platform
+            debug!("Manifest list detected, selecting platform manifest");
+            self.select_platform_manifest(&repository, &reference, &manifest_list, token.as_deref())
+                .await?
+        } else {
+            // Try to parse as regular manifest
+            serde_json::from_slice::<PackageManifest>(&bytes)
+                .context("Failed to deserialize manifest payload (not a manifest list or valid manifest)")?
+        };
 
         {
             let mut cache = self.cache.write().await;
@@ -1179,6 +1214,76 @@ impl DriftRegistryClient {
             .context("Failed to parse Docker Hub token response")?;
 
         Ok(token_response.token)
+    }
+
+    /// Select the appropriate platform manifest from a manifest list
+    async fn select_platform_manifest(
+        &self,
+        repository: &str,
+        _reference: &str,
+        manifest_list: &ManifestList,
+        token: Option<&str>,
+    ) -> Result<PackageManifest> {
+        // Detect current platform
+        let target_os = std::env::consts::OS;
+        let target_arch = std::env::consts::ARCH;
+
+        debug!("Selecting manifest for platform: {}/{}", target_os, target_arch);
+
+        // Find matching platform
+        let selected = manifest_list
+            .manifests
+            .iter()
+            .find(|m| {
+                m.platform.os == target_os
+                    && (m.platform.architecture == target_arch ||
+                        (target_arch == "x86_64" && m.platform.architecture == "amd64"))
+            })
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "No manifest found for platform {}/{}",
+                    target_os,
+                    target_arch
+                )
+            })?;
+
+        info!("Selected manifest digest: {} for {}/{}", selected.digest, target_os, target_arch);
+
+        // Fetch the specific platform manifest by digest
+        let url = format!(
+            "{}/v2/{}/manifests/{}",
+            self.endpoint, repository, selected.digest
+        );
+
+        let mut request = self.client.get(&url).header(
+            ACCEPT,
+            "application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json",
+        );
+
+        if let Some(token_value) = token {
+            request = request.bearer_auth(token_value);
+        } else {
+            request = self.with_auth(request);
+        }
+
+        let response = request
+            .send()
+            .await
+            .context("Failed to fetch platform-specific manifest")?;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!(
+                "Failed to fetch manifest by digest {} (status: {})",
+                selected.digest,
+                response.status()
+            ));
+        }
+
+        let bytes = response.bytes().await?;
+        let manifest: PackageManifest = serde_json::from_slice(&bytes)
+            .context("Failed to deserialize platform-specific manifest")?;
+
+        Ok(manifest)
     }
 
     /// Calculate SHA256 digest of a file

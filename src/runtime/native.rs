@@ -921,8 +921,32 @@ impl BoltNativeRuntime {
             user_ns.set_typ(LinuxNamespaceType::User);
             namespaces.push(user_ns);
 
-            // TODO: Add uid/gid mappings for rootless containers
-            // The oci_spec API for LinuxIdMapping needs to be investigated
+            // Add uid/gid mappings for rootless containers
+            // Map current user to root inside container
+            let current_uid = nix::unistd::getuid().as_raw();
+            let current_gid = nix::unistd::getgid().as_raw();
+
+            let uid_mappings = vec![LinuxIdMappingBuilder::default()
+                .container_id(0u32) // Root in container
+                .host_id(current_uid)
+                .size(1u32)
+                .build()
+                .context("Failed to build uid mapping")?];
+
+            let gid_mappings = vec![LinuxIdMappingBuilder::default()
+                .container_id(0u32) // Root in container
+                .host_id(current_gid)
+                .size(1u32)
+                .build()
+                .context("Failed to build gid mapping")?];
+
+            linux.set_uid_mappings(Some(uid_mappings));
+            linux.set_gid_mappings(Some(gid_mappings));
+
+            info!(
+                "✅ Rootless mode: mapping host uid/gid {}:{} to container root",
+                current_uid, current_gid
+            );
         }
 
         linux.set_namespaces(Some(namespaces));

@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use anyhow::Result;
-use quinn::{ClientConfig, Connection, ConnectionError, Endpoint, VarInt};
+use quinn::{ClientConfig, Connection, ConnectionError, Endpoint, VarInt, crypto::rustls::QuicServerConfig};
 use rcgen::generate_simple_self_signed;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName};
@@ -97,16 +97,41 @@ impl RealQUICServer {
 
     /// Setup QUIC endpoint with TLS configuration
     async fn setup_quic_endpoint(&mut self) -> Result<()> {
-        info!("🔐 Setting up QUIC endpoint (stub implementation)");
+        info!("🔐 Setting up QUIC endpoint with rustls certificates");
 
-        // TODO: Fix rustls version compatibility and implement proper certificates
-        info!("⚠️ QUIC server not fully implemented due to rustls version conflicts");
-        info!("  • This is a compilation stub");
-        info!("  • Proper certificate handling needed");
-        info!("  • Quinn/rustls version alignment required");
+        // Generate self-signed certificate
+        let cert = self.generate_self_signed_cert()?;
+        let cert_der = cert.serialize_der()?;
+        let key_der = cert.serialize_private_key_der();
 
-        // For now, skip actual endpoint creation to fix compilation
-        info!("  ✓ QUIC endpoint setup skipped (stub)");
+        // Create rustls server config
+        let mut server_crypto = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![CertificateDer::from(cert_der)],
+                rustls::pki_types::PrivateKeyDer::try_from(key_der).map_err(|e| anyhow::anyhow!("Invalid private key: {:?}", e))?
+            )?;
+
+        server_crypto.alpn_protocols = vec![b"bolt-quic".to_vec()];
+
+        let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(server_crypto)?));
+
+        // Configure transport parameters
+        let mut transport = quinn::TransportConfig::default();
+        transport.max_concurrent_bidi_streams(VarInt::from_u32(100));
+        transport.max_concurrent_uni_streams(VarInt::from_u32(100));
+        transport.keep_alive_interval(Some(Duration::from_secs(5)));
+        server_config.transport_config(Arc::new(transport));
+
+        // Create endpoint
+        let bind_addr = format!("{}:{}", self.config.bind_address, self.config.port)
+            .parse()
+            .unwrap();
+
+        let endpoint = Endpoint::server(server_config, bind_addr)?;
+        info!("✅ QUIC endpoint listening on {}", bind_addr);
+
+        self.endpoint = Some(endpoint);
         Ok(())
     }
 

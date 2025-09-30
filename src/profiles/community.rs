@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use super::ProfileRepository;
+use crate::config::UserConfig;
 use crate::optimizations::OptimizationProfile;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,10 +35,11 @@ pub async fn submit_profile(
     repository: &ProfileRepository,
 ) -> Result<()> {
     let client = reqwest::Client::new();
+    let user_config = UserConfig::load().unwrap_or_default();
 
     let submission = ProfileSubmission {
         profile: profile.clone(),
-        author_email: "user@example.com".to_string(), // TODO: Get from user config
+        author_email: user_config.get_user_email_or_default(),
         description: profile.description.clone(),
         tags: vec!["gaming".to_string()], // TODO: Auto-generate tags
         compatible_games: vec![],         // TODO: Auto-detect compatible games
@@ -61,11 +63,12 @@ pub async fn submit_profile(
 
 pub async fn submit_rating(profile_name: &str, rating: f32) -> Result<()> {
     let client = reqwest::Client::new();
+    let user_config = UserConfig::load().unwrap_or_default();
 
     let rating_submission = RatingSubmission {
         profile_name: profile_name.to_string(),
         rating,
-        user_id: "anonymous".to_string(), // TODO: Get from user config
+        user_id: user_config.get_user_id_or_anonymous(),
         comment: None,
     };
 
@@ -87,12 +90,13 @@ pub async fn submit_rating(profile_name: &str, rating: f32) -> Result<()> {
 
 pub async fn report_profile(profile_name: &str, reason: &str) -> Result<()> {
     let client = reqwest::Client::new();
+    let user_config = UserConfig::load().unwrap_or_default();
 
     let report = ProfileReport {
         profile_name: profile_name.to_string(),
         reason: reason.to_string(),
         details: "User report".to_string(),
-        reporter_id: "anonymous".to_string(), // TODO: Get from user config
+        reporter_id: user_config.get_user_id_or_anonymous(),
     };
 
     let response = client

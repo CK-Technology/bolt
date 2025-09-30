@@ -24,7 +24,7 @@
 ### 🔧 Known Issues
 - ⚠️ 76 compiler warnings (42 unused variables, 10 unused fields, stub implementations)
 - ⚠️ 34 TODO/FIXME markers in source code (mostly future work placeholders)
-- ✅ Docker Hub authentication implemented (auth works, manifest parsing in progress)
+- ✅ Docker Hub pulling WORKS (auth + manifest list parsing complete!)
 - ⚠️ Some gaming features are stubs (input lag monitoring, frame pacing details)
 
 ---

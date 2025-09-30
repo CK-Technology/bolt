@@ -548,10 +548,24 @@ async fn main() -> Result<()> {
                         )
                     });
                     info!("Creating {} snapshot '{}'", snapshot_type, snapshot_name);
-                    if let Some(desc) = description {
+                    if let Some(ref desc) = description {
                         info!("Description: {}", desc);
                     }
-                    // TODO: Implement snapshot creation
+
+                    use bolt::capsules::snapshots::SnapshotType as SnapType;
+                    let snap_type = match snapshot_type.as_str() {
+                        "manual" => SnapType::Manual,
+                        "auto" => SnapType::Auto,
+                        "daily" => SnapType::Daily,
+                        "weekly" => SnapType::Weekly,
+                        _ => SnapType::Manual,
+                    };
+
+                    let snapshot_manager = bolt::capsules::snapshots::SnapshotManager::new().await?;
+                    snapshot_manager
+                        .create_snapshot(&snapshot_name, snap_type, description.as_deref())
+                        .await?;
+
                     info!("✅ Snapshot '{}' created successfully", snapshot_name);
                 }
                 cli::SnapshotCommands::List {
@@ -562,11 +576,24 @@ async fn main() -> Result<()> {
                     if let Some(filter) = filter_type {
                         info!("Filtering by type: {}", filter);
                     }
-                    // TODO: Implement snapshot listing
-                    if verbose {
-                        println!("No snapshots found (verbose mode)");
+
+                    let snapshot_manager = bolt::capsules::snapshots::SnapshotManager::new().await?;
+                    let snapshots = snapshot_manager.list_snapshots().await?;
+
+                    if snapshots.is_empty() {
+                        if verbose {
+                            println!("No snapshots found (verbose mode)");
+                        } else {
+                            println!("No snapshots found");
+                        }
                     } else {
-                        println!("No snapshots found");
+                        for snapshot in snapshots {
+                            if verbose {
+                                println!("{} - {} ({:?})", snapshot.name, snapshot.created_at, snapshot.snapshot_type);
+                            } else {
+                                println!("{}", snapshot.name);
+                            }
+                        }
                     }
                 }
                 cli::SnapshotCommands::Show { snapshot } => {
@@ -576,12 +603,18 @@ async fn main() -> Result<()> {
                 }
                 cli::SnapshotCommands::Rollback { snapshot, force } => {
                     info!("Rolling back to snapshot '{}' (force: {})", snapshot, force);
-                    // TODO: Implement snapshot rollback
+
+                    let snapshot_manager = bolt::capsules::snapshots::SnapshotManager::new().await?;
+                    snapshot_manager.rollback_to_snapshot(&snapshot).await?;
+
                     info!("✅ Rolled back to snapshot '{}' successfully", snapshot);
                 }
                 cli::SnapshotCommands::Delete { snapshot, force } => {
                     info!("Deleting snapshot '{}' (force: {})", snapshot, force);
-                    // TODO: Implement snapshot deletion
+
+                    let snapshot_manager = bolt::capsules::snapshots::SnapshotManager::new().await?;
+                    snapshot_manager.delete_snapshot(&snapshot).await?;
+
                     info!("✅ Snapshot '{}' deleted successfully", snapshot);
                 }
                 cli::SnapshotCommands::Cleanup { .. } => {

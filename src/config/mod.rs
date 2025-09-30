@@ -4,6 +4,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
+pub mod user;
+pub use user::UserConfig;
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BoltFile {
     pub project: String,
