@@ -173,7 +173,7 @@ impl AmdManager {
     }
 
     async fn setup_dri_access(&self, container_id: &str) -> Result<()> {
-        info!("📱 Setting up DRI device access");
+        info!("📱 Setting up DRI device access for container {}", container_id);
 
         // Check for DRI devices
         let dri_path = Path::new("/dev/dri");
@@ -202,7 +202,7 @@ impl AmdManager {
         container_id: &str,
         amd_config: &crate::config::AmdConfig,
     ) -> Result<()> {
-        info!("⚡ Setting up ROCm access");
+        info!("⚡ Setting up ROCm access for container {}", container_id);
 
         // Set ROCm environment variables
         if let Some(device_id) = amd_config.device {
@@ -221,7 +221,7 @@ impl AmdManager {
     }
 
     async fn setup_vulkan_access(&self, container_id: &str) -> Result<()> {
-        info!("🎮 Setting up Vulkan access for AMD");
+        info!("🎮 Setting up Vulkan access for AMD in container {}", container_id);
 
         // Check for AMD Vulkan driver
         let vulkan_paths = [

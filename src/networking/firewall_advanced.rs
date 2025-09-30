@@ -678,8 +678,8 @@ impl AdvancedFirewallManager {
         }
 
         // Within each group, sort by target and protocol
-        for (table, chains) in table_groups {
-            for (chain, mut rules) in chains {
+        for (_table, chains) in table_groups {
+            for (_chain, mut rules) in chains {
                 rules.sort_by(|a, b| {
                     a.target
                         .cmp(&b.target)

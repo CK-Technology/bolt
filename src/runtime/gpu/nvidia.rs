@@ -836,7 +836,7 @@ impl NvidiaManager {
         nvidia_config: &crate::config::NvidiaConfig,
         device_indices: &[u32],
     ) -> Result<()> {
-        info!("🔧 Configuring CUDA environment");
+        info!("🔧 Configuring CUDA environment for container {}", container_id);
 
         // Set CUDA_VISIBLE_DEVICES
         let cuda_devices = device_indices
@@ -934,7 +934,7 @@ impl NvidiaManager {
         container_id: &str,
         nvidia_config: &crate::config::NvidiaConfig,
     ) -> Result<()> {
-        info!("🐳 Configuring nvidia-container-runtime");
+        info!("🐳 Configuring nvidia-container-runtime for container {}", container_id);
 
         // This would integrate with the actual nvidia-container-runtime
         // to properly configure GPU access in the container
@@ -1592,7 +1592,7 @@ impl NvidiaManager {
         container_id: &str,
         device_indices: &[u32],
     ) -> Result<()> {
-        info!("    🔧 Configuring NVIDIA Open GPU access");
+        info!("    🔧 Configuring NVIDIA Open GPU access for container {}", container_id);
 
         // NVIDIA Open uses both NVIDIA devices AND DRI devices
         let mut devices = Vec::new();
@@ -1635,7 +1635,7 @@ impl NvidiaManager {
         container_id: &str,
         device_indices: &[u32],
     ) -> Result<()> {
-        info!("    🔧 Configuring nouveau GPU access");
+        info!("    🔧 Configuring nouveau GPU access for container {}", container_id);
 
         // For nouveau, we primarily need DRI devices
         let mut dri_devices = Vec::new();

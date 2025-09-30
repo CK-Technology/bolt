@@ -72,6 +72,7 @@ impl RealQUICServer {
     /// Create new real QUIC server for container networking
     pub async fn new(network_config: NetworkConfig) -> Result<Self> {
         info!("🚀 Initializing real QUIC server with Quinn");
+        debug!("Network config: {:?}", network_config);
 
         let config = QUICServerConfig::default();
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
@@ -403,7 +404,7 @@ impl RealQUICServer {
         container_port: u16,
         connections: Arc<RwLock<HashMap<String, QUICConnectionInfo>>>,
     ) {
-        info!("🔄 Forwarding TCP to QUIC for container: {}", container_id);
+        info!("🔄 Forwarding TCP to QUIC for container: {} on port {}", container_id, container_port);
 
         // Find QUIC connection for container
         let quic_conn = {

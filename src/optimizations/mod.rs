@@ -143,6 +143,7 @@ impl OptimizationManager {
         profile: &OptimizationProfile,
         context: &OptimizationContext,
     ) -> Result<Vec<OptimizationStep>> {
+        debug!("Planning optimizations for context: {:?}", context);
         let mut steps = Vec::new();
 
         steps.extend(profile.cpu_optimizations.to_steps());
