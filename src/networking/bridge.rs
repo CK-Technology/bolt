@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// Bridge network configuration
 #[derive(Debug, Clone)]
@@ -42,6 +42,12 @@ pub struct BridgeManager {
     bridges: Arc<RwLock<HashMap<String, BridgeConfig>>>,
     ip_allocation: Arc<RwLock<HashMap<String, IPAllocation>>>,
     interfaces: Arc<RwLock<HashMap<String, BridgeInterface>>>,
+}
+
+impl Default for BridgeManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl BridgeManager {
@@ -202,7 +208,7 @@ impl BridgeManager {
 
         // Generate veth pair names
         let host_veth = format!("veth-{}", &container_id[..8]);
-        let container_veth = format!("eth0");
+        let container_veth = "eth0".to_string();
 
         // Create veth pair and connect to bridge
         self.create_veth_pair(&host_veth, &container_veth, &bridge_config.name)

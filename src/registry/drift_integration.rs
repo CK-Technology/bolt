@@ -1,24 +1,40 @@
 use anyhow::{Context, Result};
-use reqwest::Client;
+use futures_util::StreamExt;
+use reqwest::{Client, StatusCode, header::ACCEPT};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
+use tokio::{fs, io::AsyncWriteExt};
 use tracing::{debug, info, warn};
 
-use crate::runtime::storage::ghostbay::GhostbayClient;
+use sha2::{Digest, Sha256};
+
+use crate::runtime::storage::object_store::ObjectStore;
 
 /// Enhanced Drift registry integration for Bolt ecosystem
 /// Provides seamless package management across Drift, Ghostbay, and GhostWire
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DriftRegistryClient {
     pub endpoint: String,
     pub client: Client,
-    pub ghostbay_client: Option<GhostbayClient>,
+    pub object_store: Option<Arc<dyn ObjectStore>>,
     pub cache: Arc<RwLock<PackageCache>>,
     pub features: DriftFeatures,
     pub gaming_config: GamingPackageConfig,
+    pub credentials: Option<(String, String)>,
+}
+
+impl std::fmt::Debug for DriftRegistryClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DriftRegistryClient")
+            .field("endpoint", &self.endpoint)
+            .field("has_object_store", &self.object_store.is_some())
+            .field("features", &self.features)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -182,17 +198,30 @@ pub struct PackageCache {
     pub last_updated: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ResolvedManifest {
+    pub repository: String,
+    pub reference: String,
+    pub manifest: PackageManifest,
+    pub registry_digest: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageManifest {
+    #[serde(rename = "schemaVersion")]
     pub schema_version: u32,
+    #[serde(rename = "mediaType")]
     pub media_type: String,
     pub config: BlobDescriptor,
+    #[serde(default)]
     pub layers: Vec<LayerDescriptor>,
+    #[serde(default)]
     pub annotations: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlobDescriptor {
+    #[serde(rename = "mediaType")]
     pub media_type: String,
     pub size: u64,
     pub digest: String,
@@ -200,6 +229,7 @@ pub struct BlobDescriptor {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayerDescriptor {
+    #[serde(rename = "mediaType")]
     pub media_type: String,
     pub size: u64,
     pub digest: String,
@@ -207,15 +237,23 @@ pub struct LayerDescriptor {
     pub annotations: Option<HashMap<String, String>>,
 
     // Bolt-specific layer metadata
+    #[serde(default)]
     pub gaming_assets: bool,
+    #[serde(default)]
     pub system_libraries: bool,
+    #[serde(default)]
     pub user_data: bool,
+    #[serde(default)]
     pub cacheable: bool,
 }
 
 impl DriftRegistryClient {
-    /// Create a new Drift registry client with Ghostbay integration
-    pub async fn new(endpoint: String, ghostbay_client: Option<GhostbayClient>) -> Result<Self> {
+    /// Create a new Drift registry client with optional object store integration
+    pub async fn new(
+        endpoint: String,
+        object_store: Option<Arc<dyn ObjectStore>>,
+        credentials: Option<(String, String)>,
+    ) -> Result<Self> {
         info!("🌊 Initializing Drift Registry Client");
         info!("  Registry: {}", endpoint);
 
@@ -271,7 +309,7 @@ impl DriftRegistryClient {
         Ok(Self {
             endpoint,
             client,
-            ghostbay_client,
+            object_store,
             cache: Arc::new(RwLock::new(PackageCache::default())),
             features,
             gaming_config: GamingPackageConfig {
@@ -282,7 +320,324 @@ impl DriftRegistryClient {
                 auto_optimization: true,
                 ghostforge_sync: true,
             },
+            credentials,
         })
+    }
+
+    #[cfg(test)]
+    pub fn new_test(object_store: Option<Arc<dyn ObjectStore>>) -> Self {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .user_agent("Bolt/1.0 (Drift-Registry-Client-Test)")
+            .build()
+            .expect("failed to build reqwest client");
+
+        Self {
+            endpoint: "https://registry.test".to_string(),
+            client,
+            object_store,
+            cache: Arc::new(RwLock::new(PackageCache::default())),
+            features: DriftFeatures {
+                package_signing: false,
+                vulnerability_scanning: false,
+                gaming_optimization: false,
+                p2p_distribution: false,
+                ghostwire_integration: false,
+                multi_arch_support: true,
+            },
+            gaming_config: GamingPackageConfig {
+                enable_proton_metadata: true,
+                gpu_compatibility_checking: true,
+                steam_integration: true,
+                performance_profiling: true,
+                auto_optimization: true,
+                ghostforge_sync: true,
+            },
+            credentials: None,
+        }
+    }
+
+    fn with_auth(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if let Some((ref user, ref pass)) = self.credentials {
+            builder.basic_auth(user, Some(pass))
+        } else {
+            builder
+        }
+    }
+
+    fn parse_reference(image: &str) -> Result<(String, String)> {
+        if let Some((repository, digest)) = image.split_once('@') {
+            return Ok((repository.to_string(), digest.to_string()));
+        }
+
+        if let Some((repository, tag)) = image.rsplit_once(':') {
+            if tag.contains('/') {
+                Ok((image.to_string(), "latest".to_string()))
+            } else {
+                Ok((repository.to_string(), tag.to_string()))
+            }
+        } else {
+            Ok((image.to_string(), "latest".to_string()))
+        }
+    }
+
+    fn manifest_cache_key(repository: &str, reference: &str) -> String {
+        format!("{}@{}", repository, reference)
+    }
+
+    pub async fn resolve_manifest(&self, image: &str) -> Result<ResolvedManifest> {
+        let (repository, reference) = Self::parse_reference(image)?;
+
+        if let Some(ref object_store) = self.object_store {
+            match object_store.fetch_manifest(&repository, &reference).await {
+                Ok(Some(bytes)) => {
+                    debug!(
+                        "Resolved manifest {}@{} from object store cache",
+                        repository, reference
+                    );
+
+                    let manifest: PackageManifest = serde_json::from_slice(&bytes)
+                        .context("Failed to deserialize cached manifest payload")?;
+
+                    let registry_digest = Some(format!("sha256:{:x}", Sha256::digest(&bytes)));
+
+                    {
+                        let mut cache = self.cache.write().await;
+                        cache.manifests.insert(
+                            Self::manifest_cache_key(&repository, &reference),
+                            manifest.clone(),
+                        );
+                        cache.last_updated = Some(chrono::Utc::now());
+                    }
+
+                    return Ok(ResolvedManifest {
+                        repository,
+                        reference,
+                        manifest,
+                        registry_digest,
+                    });
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    warn!(
+                        "Failed to read manifest {}@{} from object store: {}",
+                        repository, reference, err
+                    );
+                }
+            }
+        }
+
+        // First check if we need to authenticate
+        self.ensure_authenticated().await?;
+
+        let url = format!(
+            "{}/v2/{}/manifests/{}",
+            self.endpoint, repository, reference
+        );
+
+        debug!("Fetching manifest from {}", url);
+
+        let accept_header = "application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json";
+        let response = self
+            .with_auth(self.client.get(&url).header(ACCEPT, accept_header))
+            .send()
+            .await
+            .with_context(|| format!("Failed to request manifest for {}", image))?;
+
+        match response.status() {
+            StatusCode::OK => {}
+            StatusCode::NOT_FOUND => {
+                return Err(anyhow::anyhow!("Image not found in registry: {}", image));
+            }
+            status => {
+                return Err(anyhow::anyhow!(
+                    "Failed to fetch manifest {} (status: {})",
+                    image,
+                    status
+                ));
+            }
+        }
+
+        let registry_digest = response
+            .headers()
+            .get("Docker-Content-Digest")
+            .and_then(|header| header.to_str().ok())
+            .map(|s| s.to_string());
+
+        let bytes = response
+            .bytes()
+            .await
+            .context("Failed to read manifest body from registry")?;
+
+        if let Some(ref object_store) = self.object_store {
+            if let Err(err) = object_store
+                .store_manifest(&repository, &reference, &bytes)
+                .await
+            {
+                warn!(
+                    "Failed to persist manifest {}@{} to object store: {}",
+                    repository, reference, err
+                );
+            }
+        }
+
+        let manifest: PackageManifest =
+            serde_json::from_slice(&bytes).context("Failed to deserialize manifest payload")?;
+
+        {
+            let mut cache = self.cache.write().await;
+            cache.manifests.insert(
+                Self::manifest_cache_key(&repository, &reference),
+                manifest.clone(),
+            );
+            cache.last_updated = Some(chrono::Utc::now());
+        }
+
+        Ok(ResolvedManifest {
+            repository,
+            reference,
+            manifest,
+            registry_digest,
+        })
+    }
+
+    pub async fn download_blob_to(
+        &self,
+        repository: &str,
+        digest: &str,
+        destination: &Path,
+    ) -> Result<()> {
+        if destination.exists() {
+            return Ok(());
+        }
+
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)
+                .await
+                .with_context(|| format!("Failed to prepare directory {}", parent.display()))?;
+        }
+
+        let url = format!("{}/v2/{}/blobs/{}", self.endpoint, repository, digest);
+        debug!("Downloading blob {} from {}", digest, url);
+
+        let response = self
+            .with_auth(self.client.get(&url))
+            .send()
+            .await
+            .with_context(|| format!("Failed to download blob {}", digest))?;
+
+        match response.status() {
+            StatusCode::OK => {}
+            StatusCode::ACCEPTED => {}
+            StatusCode::NOT_FOUND => {
+                return Err(anyhow::anyhow!(
+                    "Layer {} not found in repository {}",
+                    digest,
+                    repository
+                ));
+            }
+            status => {
+                return Err(anyhow::anyhow!(
+                    "Failed to download blob {} (status: {})",
+                    digest,
+                    status
+                ));
+            }
+        }
+
+        let temp_path = destination.with_extension("download");
+        let mut file = fs::File::create(&temp_path)
+            .await
+            .with_context(|| format!("Failed to create temp file at {}", temp_path.display()))?;
+
+        let mut hasher = Sha256::new();
+        let mut stream = response.bytes_stream();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.context("Failed to read blob stream")?;
+            hasher.update(&chunk);
+            file.write_all(&chunk)
+                .await
+                .context("Failed to write blob to disk")?;
+        }
+
+        file.flush().await.context("Failed to flush blob to disk")?;
+        drop(file);
+
+        let computed_digest = format!("sha256:{:x}", hasher.finalize());
+        if let Some((algo, _)) = digest.split_once(':') {
+            if algo.eq_ignore_ascii_case("sha256") && computed_digest != digest {
+                fs::remove_file(&temp_path).await.ok();
+                return Err(anyhow::anyhow!(
+                    "Digest mismatch for {} (expected {}, got {})",
+                    destination.display(),
+                    digest,
+                    computed_digest
+                ));
+            }
+        }
+
+        fs::rename(&temp_path, destination)
+            .await
+            .with_context(|| format!("Failed to finalize blob at {}", destination.display()))?;
+
+        Ok(())
+    }
+
+    pub async fn download_config_to(
+        &self,
+        repository: &str,
+        digest: &str,
+        destination: &Path,
+    ) -> Result<()> {
+        if destination.exists() {
+            return Ok(());
+        }
+
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)
+                .await
+                .with_context(|| format!("Failed to prepare directory {}", parent.display()))?;
+        }
+
+        if let Some(ref object_store) = self.object_store {
+            match object_store
+                .download_cached_config(repository, digest, destination)
+                .await
+            {
+                Ok(true) => {
+                    debug!(
+                        "Config {} fetched from object store cache for {}",
+                        digest, repository
+                    );
+                    return Ok(());
+                }
+                Ok(false) => {}
+                Err(err) => {
+                    warn!(
+                        "Object store config cache check failed for {} ({}): {}",
+                        digest, repository, err
+                    );
+                }
+            }
+        }
+
+        self.download_blob_to(repository, digest, destination)
+            .await?;
+
+        if let Some(ref object_store) = self.object_store {
+            if let Err(err) = object_store
+                .upload_config(repository, digest, destination)
+                .await
+            {
+                warn!(
+                    "Failed to upload config {} for {} to object store: {}",
+                    digest, repository, err
+                );
+            }
+        }
+
+        Ok(())
     }
 
     /// Detect registry features by querying the API
@@ -398,7 +753,7 @@ impl DriftRegistryClient {
             warn!("P2P pull failed, falling back to registry");
         }
 
-        // Pull from registry with Ghostbay optimization
+        // Pull from registry with object store optimization
         let path = self.pull_from_registry(&package_ref).await?;
 
         // Async background P2P sharing for future requests
@@ -442,39 +797,47 @@ impl DriftRegistryClient {
         Ok(download_path)
     }
 
-    /// Pull package from registry with Ghostbay optimization
+    /// Pull package from registry with object store optimization
     async fn pull_from_registry(&self, package_ref: &str) -> Result<String> {
         debug!("🌊 Pulling from registry: {}", package_ref);
 
         // Get package manifest
-        let manifest = self.get_package_manifest(package_ref).await?;
+        let resolved = self.resolve_manifest(package_ref).await?;
+        let manifest = &resolved.manifest;
 
-        // If Ghostbay is available, use optimized download
-        if let Some(ref ghostbay) = self.ghostbay_client {
+        // If an object store cache is available, use optimized download
+        if let Some(ref object_store) = self.object_store {
             return self
-                .pull_via_ghostbay(package_ref, &manifest, ghostbay)
+                .pull_via_object_store(
+                    package_ref,
+                    &resolved.repository,
+                    manifest,
+                    object_store.as_ref(),
+                )
                 .await;
         }
 
         // Standard registry pull
-        self.pull_standard(package_ref, &manifest).await
+        self.pull_standard(package_ref, &resolved.repository, manifest)
+            .await
     }
 
-    /// Optimized pull using Ghostbay storage
-    async fn pull_via_ghostbay(
+    /// Optimized pull using configured object store cache
+    async fn pull_via_object_store(
         &self,
         package_ref: &str,
+        repository: &str,
         manifest: &PackageManifest,
-        ghostbay: &GhostbayClient,
+        object_store: &(dyn ObjectStore),
     ) -> Result<String> {
-        debug!("👻 Using Ghostbay optimized pull");
+        debug!("🪣 Using object store optimized pull");
 
-        // Check if layers are already cached in Ghostbay
+        // Check if layers are already cached in the object store
         let mut cached_layers = Vec::new();
         let mut missing_layers = Vec::new();
 
         for layer in &manifest.layers {
-            if ghostbay.blob_exists(&layer.digest).await? {
+            if object_store.blob_exists(repository, &layer.digest).await? {
                 cached_layers.push(layer);
             } else {
                 missing_layers.push(layer);
@@ -489,29 +852,35 @@ impl DriftRegistryClient {
 
         // Download missing layers in parallel
         if !missing_layers.is_empty() {
-            self.download_missing_layers(&missing_layers).await?;
+            self.download_missing_layers(repository, &missing_layers)
+                .await?;
         }
 
         // Assemble final image
         let image_path = self
-            .assemble_image_from_layers(package_ref, &manifest.layers)
+            .assemble_image_from_layers(package_ref, repository, &manifest.layers)
             .await?;
 
         Ok(image_path)
     }
 
-    /// Standard registry pull without Ghostbay
-    async fn pull_standard(&self, package_ref: &str, manifest: &PackageManifest) -> Result<String> {
+    /// Standard registry pull without object store assistance
+    async fn pull_standard(
+        &self,
+        package_ref: &str,
+        repository: &str,
+        manifest: &PackageManifest,
+    ) -> Result<String> {
         debug!("📦 Standard registry pull");
 
         // Download all layers
         for layer in &manifest.layers {
-            self.download_layer(&layer.digest).await?;
+            self.download_layer(repository, &layer.digest).await?;
         }
 
         // Assemble image
         let image_path = self
-            .assemble_image_from_layers(package_ref, &manifest.layers)
+            .assemble_image_from_layers(package_ref, repository, &manifest.layers)
             .await?;
 
         Ok(image_path)
@@ -552,7 +921,7 @@ impl DriftRegistryClient {
             .create_enhanced_manifest(&metadata, gaming_metadata)
             .await?;
 
-        // Upload layers to registry (and Ghostbay if available)
+        // Upload layers to registry (and object store if available)
         self.upload_package_layers(package_path, &manifest).await?;
 
         // Upload manifest
@@ -583,43 +952,52 @@ impl DriftRegistryClient {
         Ok("/tmp/package".to_string())
     }
 
-    async fn get_package_manifest(&self, _package_ref: &str) -> Result<PackageManifest> {
-        // Fetch manifest from registry
-        Ok(PackageManifest {
-            schema_version: 2,
-            media_type: "application/vnd.oci.image.manifest.v1+json".to_string(),
-            config: BlobDescriptor {
-                media_type: "application/vnd.oci.image.config.v1+json".to_string(),
-                size: 1024,
-                digest: "sha256:abcd1234".to_string(),
-            },
-            layers: vec![],
-            annotations: HashMap::new(),
-        })
-    }
-
     async fn share_via_p2p(&self, _package_ref: &str, _path: &str) -> Result<()> {
         // Share package via P2P mesh
         Ok(())
     }
 
-    async fn download_missing_layers(&self, _layers: &[&LayerDescriptor]) -> Result<()> {
-        // Download layers that aren't in Ghostbay
+    async fn download_missing_layers(
+        &self,
+        repository: &str,
+        layers: &[&LayerDescriptor],
+    ) -> Result<()> {
+        for layer in layers {
+            self.download_layer(repository, &layer.digest).await?;
+        }
         Ok(())
     }
 
     async fn assemble_image_from_layers(
         &self,
         _package_ref: &str,
+        repository: &str,
         _layers: &[LayerDescriptor],
     ) -> Result<String> {
-        // Assemble final container image
-        Ok("/var/lib/bolt/images/package".to_string())
+        let cache_dir = Self::layer_cache_dir(repository);
+        fs::create_dir_all(&cache_dir)
+            .await
+            .with_context(|| format!("Failed to ensure cache directory {}", cache_dir.display()))?;
+        Ok(cache_dir.to_string_lossy().to_string())
     }
 
-    async fn download_layer(&self, _digest: &str) -> Result<()> {
-        // Download individual layer
-        Ok(())
+    async fn download_layer(&self, repository: &str, digest: &str) -> Result<()> {
+        let cache_dir = Self::layer_cache_dir(repository);
+        let destination = cache_dir.join(Self::blob_filename(digest));
+        self.download_blob_to(repository, digest, &destination)
+            .await
+    }
+
+    fn layer_cache_dir(repository: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push("bolt");
+        path.push("layers");
+        path.push(repository.replace('/', "_"));
+        path
+    }
+
+    fn blob_filename(digest: &str) -> String {
+        digest.replace(':', "_")
     }
 
     async fn create_enhanced_manifest(
@@ -646,7 +1024,7 @@ impl DriftRegistryClient {
         _package_path: &str,
         _manifest: &PackageManifest,
     ) -> Result<()> {
-        // Upload layers to registry and Ghostbay
+        // Upload layers to registry and object store
         Ok(())
     }
 
@@ -707,5 +1085,213 @@ impl Default for GamingPackageConfig {
             auto_optimization: true,
             ghostforge_sync: true,
         }
+    }
+}
+
+// Enhanced registry client methods for better OCI support
+impl DriftRegistryClient {
+    /// Ensure the client is authenticated with the registry
+    async fn ensure_authenticated(&self) -> Result<()> {
+        // For Docker Hub and public registries, no auth needed for public images
+        if self.endpoint.contains("docker.io") || self.endpoint.contains("registry-1.docker.io") {
+            return Ok(());
+        }
+
+        debug!("Registry authentication check for: {}", self.endpoint);
+        Ok(())
+    }
+
+    /// Calculate SHA256 digest of a file
+    async fn calculate_file_digest(&self, path: &Path) -> Result<String> {
+        use sha2::{Digest, Sha256};
+        use tokio::io::AsyncReadExt;
+
+        let mut file = fs::File::open(path).await?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0; 8192];
+
+        loop {
+            let bytes_read = file.read(&mut buffer).await?;
+            if bytes_read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..bytes_read]);
+        }
+
+        Ok(hex::encode(hasher.finalize()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::BoltError;
+    use async_trait::async_trait;
+    use std::sync::Mutex;
+    use tempfile::tempdir;
+
+    struct TestObjectStore {
+        manifest: Mutex<Option<Vec<u8>>>,
+        config: Mutex<Option<Vec<u8>>>,
+    }
+
+    impl TestObjectStore {
+        fn new(manifest: Option<Vec<u8>>, config: Option<Vec<u8>>) -> Self {
+            Self {
+                manifest: Mutex::new(manifest),
+                config: Mutex::new(config),
+            }
+        }
+    }
+
+    type BoltResult<T> = crate::Result<T>;
+
+    #[async_trait]
+    impl ObjectStore for TestObjectStore {
+        async fn blob_exists(&self, _repository: &str, _digest: &str) -> BoltResult<bool> {
+            Ok(false)
+        }
+
+        async fn download_cached_layer(
+            &self,
+            _repository: &str,
+            _digest: &str,
+            _destination: &Path,
+        ) -> BoltResult<bool> {
+            Ok(false)
+        }
+
+        async fn upload_layer(
+            &self,
+            _repository: &str,
+            _digest: &str,
+            _source: &Path,
+        ) -> BoltResult<()> {
+            Ok(())
+        }
+
+        async fn download_cached_config(
+            &self,
+            _repository: &str,
+            _digest: &str,
+            destination: &Path,
+        ) -> BoltResult<bool> {
+            let maybe_bytes = self.config.lock().unwrap().clone();
+            if let Some(bytes) = maybe_bytes {
+                if let Some(parent) = destination.parent() {
+                    tokio::fs::create_dir_all(parent)
+                        .await
+                        .map_err(BoltError::from)?;
+                }
+                tokio::fs::write(destination, bytes)
+                    .await
+                    .map_err(BoltError::from)?;
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        }
+
+        async fn download_config(
+            &self,
+            _repository: &str,
+            _digest: &str,
+            _destination: &Path,
+        ) -> BoltResult<()> {
+            panic!("download_config should not be called in this test");
+        }
+
+        async fn upload_config(
+            &self,
+            _repository: &str,
+            _digest: &str,
+            _source: &Path,
+        ) -> BoltResult<()> {
+            panic!("upload_config should not be called in this test");
+        }
+
+        async fn fetch_manifest(
+            &self,
+            _repository: &str,
+            _reference: &str,
+        ) -> BoltResult<Option<Vec<u8>>> {
+            Ok(self.manifest.lock().unwrap().clone())
+        }
+
+        async fn store_manifest(
+            &self,
+            _repository: &str,
+            _reference: &str,
+            _data: &[u8],
+        ) -> BoltResult<()> {
+            panic!("store_manifest should not be called in this test");
+        }
+    }
+
+    fn test_registry_client(object_store: Option<Arc<dyn ObjectStore>>) -> DriftRegistryClient {
+        DriftRegistryClient {
+            endpoint: "https://example.registry".to_string(),
+            client: Client::builder().build().expect("failed to build client"),
+            object_store,
+            cache: Arc::new(RwLock::new(PackageCache::default())),
+            features: DriftFeatures::default(),
+            gaming_config: GamingPackageConfig::default(),
+            credentials: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_manifest_uses_object_store_cache() {
+        let manifest = PackageManifest {
+            schema_version: 2,
+            media_type: "application/vnd.oci.image.manifest.v1+json".into(),
+            config: BlobDescriptor {
+                media_type: "application/vnd.oci.image.config.v1+json".into(),
+                size: 512,
+                digest: "sha256:deadbeef".into(),
+            },
+            layers: vec![],
+            annotations: HashMap::new(),
+        };
+        let manifest_bytes = serde_json::to_vec(&manifest).expect("serialize manifest");
+
+        let client = test_registry_client(Some(Arc::new(TestObjectStore::new(
+            Some(manifest_bytes.clone()),
+            None,
+        ))));
+
+        let resolved = client
+            .resolve_manifest("library/bolt:latest")
+            .await
+            .expect("resolve manifest");
+
+        assert_eq!(resolved.manifest.config.digest, "sha256:deadbeef");
+        assert!(
+            resolved
+                .registry_digest
+                .expect("digest")
+                .starts_with("sha256:")
+        );
+
+        let cache = client.cache.read().await;
+        assert!(cache.manifests.contains_key("library/bolt@latest"));
+    }
+
+    #[tokio::test]
+    async fn download_config_prefers_cached_object_store() {
+        let client = test_registry_client(Some(Arc::new(TestObjectStore::new(
+            None,
+            Some(b"cached-config".to_vec()),
+        ))));
+        let temp = tempdir().expect("tempdir");
+        let dest = temp.path().join("config.json");
+
+        client
+            .download_config_to("library/bolt", "sha256:deadbeef", &dest)
+            .await
+            .expect("download config");
+
+        let contents = tokio::fs::read(&dest).await.expect("read cached config");
+        assert_eq!(contents, b"cached-config");
     }
 }

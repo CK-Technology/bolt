@@ -50,11 +50,11 @@ pub enum QuantizationType {
     FP16,
     INT8,
     INT4,
-    GGML_Q4_0,
-    GGML_Q4_1,
-    GGML_Q5_0,
-    GGML_Q5_1,
-    GGML_Q8_0,
+    GgmlQ4_0,
+    GgmlQ4_1,
+    GgmlQ5_0,
+    GgmlQ5_1,
+    GgmlQ8_0,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -300,11 +300,11 @@ impl AiOptimizer {
     ) -> QuantizationType {
         match (model_size, gpu_memory_gb) {
             (ModelSize::XLarge, mem) if mem >= 80 => QuantizationType::FP16,
-            (ModelSize::XLarge, _) => QuantizationType::GGML_Q4_0,
+            (ModelSize::XLarge, _) => QuantizationType::GgmlQ4_0,
             (ModelSize::Large, mem) if mem >= 48 => QuantizationType::FP16,
-            (ModelSize::Large, _) => QuantizationType::GGML_Q4_1,
+            (ModelSize::Large, _) => QuantizationType::GgmlQ4_1,
             (ModelSize::Medium, mem) if mem >= 16 => QuantizationType::FP16,
-            (ModelSize::Medium, _) => QuantizationType::GGML_Q5_0,
+            (ModelSize::Medium, _) => QuantizationType::GgmlQ5_0,
             (ModelSize::Small, _) => QuantizationType::FP16,
         }
     }

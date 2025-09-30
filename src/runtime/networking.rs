@@ -1,15 +1,18 @@
-use crate::{BoltError, Result};
-use anyhow::{anyhow, Context};
+use crate::Result;
+use anyhow::{Context, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::{debug, info, warn, error};
+use tokio::process::Command;
+use tokio::sync::{Mutex, RwLock};
+use tracing::{debug, info, warn};
 
 /// Bolt Network Manager - Revolutionary QUIC-based container networking
+/// This is now a wrapper around the enhanced NetworkManager
 #[derive(Debug)]
 pub struct BoltNetworkManager {
+    pub enhanced_manager: Arc<Mutex<crate::networking::NetworkManager>>,
     pub networks: Arc<RwLock<HashMap<String, BoltNetwork>>>,
     pub quic_fabric: QuicNetworkFabric,
     pub bridge_manager: BridgeManager,
@@ -39,6 +42,8 @@ pub struct ContainerNetworkInfo {
     pub ports: Vec<PortMapping>,
     pub bandwidth_limit: Option<u64>,
     pub latency_target: Option<u64>, // microseconds
+    pub host_interface: String,
+    pub container_interface: String,
 }
 
 /// Port mapping for container services
@@ -60,19 +65,19 @@ pub enum Protocol {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NetworkDriver {
-    BoltBridge,   // High-performance bridge
-    BoltOverlay,  // QUIC-based overlay
-    BoltMacvlan,  // Direct host networking
-    BoltIpvlan,   // IP-based VLAN
-    BoltSriov,    // SR-IOV for maximum performance
+    BoltBridge,  // High-performance bridge
+    BoltOverlay, // QUIC-based overlay
+    BoltMacvlan, // Direct host networking
+    BoltIpvlan,  // IP-based VLAN
+    BoltSriov,   // SR-IOV for maximum performance
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NetworkPerformanceMode {
-    Gaming,      // Ultra-low latency
+    Gaming,         // Ultra-low latency
     HighThroughput, // Maximum bandwidth
-    Balanced,    // Default mode
-    PowerSaving, // Low power consumption
+    Balanced,       // Default mode
+    PowerSaving,    // Low power consumption
 }
 
 /// QUIC-based network fabric for ultra-low latency
@@ -268,16 +273,35 @@ pub struct RetryPolicy {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BackoffStrategy {
     Fixed(std::time::Duration),
-    Exponential { base: std::time::Duration, max: std::time::Duration },
+    Exponential {
+        base: std::time::Duration,
+        max: std::time::Duration,
+    },
     Linear(std::time::Duration),
 }
 
 impl BoltNetworkManager {
     /// Initialize network manager with QUIC optimization
     pub async fn new() -> Result<Self> {
-        info!("🌐 Initializing Bolt Network Manager with QUIC fabric");
+        info!("🌐 Initializing Bolt Network Manager with enhanced QUIC support");
+
+        // Initialize enhanced QUIC NetworkManager
+        let quic_config = crate::networking::NetworkConfig {
+            enable_quic: true,
+            enable_ebpf: false, // Conservative default
+            low_latency: true,
+            bandwidth_optimization: true,
+            ipv6: true,
+            driver: crate::networking::NetworkDriver::BoltBridge,
+        };
+
+        let enhanced_manager = Arc::new(Mutex::new(
+            crate::networking::NetworkManager::new(quic_config).await?,
+        ));
+        info!("✅ Enhanced QUIC NetworkManager initialized");
 
         Ok(Self {
+            enhanced_manager,
             networks: Arc::new(RwLock::new(HashMap::new())),
             quic_fabric: QuicNetworkFabric::new().await?,
             bridge_manager: BridgeManager::new(),
@@ -296,14 +320,15 @@ impl BoltNetworkManager {
     ) -> Result<String> {
         info!("🔧 Creating network '{}' with driver {:?}", name, driver);
 
-        let network_id = format!("bolt-net-{}", uuid::Uuid::new_v4().to_string()[..8]);
+        let network_suffix = uuid::Uuid::new_v4().simple().to_string();
+        let network_id = format!("bolt-net-{}", &network_suffix[..8]);
 
         let gateway = self.calculate_gateway(subnet)?;
 
         let network = BoltNetwork {
             id: network_id.clone(),
             name: name.to_string(),
-            driver,
+            driver: driver.clone(),
             subnet: subnet.to_string(),
             gateway,
             containers: HashMap::new(),
@@ -311,8 +336,28 @@ impl BoltNetworkManager {
             performance_mode,
         };
 
-        // Create network infrastructure
-        self.setup_network_infrastructure(&network).await?;
+        // Create network infrastructure using enhanced manager
+        let driver_str = match driver {
+            NetworkDriver::BoltBridge => "bolt",
+            NetworkDriver::BoltOverlay => "overlay",
+            NetworkDriver::BoltMacvlan => "macvlan",
+            NetworkDriver::BoltIpvlan => "ipvlan",
+            NetworkDriver::BoltSriov => "sriov",
+        };
+
+        // Create using enhanced QUIC NetworkManager
+        if let Err(e) = self
+            .enhanced_manager
+            .lock()
+            .await
+            .create_bolt_network(name, driver_str, Some(subnet))
+            .await
+        {
+            warn!("Enhanced network creation failed, using fallback: {}", e);
+            self.setup_network_infrastructure(&network).await?;
+        } else {
+            info!("✅ Enhanced QUIC network infrastructure created");
+        }
 
         let mut networks = self.networks.write().await;
         networks.insert(network_id.clone(), network);
@@ -328,10 +373,14 @@ impl BoltNetworkManager {
         container_id: &str,
         config: ContainerNetworkConfig,
     ) -> Result<()> {
-        info!("🔌 Connecting container {} to network {}", container_id, network_id);
+        info!(
+            "🔌 Connecting container {} to network {}",
+            container_id, network_id
+        );
 
         let mut networks = self.networks.write().await;
-        let network = networks.get_mut(network_id)
+        let network = networks
+            .get_mut(network_id)
             .ok_or_else(|| anyhow!("Network not found: {}", network_id))?;
 
         // Allocate IP address
@@ -339,6 +388,10 @@ impl BoltNetworkManager {
 
         // Generate MAC address
         let mac_address = self.generate_mac_address();
+
+        let iface_suffix = Self::interface_suffix(container_id);
+        let host_interface = format!("veth{}", iface_suffix);
+        let container_interface = format!("vep{}", iface_suffix);
 
         // Create container network info
         let container_info = ContainerNetworkInfo {
@@ -348,21 +401,190 @@ impl BoltNetworkManager {
             ports: config.port_mappings,
             bandwidth_limit: config.bandwidth_limit,
             latency_target: config.latency_target,
+            host_interface,
+            container_interface,
         };
 
         // Setup container networking
-        self.setup_container_networking(network, &container_info).await?;
+        self.setup_container_networking(network, &container_info)
+            .await?;
 
-        // Configure QUIC if enabled
+        // Configure QUIC networking using enhanced manager
         if network.quic_enabled {
-            self.setup_quic_networking(container_id, &container_info).await?;
+            info!(
+                "🚀 Setting up enhanced QUIC networking for container: {}",
+                container_id
+            );
+
+            // Use enhanced NetworkManager for QUIC setup
+            let port_strings: Vec<String> = container_info
+                .ports
+                .iter()
+                .map(|p| format!("{}:{}", p.host_port, p.container_port))
+                .collect();
+
+            if let Err(e) = self
+                .enhanced_manager
+                .lock()
+                .await
+                .setup_container_network(container_id, &network.name, &port_strings)
+                .await
+            {
+                warn!(
+                    "Enhanced QUIC setup failed, falling back to traditional: {}",
+                    e
+                );
+                self.setup_quic_networking(container_id, &container_info)
+                    .await?;
+            } else {
+                info!(
+                    "✅ Enhanced QUIC networking configured for container: {}",
+                    container_id
+                );
+            }
+        } else {
+            // Fallback to traditional networking
+            self.setup_quic_networking(container_id, &container_info)
+                .await?;
         }
 
-        network.containers.insert(container_id.to_string(), container_info);
+        network
+            .containers
+            .insert(container_id.to_string(), container_info);
 
-        info!("✅ Container {} connected to network {} with IP {}",
-               container_id, network_id, ip_address);
+        info!(
+            "✅ Container {} connected to network {} with IP {}",
+            container_id, network_id, ip_address
+        );
         Ok(())
+    }
+
+    pub async fn disconnect_container(&self, network_id: &str, container_id: &str) -> Result<()> {
+        info!(
+            "🧹 Disconnecting container {} from network {}",
+            container_id, network_id
+        );
+
+        let (container_info, quic_enabled, remaining_containers) = {
+            let mut networks = self.networks.write().await;
+            match networks.get_mut(network_id) {
+                Some(network) => {
+                    let info = network.containers.remove(container_id);
+                    let quic_enabled = network.quic_enabled;
+                    let remaining = network.containers.len();
+                    (info, quic_enabled, remaining)
+                }
+                None => {
+                    debug!(
+                        "Network {} not found while disconnecting container {}",
+                        network_id, container_id
+                    );
+                    return Ok(());
+                }
+            }
+        };
+
+        if let Some(info) = container_info {
+            if quic_enabled {
+                self.quic_fabric
+                    .connections
+                    .write()
+                    .await
+                    .retain(|_, connection| connection.connection_id != container_id);
+            }
+
+            if let Err(err) =
+                Self::run_command_allow_missing("ip", &["link", "delete", &info.host_interface])
+                    .await
+            {
+                warn!(
+                    "Failed to delete veth interface {}: {}",
+                    info.host_interface, err
+                );
+            }
+
+            debug!(
+                "Container {} detached from network {} (remaining: {})",
+                container_id, network_id, remaining_containers
+            );
+        } else {
+            debug!(
+                "Container {} had no tracked network state in {}",
+                container_id, network_id
+            );
+        }
+
+        Ok(())
+    }
+
+    pub async fn configure_container_namespace(
+        &self,
+        network_id: &str,
+        container_id: &str,
+        pid: i32,
+    ) -> Result<()> {
+        let (container_info, gateway) = {
+            let networks = self.networks.read().await;
+            let network = networks
+                .get(network_id)
+                .ok_or_else(|| anyhow!("Network not found: {}", network_id))?;
+            let info = network
+                .containers
+                .get(container_id)
+                .ok_or_else(|| anyhow!("Container {} not tracked in network", container_id))?;
+            (info.clone(), network.gateway)
+        };
+
+        let pid_str = pid.to_string();
+        let container_iface = container_info.container_interface.clone();
+
+        Self::run_command("ip", &["link", "set", &container_iface, "netns", &pid_str]).await?;
+
+        Self::run_ns_command(pid, &["ip", "link", "set", "lo", "up"]).await?;
+        Self::run_ns_command(
+            pid,
+            &["ip", "link", "set", &container_iface, "name", "eth0"],
+        )
+        .await?;
+        Self::run_ns_command(
+            pid,
+            &[
+                "ip",
+                "link",
+                "set",
+                "eth0",
+                "address",
+                &container_info.mac_address,
+            ],
+        )
+        .await?;
+
+        let cidr = match container_info.ip_address {
+            IpAddr::V4(addr) => format!("{}/16", addr),
+            IpAddr::V6(addr) => format!("{}/64", addr),
+        };
+
+        Self::run_ns_command(pid, &["ip", "addr", "add", &cidr, "dev", "eth0"]).await?;
+        Self::run_ns_command(pid, &["ip", "link", "set", "eth0", "up"]).await?;
+
+        if let IpAddr::V4(addr) = gateway {
+            Self::run_ns_command(
+                pid,
+                &["ip", "route", "add", "default", "via", &addr.to_string()],
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    fn interface_suffix(container_id: &str) -> String {
+        let cleaned: String = container_id
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .collect();
+        let len = cleaned.len().min(6);
+        cleaned[..len].to_lowercase()
     }
 
     /// Setup network infrastructure
@@ -392,10 +614,14 @@ impl BoltNetworkManager {
     async fn create_bridge_network(&self, network: &BoltNetwork) -> Result<()> {
         info!("🌉 Creating optimized bridge network: {}", network.name);
 
-        // Create bridge interface
-        let bridge_name = format!("bolt-{}", &network.id[..8]);
+        let bridge_name = Self::bridge_name(network);
 
-        // Configure bridge with performance optimizations
+        if let Err(err) = Self::ensure_bridge_ready(&bridge_name, network).await {
+            warn!("Failed to ensure bridge {} is ready: {}", bridge_name, err);
+            return Err(err);
+        }
+
+        // Configure bridge metadata for bookkeeping
         let bridge = NetworkBridge {
             name: bridge_name.clone(),
             ip_range: network.subnet.clone(),
@@ -408,7 +634,6 @@ impl BoltNetworkManager {
             iptables_rules: self.generate_bridge_iptables_rules(network),
         };
 
-        // In real implementation: ip link add, ip addr add, iptables rules
         debug!("Bridge configuration: {:?}", bridge);
 
         Ok(())
@@ -454,15 +679,27 @@ impl BoltNetworkManager {
         network: &BoltNetwork,
         container_info: &ContainerNetworkInfo,
     ) -> Result<()> {
-        // Create veth pair
-        let veth_host = format!("veth{}", &container_info.container_id[..8]);
-        let veth_container = format!("eth0");
+        let bridge_name = Self::bridge_name(network);
 
-        // Configure container network namespace
-        // In real implementation: ip netns, ip link, ip addr
+        Self::ensure_bridge_ready(&bridge_name, network).await?;
+
+        let host_iface = &container_info.host_interface;
+        let peer_iface = &container_info.container_interface;
+
+        Self::run_command_allow_exists(
+            "ip",
+            &[
+                "link", "add", host_iface, "type", "veth", "peer", "name", peer_iface,
+            ],
+        )
+        .await?;
+
+        Self::run_command("ip", &["link", "set", host_iface, "master", &bridge_name]).await?;
+        Self::run_command("ip", &["link", "set", host_iface, "up"]).await?;
 
         // Apply performance optimizations
-        self.apply_network_performance_optimizations(network, container_info).await?;
+        self.apply_network_performance_optimizations(network, container_info)
+            .await?;
 
         Ok(())
     }
@@ -473,7 +710,10 @@ impl BoltNetworkManager {
         container_id: &str,
         container_info: &ContainerNetworkInfo,
     ) -> Result<()> {
-        info!("🚀 Setting up QUIC networking for container: {}", container_id);
+        info!(
+            "🚀 Setting up QUIC networking for container: {}",
+            container_id
+        );
 
         // In real implementation: QUIC endpoint creation, connection setup
 
@@ -488,7 +728,8 @@ impl BoltNetworkManager {
     ) -> Result<()> {
         match network.performance_mode {
             NetworkPerformanceMode::Gaming => {
-                self.apply_gaming_network_optimizations(container_info).await?;
+                self.apply_gaming_network_optimizations(container_info)
+                    .await?;
             }
             NetworkPerformanceMode::HighThroughput => {
                 self.apply_throughput_optimizations(container_info).await?;
@@ -568,6 +809,130 @@ impl BoltNetworkManager {
             format!("-A FORWARD -i {} -j ACCEPT", network.name),
             format!("-A FORWARD -o {} -j ACCEPT", network.name),
         ]
+    }
+
+    fn bridge_name(network: &BoltNetwork) -> String {
+        format!("bolt-{}", &network.id[..8])
+    }
+
+    async fn ensure_bridge_ready(bridge_name: &str, network: &BoltNetwork) -> Result<()> {
+        if Self::run_command("ip", &["link", "show", bridge_name])
+            .await
+            .is_ok()
+        {
+            return Ok(());
+        }
+
+        Self::run_command_allow_exists(
+            "ip",
+            &["link", "add", "name", bridge_name, "type", "bridge"],
+        )
+        .await?;
+
+        if let IpAddr::V4(gateway) = network.gateway {
+            let cidr = format!("{}/16", gateway);
+            Self::run_command_allow_exists("ip", &["addr", "add", &cidr, "dev", bridge_name])
+                .await?;
+        }
+
+        Self::run_command("ip", &["link", "set", bridge_name, "up"]).await?;
+        // Enable IPv4 forwarding for NAT scenarios (best-effort)
+        let _ = Self::run_command_allow_exists("sysctl", &["-w", "net.ipv4.ip_forward=1"]).await;
+
+        Ok(())
+    }
+
+    async fn run_command(program: &str, args: &[&str]) -> Result<()> {
+        let output = Command::new(program)
+            .args(args)
+            .output()
+            .await
+            .with_context(|| format!("Failed to execute {} {:?}", program, args))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!("Command `{}` {:?} failed: {}", program, args, stderr).into());
+        }
+
+        Ok(())
+    }
+
+    async fn run_command_allow_exists(program: &str, args: &[&str]) -> Result<()> {
+        let output = Command::new(program)
+            .args(args)
+            .output()
+            .await
+            .with_context(|| format!("Failed to execute {} {:?}", program, args))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("File exists") || stderr.contains("exists") {
+                debug!(
+                    "Command `{}` {:?} reported existing resource: {}",
+                    program,
+                    args,
+                    stderr.trim()
+                );
+                return Ok(());
+            }
+            return Err(anyhow!("Command `{}` {:?} failed: {}", program, args, stderr).into());
+        }
+
+        Ok(())
+    }
+
+    async fn run_command_allow_missing(program: &str, args: &[&str]) -> Result<()> {
+        let output = Command::new(program)
+            .args(args)
+            .output()
+            .await
+            .with_context(|| format!("Failed to execute {} {:?}", program, args))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("Cannot find device")
+                || stderr.contains("No such file")
+                || stderr.contains("not found")
+            {
+                debug!(
+                    "Command `{}` {:?} reported missing resource: {}",
+                    program,
+                    args,
+                    stderr.trim()
+                );
+                return Ok(());
+            }
+            return Err(anyhow!("Command `{}` {:?} failed: {}", program, args, stderr).into());
+        }
+
+        Ok(())
+    }
+
+    async fn run_ns_command(pid: i32, args: &[&str]) -> Result<()> {
+        let pid_str = pid.to_string();
+        let mut command = Command::new("nsenter");
+        command.arg("-t").arg(&pid_str).arg("-n").arg("--");
+        for arg in args {
+            command.arg(arg);
+        }
+
+        let output = command
+            .output()
+            .await
+            .with_context(|| format!("Failed to nsenter pid {} with args {:?}", pid, args))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!(
+                "Namespace command for pid {} {:?} failed: {}",
+                pid,
+                args,
+                stderr
+            )
+            .into());
+        }
+
+        Ok(())
     }
 }
 

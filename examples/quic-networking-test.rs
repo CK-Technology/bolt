@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bolt::networking::quic::{QUICClient, QUICServer};
+use bolt::networking::quic::QUICServer;
 use bolt::networking::{NetworkConfig, NetworkDriver, NetworkManager};
 use tracing::{debug, info};
 

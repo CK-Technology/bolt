@@ -1,4 +1,3 @@
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -255,7 +254,6 @@ impl std::fmt::Display for ApiError {
 impl std::error::Error for ApiError {}
 
 /// API Endpoints for Drift Registry
-
 pub const API_VERSION: &str = "v1";
 
 pub mod endpoints {
@@ -287,7 +285,6 @@ pub mod endpoints {
 }
 
 /// Media Types for Registry Content
-
 pub mod media_types {
     pub const BOLT_PROFILE: &str = "application/vnd.bolt.profile.v1+toml";
     pub const BOLT_PLUGIN_MANIFEST: &str = "application/vnd.bolt.plugin.manifest.v1+json";

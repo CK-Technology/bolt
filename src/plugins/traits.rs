@@ -87,6 +87,7 @@ pub enum NetworkPriority {
     Critical,
 }
 
+#[async_trait]
 pub trait GameSpecificPlugin: Plugin {
     fn supported_games(&self) -> Vec<String>;
     async fn optimize_for_game(&self, game_title: &str, container_id: &str) -> Result<()>;

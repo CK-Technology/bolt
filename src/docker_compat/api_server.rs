@@ -1,10 +1,8 @@
 use crate::BoltRuntime;
 use crate::error::{BoltError, Result};
-use crate::types::{ContainerInfo, NetworkInfo};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::sync::Arc;
 use warp::{Filter, Rejection, Reply};
 
@@ -599,11 +597,7 @@ impl DockerAPIServer {
         let runtime_clone = self.runtime.clone();
         let info = warp::path("info").and(warp::get()).and_then(move || {
             let rt = runtime_clone.clone();
-            async move {
-                Self::info_handler(rt)
-                    .await
-                    .map_err(|e| warp::reject::custom(e))
-            }
+            async move { Self::info_handler(rt).await.map_err(warp::reject::custom) }
         });
 
         // Container endpoints

@@ -1,10 +1,7 @@
-use crate::{BoltError, Result};
-use anyhow::{anyhow, Context};
+use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
-use tracing::{debug, info, warn, error};
-use nix::unistd::{Uid, Gid};
+use tracing::{debug, info, warn};
 
 /// Bolt Security Manager - Revolutionary zero-trust container security
 #[derive(Debug, Clone)]
@@ -87,7 +84,10 @@ impl BoltSecurityManager {
 
     /// Apply comprehensive security hardening to container
     pub async fn harden_container(&self, container_id: &str, profile: &str) -> Result<()> {
-        info!("🔒 Applying security hardening to container: {}", container_id);
+        info!(
+            "🔒 Applying security hardening to container: {}",
+            container_id
+        );
 
         // Apply seccomp profile
         self.apply_seccomp_profile(container_id, profile).await?;
@@ -106,7 +106,10 @@ impl BoltSecurityManager {
             self.configure_rootless(container_id).await?;
         }
 
-        info!("✅ Security hardening applied to container: {}", container_id);
+        info!(
+            "✅ Security hardening applied to container: {}",
+            container_id
+        );
         Ok(())
     }
 
@@ -115,76 +118,82 @@ impl BoltSecurityManager {
         let mut profiles = HashMap::new();
 
         // Gaming-optimized profile with minimal restrictions
-        profiles.insert("gaming".to_string(), SeccompProfile {
-            name: "gaming".to_string(),
-            default_action: "allow".to_string(),
-            syscalls: vec![
-                // Block dangerous syscalls even in gaming mode
-                SeccompSyscall {
-                    name: "keyctl".to_string(),
-                    action: "errno".to_string(),
-                    args: None,
-                },
-                SeccompSyscall {
-                    name: "add_key".to_string(),
-                    action: "errno".to_string(),
-                    args: None,
-                },
-                SeccompSyscall {
-                    name: "request_key".to_string(),
-                    action: "errno".to_string(),
-                    args: None,
-                },
-            ],
-            gaming_optimized: true,
-            performance_mode: true,
-        });
+        profiles.insert(
+            "gaming".to_string(),
+            SeccompProfile {
+                name: "gaming".to_string(),
+                default_action: "allow".to_string(),
+                syscalls: vec![
+                    // Block dangerous syscalls even in gaming mode
+                    SeccompSyscall {
+                        name: "keyctl".to_string(),
+                        action: "errno".to_string(),
+                        args: None,
+                    },
+                    SeccompSyscall {
+                        name: "add_key".to_string(),
+                        action: "errno".to_string(),
+                        args: None,
+                    },
+                    SeccompSyscall {
+                        name: "request_key".to_string(),
+                        action: "errno".to_string(),
+                        args: None,
+                    },
+                ],
+                gaming_optimized: true,
+                performance_mode: true,
+            },
+        );
 
         // High-security profile for production workloads
-        profiles.insert("secure".to_string(), SeccompProfile {
-            name: "secure".to_string(),
-            default_action: "errno".to_string(),
-            syscalls: vec![
-                // Allow only essential syscalls
-                SeccompSyscall {
-                    name: "read".to_string(),
-                    action: "allow".to_string(),
-                    args: None,
-                },
-                SeccompSyscall {
-                    name: "write".to_string(),
-                    action: "allow".to_string(),
-                    args: None,
-                },
-                SeccompSyscall {
-                    name: "openat".to_string(),
-                    action: "allow".to_string(),
-                    args: None,
-                },
-                SeccompSyscall {
-                    name: "close".to_string(),
-                    action: "allow".to_string(),
-                    args: None,
-                },
-                SeccompSyscall {
-                    name: "mmap".to_string(),
-                    action: "allow".to_string(),
-                    args: None,
-                },
-                SeccompSyscall {
-                    name: "munmap".to_string(),
-                    action: "allow".to_string(),
-                    args: None,
-                },
-                SeccompSyscall {
-                    name: "exit_group".to_string(),
-                    action: "allow".to_string(),
-                    args: None,
-                },
-            ],
-            gaming_optimized: false,
-            performance_mode: false,
-        });
+        profiles.insert(
+            "secure".to_string(),
+            SeccompProfile {
+                name: "secure".to_string(),
+                default_action: "errno".to_string(),
+                syscalls: vec![
+                    // Allow only essential syscalls
+                    SeccompSyscall {
+                        name: "read".to_string(),
+                        action: "allow".to_string(),
+                        args: None,
+                    },
+                    SeccompSyscall {
+                        name: "write".to_string(),
+                        action: "allow".to_string(),
+                        args: None,
+                    },
+                    SeccompSyscall {
+                        name: "openat".to_string(),
+                        action: "allow".to_string(),
+                        args: None,
+                    },
+                    SeccompSyscall {
+                        name: "close".to_string(),
+                        action: "allow".to_string(),
+                        args: None,
+                    },
+                    SeccompSyscall {
+                        name: "mmap".to_string(),
+                        action: "allow".to_string(),
+                        args: None,
+                    },
+                    SeccompSyscall {
+                        name: "munmap".to_string(),
+                        action: "allow".to_string(),
+                        args: None,
+                    },
+                    SeccompSyscall {
+                        name: "exit_group".to_string(),
+                        action: "allow".to_string(),
+                        args: None,
+                    },
+                ],
+                gaming_optimized: false,
+                performance_mode: false,
+            },
+        );
 
         profiles
     }
@@ -192,7 +201,10 @@ impl BoltSecurityManager {
     /// Apply seccomp profile to container
     async fn apply_seccomp_profile(&self, container_id: &str, profile: &str) -> Result<()> {
         if let Some(seccomp_profile) = self.seccomp_profiles.get(profile) {
-            info!("🔧 Applying seccomp profile '{}' to container {}", profile, container_id);
+            info!(
+                "🔧 Applying seccomp profile '{}' to container {}",
+                profile, container_id
+            );
 
             // In a real implementation, this would write seccomp BPF programs
             // For now, we'll create the profile configuration
@@ -210,7 +222,10 @@ impl BoltSecurityManager {
 
     /// Configure Linux capabilities with minimal privilege principle
     async fn configure_capabilities(&self, container_id: &str) -> Result<()> {
-        info!("🔧 Configuring capabilities for container: {}", container_id);
+        info!(
+            "🔧 Configuring capabilities for container: {}",
+            container_id
+        );
 
         for cap in &self.capability_manager.dropped_caps {
             debug!("Dropping capability: {}", cap);
@@ -225,7 +240,10 @@ impl BoltSecurityManager {
 
     /// Setup comprehensive namespace isolation
     async fn setup_namespace_isolation(&self, container_id: &str) -> Result<()> {
-        info!("🏠 Setting up namespace isolation for container: {}", container_id);
+        info!(
+            "🏠 Setting up namespace isolation for container: {}",
+            container_id
+        );
 
         let ns = &self.namespace_isolation;
 
@@ -258,7 +276,10 @@ impl BoltSecurityManager {
 
     /// Enable advanced memory protection features
     async fn enable_memory_protection(&self, container_id: &str) -> Result<()> {
-        info!("🧠 Enabling memory protection for container: {}", container_id);
+        info!(
+            "🧠 Enabling memory protection for container: {}",
+            container_id
+        );
 
         let mp = &self.memory_protection;
 
@@ -287,7 +308,10 @@ impl BoltSecurityManager {
 
     /// Configure rootless container execution
     async fn configure_rootless(&self, container_id: &str) -> Result<()> {
-        info!("👤 Configuring rootless execution for container: {}", container_id);
+        info!(
+            "👤 Configuring rootless execution for container: {}",
+            container_id
+        );
 
         // Map current user to container user
         let current_uid = nix::unistd::getuid();
@@ -304,7 +328,10 @@ impl BoltSecurityManager {
 
     /// Real-time security monitoring and threat detection
     pub async fn monitor_container_security(&self, container_id: &str) -> Result<SecurityMetrics> {
-        debug!("🔍 Monitoring security metrics for container: {}", container_id);
+        debug!(
+            "🔍 Monitoring security metrics for container: {}",
+            container_id
+        );
 
         // In real implementation, this would monitor:
         // - Syscall patterns for anomaly detection

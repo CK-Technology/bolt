@@ -1,13 +1,11 @@
 use crate::{BoltError, Result};
-use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::Command;
 use std::sync::Arc;
 use tokio::process::Command as AsyncCommand;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RTXFeatureConfig {
@@ -219,7 +217,7 @@ impl RTXFeatureManager {
 
     async fn query_gpu_info() -> Result<HashMap<String, String>> {
         let output = AsyncCommand::new("nvidia-smi")
-            .args(&[
+            .args([
                 "--query-gpu=name,memory.total,compute_cap",
                 "--format=csv,noheader,nounits",
             ])
@@ -229,8 +227,7 @@ impl RTXFeatureManager {
         if !output.status.success() {
             return Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
                 message: "Failed to query GPU information".to_string(),
-            })
-            .into());
+            }));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);

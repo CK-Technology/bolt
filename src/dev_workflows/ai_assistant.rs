@@ -1,9 +1,16 @@
+//! AI-powered development assistant (future feature)
+//! This module provides code completion, bug detection, and test generation
+//! functionality for development containers. Currently a placeholder for future
+//! implementation.
+
+#![allow(dead_code)]
+
 use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use super::AIFeature;
 
@@ -108,7 +115,7 @@ impl AIAssistant {
         Ok(())
     }
 
-    async fn initialize_ai_feature(&self, env_id: &str, feature: &AIFeature) -> Result<()> {
+    async fn initialize_ai_feature(&self, _env_id: &str, feature: &AIFeature) -> Result<()> {
         match feature {
             AIFeature::CodeCompletion => {
                 info!("   📝 Code completion model loaded");
@@ -166,8 +173,8 @@ impl AIAssistant {
     pub async fn get_code_suggestions(
         &self,
         env_id: &str,
-        code_context: &str,
-        cursor_position: usize,
+        _code_context: &str,
+        _cursor_position: usize,
     ) -> Result<Vec<CodeSuggestion>> {
         if !self.enabled {
             return Ok(Vec::new());
@@ -210,7 +217,7 @@ impl AIAssistant {
         Ok(suggestions)
     }
 
-    pub async fn analyze_code_for_bugs(&self, env_id: &str, code: &str) -> Result<Vec<BugReport>> {
+    pub async fn analyze_code_for_bugs(&self, env_id: &str, _code: &str) -> Result<Vec<BugReport>> {
         if !self.enabled {
             return Ok(Vec::new());
         }
@@ -245,7 +252,7 @@ impl AIAssistant {
         &self,
         env_id: &str,
         function_signature: &str,
-        code_body: &str,
+        _code_body: &str,
     ) -> Result<Vec<TestCase>> {
         if !self.enabled {
             return Ok(Vec::new());
@@ -295,7 +302,7 @@ async fn test_error_handling() {{
     pub async fn suggest_performance_optimizations(
         &self,
         env_id: &str,
-        code: &str,
+        _code: &str,
     ) -> Result<Vec<PerformanceOptimization>> {
         if !self.enabled {
             return Ok(Vec::new());

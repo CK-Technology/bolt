@@ -7,7 +7,7 @@ use crate::runtime::gpu::{
     AIWorkload, ComputeWorkload, GPUInfo, GPUVendor, GamingConfig, MLWorkload,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NvbindManager {
     pub is_available: bool,
     pub nvbind_path: Option<String>,
@@ -350,13 +350,4 @@ pub struct NvbindCompatibility {
     pub bolt_optimizations: bool,
     pub wsl2_mode: bool,
     pub performance_info: String,
-}
-
-impl Default for NvbindManager {
-    fn default() -> Self {
-        Self {
-            is_available: false,
-            nvbind_path: None,
-        }
-    }
 }

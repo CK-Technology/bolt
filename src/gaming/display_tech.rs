@@ -1,12 +1,11 @@
-use crate::{BoltError, Result};
-use anyhow::Context;
+use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::process::Command as AsyncCommand;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DisplayTechConfig {
@@ -119,16 +118,16 @@ impl DisplayTechManager {
         let detected_displays = Self::detect_displays().await?;
         info!("   Detected {} display(s)", detected_displays.len());
 
-        for display in &detected_displays {
+        for disp in &detected_displays {
             info!(
                 "   📺 {}: {}x{}@{}Hz",
-                display.name, display.resolution.0, display.resolution.1, display.refresh_rate
+                disp.name, disp.resolution.0, disp.resolution.1, disp.refresh_rate
             );
-            if display.vrr_supported {
-                info!("      VRR: {:?}Hz", display.vrr_range);
+            if disp.vrr_supported {
+                info!("      VRR: {:?}Hz", disp.vrr_range);
             }
-            if display.hdr_supported {
-                info!("      HDR: {} formats", display.hdr_formats.len());
+            if disp.hdr_supported {
+                info!("      HDR: {} formats", disp.hdr_formats.len());
             }
         }
 
@@ -224,7 +223,7 @@ impl DisplayTechManager {
         let output = AsyncCommand::new("wlr-randr").output().await?;
 
         if !output.status.success() {
-            return Err(anyhow::anyhow!("wlr-randr failed"));
+            return Err(anyhow::anyhow!("wlr-randr failed").into());
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -284,12 +283,12 @@ impl DisplayTechManager {
 
     async fn detect_x11_displays() -> Result<Vec<DisplayDevice>> {
         let output = AsyncCommand::new("xrandr")
-            .args(&["--verbose"])
+            .args(["--verbose"])
             .output()
             .await?;
 
         if !output.status.success() {
-            return Err(anyhow::anyhow!("xrandr failed"));
+            return Err(anyhow::anyhow!("xrandr failed").into());
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -356,7 +355,7 @@ impl DisplayTechManager {
         // Check DRM subsystem for display information
         let drm_path = Path::new("/sys/class/drm");
         if !drm_path.exists() {
-            return Err(anyhow::anyhow!("DRM subsystem not available"));
+            return Err(anyhow::anyhow!("DRM subsystem not available").into());
         }
 
         let entries = std::fs::read_dir(drm_path)?;
@@ -473,16 +472,16 @@ impl DisplayTechManager {
             return Ok(());
         }
 
-        for display in vrr_displays {
-            info!("   Enabling VRR on {}", display.name);
+        for disp in vrr_displays {
+            info!("   Enabling VRR on {}", disp.name);
 
             // Try different methods to enable VRR
-            if let Err(e) = self.enable_vrr_wayland(&display.name).await {
+            if let Err(e) = self.enable_vrr_wayland(&disp.name).await {
                 debug!("Wayland VRR failed: {}, trying X11", e);
-                if let Err(e) = self.enable_vrr_x11(&display.name).await {
+                if let Err(e) = self.enable_vrr_x11(&disp.name).await {
                     debug!("X11 VRR failed: {}, trying DRM", e);
-                    if let Err(e) = self.enable_vrr_drm(&display.connector).await {
-                        warn!("Failed to enable VRR on {}: {}", display.name, e);
+                    if let Err(e) = self.enable_vrr_drm(&disp.connector).await {
+                        warn!("Failed to enable VRR on {}: {}", disp.name, e);
                     }
                 }
             }
@@ -495,13 +494,13 @@ impl DisplayTechManager {
     async fn enable_vrr_wayland(&self, display_name: &str) -> Result<()> {
         // Enable VRR via wlr-randr
         let output = AsyncCommand::new("wlr-randr")
-            .args(&["--output", display_name, "--adaptive-sync", "enabled"])
+            .args(["--output", display_name, "--adaptive-sync", "enabled"])
             .output()
             .await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow::anyhow!("wlr-randr VRR failed: {}", stderr));
+            return Err(anyhow::anyhow!("wlr-randr VRR failed: {}", stderr).into());
         }
 
         Ok(())
@@ -510,13 +509,13 @@ impl DisplayTechManager {
     async fn enable_vrr_x11(&self, display_name: &str) -> Result<()> {
         // Enable VRR via xrandr
         let output = AsyncCommand::new("xrandr")
-            .args(&["--output", display_name, "--set", "vrr_capable", "1"])
+            .args(["--output", display_name, "--set", "vrr_capable", "1"])
             .output()
             .await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow::anyhow!("xrandr VRR failed: {}", stderr));
+            return Err(anyhow::anyhow!("xrandr VRR failed: {}", stderr).into());
         }
 
         Ok(())
@@ -546,12 +545,12 @@ impl DisplayTechManager {
             return Ok(());
         }
 
-        for display in hdr_displays {
-            info!("   Enabling HDR on {}", display.name);
+        for disp in hdr_displays {
+            info!("   Enabling HDR on {}", disp.name);
 
             // Configure HDR
-            if let Err(e) = self.configure_hdr_display(display).await {
-                warn!("Failed to configure HDR on {}: {}", display.name, e);
+            if let Err(e) = self.configure_hdr_display(disp).await {
+                warn!("Failed to configure HDR on {}: {}", disp.name, e);
             }
         }
 
@@ -592,7 +591,7 @@ impl DisplayTechManager {
     async fn set_hdr_wayland(&self, display_name: &str, colorspace: &str) -> Result<()> {
         // Set HDR via wlr-randr (if supported)
         let output = AsyncCommand::new("wlr-randr")
-            .args(&[
+            .args([
                 "--output",
                 display_name,
                 "--hdr",
@@ -605,7 +604,7 @@ impl DisplayTechManager {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow::anyhow!("wlr-randr HDR failed: {}", stderr));
+            return Err(anyhow::anyhow!("wlr-randr HDR failed: {}", stderr).into());
         }
 
         Ok(())
@@ -614,13 +613,13 @@ impl DisplayTechManager {
     async fn set_hdr_x11(&self, display_name: &str, colorspace: &str) -> Result<()> {
         // Set HDR via xrandr
         let output = AsyncCommand::new("xrandr")
-            .args(&["--output", display_name, "--set", "Colorspace", colorspace])
+            .args(["--output", display_name, "--set", "Colorspace", colorspace])
             .output()
             .await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow::anyhow!("xrandr HDR failed: {}", stderr));
+            return Err(anyhow::anyhow!("xrandr HDR failed: {}", stderr).into());
         }
 
         Ok(())
@@ -645,7 +644,7 @@ impl DisplayTechManager {
             std::env::set_var("VK_HDR_SURFACE_EXTENSION", "1");
             std::env::set_var(
                 "HDR_PEAK_BRIGHTNESS",
-                &self.config.hdr_peak_brightness.to_string(),
+                self.config.hdr_peak_brightness.to_string(),
             );
 
             match self.config.hdr_colorspace {

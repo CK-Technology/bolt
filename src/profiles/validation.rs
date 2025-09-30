@@ -47,7 +47,7 @@ pub fn validate_profile(profile: &OptimizationProfile) -> Result<()> {
 
     // Validate CPU optimizations
     if let Some(priority) = profile.cpu_optimizations.priority {
-        if priority < -20 || priority > 19 {
+        if !(-20..=19).contains(&priority) {
             return Err(anyhow::anyhow!("CPU priority out of range (-20 to 19)"));
         }
     }

@@ -44,7 +44,7 @@ pub async fn submit_profile(
     };
 
     let response = client
-        .post(&format!("{}/submit", repository.url))
+        .post(format!("{}/submit", repository.url))
         .json(&submission)
         .send()
         .await?;

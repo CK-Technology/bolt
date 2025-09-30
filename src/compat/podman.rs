@@ -464,11 +464,9 @@ impl PodmanCompat {
                 println!("⚠️  Note: System reset coming soon in Bolt v0.2");
                 Ok(())
             }
-            _ => {
-                return Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
-                    message: format!("Unsupported system command: {}", args[0]),
-                }));
-            }
+            _ => Err(BoltError::Runtime(crate::error::RuntimeError::OciError {
+                message: format!("Unsupported system command: {}", args[0]),
+            })),
         }
     }
 

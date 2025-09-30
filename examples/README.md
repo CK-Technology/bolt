@@ -1,6 +1,31 @@
 # 🚀 Bolt Container Examples
 
-Welcome to Bolt's example configurations! These examples showcase Bolt's advanced features including GPU acceleration, AI workloads, gaming optimizations, and high-performance networking.
+Welcome to Bolt's example configurations! These examples showcase Bolt's advanced features including GPU acceleration, AI workloads, gaming optimizations, QUIC networking, and volume management.
+
+## 📦 Volume and Network Management
+
+### Volume & Network Demo (`volume-network-example.toml`)
+Complete Boltfile demonstrating:
+- **QUIC Networks** - Ultra-low latency networking with `driver = "bolt"`
+- **Named Volumes** - Persistent storage with size limits and labels
+- **Multi-tier Architecture** - Frontend, backend, and database with proper isolation
+- **OCI 7.0 Compliance** - Standards-compliant volume mounting
+
+### CLI Demo Script (`volume-network-cli-demo.sh`)
+Interactive demonstration of:
+- Volume creation, inspection, and management
+- QUIC network setup and container communication
+- Data persistence across container restarts
+- Container-to-container networking
+
+**Quick Start:**
+```bash
+# Run the CLI demo
+./examples/volume-network-cli-demo.sh
+
+# Or deploy the full stack
+bolt surge up examples/volume-network-example.toml
+```
 
 ## 🤖 AI & Machine Learning Examples
 

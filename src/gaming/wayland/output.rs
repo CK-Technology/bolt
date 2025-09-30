@@ -1,8 +1,8 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use super::WaylandGamingConfig;
 
@@ -39,7 +39,7 @@ pub enum OutputType {
     DisplayPort,
     DVID,
     VGA,
-    USB_C,
+    UsbC,
     Thunderbolt,
     Internal,
 }

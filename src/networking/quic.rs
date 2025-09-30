@@ -57,6 +57,7 @@ pub enum ForwardProtocol {
 }
 
 /// High-performance QUIC server for container networking
+#[derive(Debug)]
 pub struct QUICServer {
     connections: Arc<RwLock<HashMap<String, QUICConnection>>>,
     port_forwards: Arc<RwLock<HashMap<u16, QUICPortForward>>>,

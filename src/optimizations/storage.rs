@@ -9,11 +9,11 @@ pub struct StorageOptimizations {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum IoScheduler {
-    Noop,        // No scheduling (good for NVMe SSDs)
-    Cfq,         // Completely Fair Queuing (good for HDDs)
-    Deadline,    // Deadline scheduler
-    Mq_deadline, // Multi-queue deadline
-    None,        // No scheduler for ultra-low latency
+    Noop,       // No scheduling (good for NVMe SSDs)
+    Cfq,        // Completely Fair Queuing (good for HDDs)
+    Deadline,   // Deadline scheduler
+    MqDeadline, // Multi-queue deadline
+    None,       // No scheduler for ultra-low latency
 }
 
 impl ToOptimizationSteps for StorageOptimizations {
@@ -46,7 +46,7 @@ impl IoScheduler {
             IoScheduler::Noop => "noop",
             IoScheduler::Cfq => "cfq",
             IoScheduler::Deadline => "deadline",
-            IoScheduler::Mq_deadline => "mq-deadline",
+            IoScheduler::MqDeadline => "mq-deadline",
             IoScheduler::None => "none",
         }
     }

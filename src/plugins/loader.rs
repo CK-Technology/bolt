@@ -1,12 +1,18 @@
 use anyhow::{Context, Result};
 use libloading::{Library, Symbol};
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 
 use super::{Plugin, PluginManifest};
 
 pub struct PluginLoader {
     libraries: Vec<Arc<Library>>,
+}
+
+impl Default for PluginLoader {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PluginLoader {
@@ -17,7 +23,7 @@ impl PluginLoader {
     }
 }
 
-pub async fn load_plugin(path: &PathBuf, manifest: &PluginManifest) -> Result<Box<dyn Plugin>> {
+pub async fn load_plugin(path: &Path, manifest: &PluginManifest) -> Result<Box<dyn Plugin>> {
     let library_path = path.join(&manifest.entry_point);
 
     if !library_path.exists() {
@@ -49,7 +55,7 @@ pub async fn load_plugin(path: &PathBuf, manifest: &PluginManifest) -> Result<Bo
     }
 }
 
-pub fn validate_plugin_signature(path: &PathBuf) -> Result<()> {
+pub fn validate_plugin_signature(path: &Path) -> Result<()> {
     let signature_path = path.join("plugin.sig");
 
     if !signature_path.exists() {

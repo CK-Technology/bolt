@@ -1,10 +1,9 @@
-use crate::{BoltError, Result};
-use anyhow::Context;
+use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::info;
 
 /// Enterprise-Grade Predictive Auto-Scaling System
 /// Uses AI/ML algorithms to predict resource needs and scale proactively

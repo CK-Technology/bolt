@@ -36,20 +36,20 @@ impl AmdManager {
 
         let mut index = 0;
         for line in output_str.lines() {
-            if line.to_lowercase().contains("amd") || line.to_lowercase().contains("ati") {
-                if line.to_lowercase().contains("vga") || line.to_lowercase().contains("display") {
-                    let parts: Vec<&str> = line.split_whitespace().collect();
-                    if let Some(pci_id) = parts.first() {
-                        let gpu = AmdGPU {
-                            index,
-                            name: Self::extract_gpu_name(line),
-                            memory_mb: Self::get_gpu_memory(index).unwrap_or(0),
-                            device_id: pci_id.to_string(),
-                            pci_bus_id: pci_id.to_string(),
-                        };
-                        gpus.push(gpu);
-                        index += 1;
-                    }
+            if (line.to_lowercase().contains("amd") || line.to_lowercase().contains("ati"))
+                && (line.to_lowercase().contains("vga") || line.to_lowercase().contains("display"))
+            {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if let Some(pci_id) = parts.first() {
+                    let gpu = AmdGPU {
+                        index,
+                        name: Self::extract_gpu_name(line),
+                        memory_mb: Self::get_gpu_memory(index).unwrap_or(0),
+                        device_id: pci_id.to_string(),
+                        pci_bus_id: pci_id.to_string(),
+                    };
+                    gpus.push(gpu);
+                    index += 1;
                 }
             }
         }

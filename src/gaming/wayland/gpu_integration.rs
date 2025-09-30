@@ -1,9 +1,8 @@
 use anyhow::Result;
 use std::collections::HashMap;
-use std::path::Path;
 use tracing::{debug, info, warn};
 
-use super::{GamingPerformanceMetrics, WaylandGamingConfig};
+use super::WaylandGamingConfig;
 use crate::runtime::gpu::{GPUManager, GPUVendor};
 
 #[derive(Debug, Clone)]

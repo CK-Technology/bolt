@@ -583,7 +583,7 @@ impl HealthChecker {
         use std::process::Command;
 
         let output = Command::new("ping")
-            .args(&["-c", "1", "-W", "3", "8.8.8.8"])
+            .args(["-c", "1", "-W", "3", "8.8.8.8"])
             .output()?;
 
         Ok(output.status.success())
@@ -603,7 +603,7 @@ impl HealthChecker {
     async fn check_port_listening(&self, port: u16) -> Result<bool> {
         use std::process::Command;
 
-        let output = Command::new("netstat").args(&["-ln"]).output()?;
+        let output = Command::new("netstat").args(["-ln"]).output()?;
 
         let output_str = String::from_utf8_lossy(&output.stdout);
         let port_str = format!(":{}", port);

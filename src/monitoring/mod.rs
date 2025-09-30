@@ -1,3 +1,9 @@
+//! Monitoring and observability system (partial implementation)
+//! Provides metrics collection, health checks, and telemetry.
+//! Some features are placeholders for future Prometheus/OpenTelemetry integration.
+
+#![allow(dead_code)]
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -374,8 +380,6 @@ impl MetricsCollector {
 
     /// Collect AMD GPU metrics
     async fn collect_amd_gpu_metrics(&self) -> Result<()> {
-        use std::fs;
-
         // Check for AMD GPU sysfs entries
         let amd_gpu_paths = ["/sys/class/drm/card0/device", "/sys/class/drm/card1/device"];
 

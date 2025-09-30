@@ -1,15 +1,12 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tokio::fs;
-use tokio::process::Command;
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{RwLock, mpsc};
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, info, instrument};
 
-use crate::config::{GamingConfig, Service};
 #[cfg(feature = "nvidia-support")]
 use crate::runtime::gpu::nvidia::NvidiaManager;
 

@@ -1,16 +1,22 @@
 use crate::{BoltError, Result};
+use chrono::{DateTime, Utc};
+use serde_json::Value;
 use std::collections::HashMap;
+use std::time::SystemTime;
 use tokio::process::Command as AsyncCommand;
 use tracing::{debug, info, warn};
 
+pub mod amd_metrics;
 pub mod environment;
 pub mod gpu_integration;
+pub mod hardware_detection;
 pub mod input;
 pub mod native;
 pub mod networking;
 pub mod nvbind;
 pub mod oci;
 pub mod performance;
+pub mod quick_sync;
 pub mod security;
 pub mod storage;
 pub mod unified;
@@ -164,9 +170,11 @@ pub async fn stop_container_delegate(runtime: &str, id: &str) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(BoltError::Runtime(crate::error::RuntimeError::StartFailed {
-            reason: format!("Failed to stop container: {}", stderr),
-        }));
+        return Err(BoltError::Runtime(
+            crate::error::RuntimeError::StartFailed {
+                reason: format!("Failed to stop container: {}", stderr),
+            },
+        ));
     }
 
     info!("✅ Container stopped: {}", id);
@@ -187,16 +195,21 @@ pub async fn remove_container_delegate(runtime: &str, id: &str, force: bool) -> 
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(BoltError::Runtime(crate::error::RuntimeError::StartFailed {
-            reason: format!("Failed to remove container: {}", stderr),
-        }));
+        return Err(BoltError::Runtime(
+            crate::error::RuntimeError::StartFailed {
+                reason: format!("Failed to remove container: {}", stderr),
+            },
+        ));
     }
 
     info!("✅ Container removed: {}", id);
     Ok(())
 }
 
-pub async fn list_containers_delegate(runtime: &str, all: bool) -> Result<Vec<native::NativeContainerInfo>> {
+pub async fn list_containers_delegate(
+    runtime: &str,
+    all: bool,
+) -> Result<Vec<native::NativeContainerInfo>> {
     info!("📋 Listing containers...");
 
     let mut cmd = AsyncCommand::new(runtime);
@@ -210,14 +223,105 @@ pub async fn list_containers_delegate(runtime: &str, all: bool) -> Result<Vec<na
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(BoltError::Runtime(crate::error::RuntimeError::StartFailed {
-            reason: format!("Failed to list containers: {}", stderr),
-        }));
+        return Err(BoltError::Runtime(
+            crate::error::RuntimeError::StartFailed {
+                reason: format!("Failed to list containers: {}", stderr),
+            },
+        ));
     }
 
-    // Parse JSON output and convert to ContainerInfo
-    // This is a simplified implementation
-    let containers = Vec::new(); // TODO: Parse actual output
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut containers = Vec::new();
+
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        match serde_json::from_str::<Value>(trimmed) {
+            Ok(value) => {
+                let id = value
+                    .get("ID")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+
+                let name = value
+                    .get("Names")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                let image = value
+                    .get("Image")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+
+                let created = value
+                    .get("CreatedAt")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| {
+                        DateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S %z %Z")
+                            .or_else(|_| DateTime::parse_from_rfc3339(s))
+                            .map(|dt| dt.with_timezone(&Utc).into())
+                            .ok()
+                    })
+                    .unwrap_or_else(SystemTime::now);
+
+                let status_raw = value
+                    .get("Status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+
+                let status = if status_raw.to_lowercase().contains("up")
+                    || status_raw.to_lowercase().contains("running")
+                {
+                    native::ContainerStatus::Running
+                } else if let Some(code) = status_raw
+                    .split(['(', ')'])
+                    .filter_map(|segment| segment.trim().strip_prefix("Exited "))
+                    .filter_map(|segment| segment.parse::<i32>().ok())
+                    .next()
+                {
+                    native::ContainerStatus::Exited(code)
+                } else if status_raw.to_lowercase().contains("paused") {
+                    native::ContainerStatus::Paused
+                } else if status_raw.to_lowercase().contains("created") {
+                    native::ContainerStatus::Created
+                } else {
+                    native::ContainerStatus::Stopped
+                };
+
+                let ports = value
+                    .get("Ports")
+                    .and_then(|v| v.as_str())
+                    .map(|ports| {
+                        ports
+                            .split(',')
+                            .map(|p| p.trim().to_string())
+                            .filter(|p| !p.is_empty())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+
+                containers.push(native::NativeContainerInfo {
+                    id,
+                    name,
+                    image,
+                    status,
+                    created,
+                    ports,
+                    pid: None,
+                });
+            }
+            Err(err) => {
+                warn!("Failed to parse container JSON line: {}", err);
+            }
+        }
+    }
+
     Ok(containers)
 }
 
@@ -231,9 +335,11 @@ pub async fn pull_image_delegate(runtime: &str, image: &str) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(BoltError::Runtime(crate::error::RuntimeError::StartFailed {
-            reason: format!("Failed to pull image: {}", stderr),
-        }));
+        return Err(BoltError::Runtime(
+            crate::error::RuntimeError::StartFailed {
+                reason: format!("Failed to pull image: {}", stderr),
+            },
+        ));
     }
 
     info!("✅ Image pulled: {}", image);
@@ -247,7 +353,12 @@ pub async fn build_image(path: &str, tag: Option<&str>, dockerfile: &str) -> Res
     build_image_delegate(&runtime, path, tag, dockerfile).await
 }
 
-pub async fn build_image_delegate(runtime: &str, path: &str, tag: Option<&str>, dockerfile: &str) -> Result<()> {
+pub async fn build_image_delegate(
+    runtime: &str,
+    path: &str,
+    tag: Option<&str>,
+    dockerfile: &str,
+) -> Result<()> {
     info!("🔨 Building image from path: {}", path);
     debug!("Dockerfile: {}", dockerfile);
     if let Some(tag) = tag {

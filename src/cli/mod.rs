@@ -3,11 +3,12 @@ use clap::{Parser, Subcommand};
 pub mod compat;
 
 #[derive(Parser)]
-#[command(name = "bolt")]
 #[command(
-    about = "Performance-first container runtime with revolutionary networking and optimization"
+    name = "Bolt",
+    about = "Performance-first container runtime with revolutionary networking and optimization",
+    version = env!("CARGO_PKG_VERSION"),
+    long_about = None
 )]
-#[command(version, long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -146,6 +147,12 @@ pub enum Commands {
     Snapshot {
         #[command(subcommand)]
         command: SnapshotCommands,
+    },
+
+    /// Hardware detection and optimization
+    Hardware {
+        #[command(subcommand)]
+        command: HardwareCommands,
     },
 
     /// Docker/Podman compatibility layer
@@ -477,4 +484,53 @@ pub enum AutoAction {
     Enable,
     Disable,
     Status,
+}
+
+#[derive(Subcommand)]
+pub enum HardwareCommands {
+    /// Detect all hardware (CPU + GPU + Memory)
+    Detect {
+        /// Output format (text, json)
+        #[arg(short, long, default_value = "text")]
+        format: String,
+    },
+
+    /// Show CPU information and optimizations
+    Cpu {
+        /// Show detailed CPU features
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
+    /// Show GPU information and capabilities
+    Gpu {
+        /// Show detailed GPU capabilities
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
+    /// Show memory information
+    Memory,
+
+    /// Show optimal CPU affinity for workload types
+    Affinity {
+        /// Workload type (gaming, performance, balanced, background, batch)
+        #[arg(value_enum)]
+        workload: Option<WorkloadType>,
+    },
+
+    /// Control CPU governor (performance vs powersave)
+    Governor {
+        /// Governor mode to set (performance, powersave, ondemand, schedutil)
+        mode: Option<String>,
+    },
+}
+
+#[derive(clap::ValueEnum, Clone, Debug)]
+pub enum WorkloadType {
+    Gaming,
+    Performance,
+    Balanced,
+    Background,
+    Batch,
 }

@@ -85,7 +85,7 @@ impl CpuAffinity {
         match self {
             CpuAffinity::Gaming => {
                 // For gaming, use the last 4 cores (assuming they're performance cores)
-                let start = if total_cpus >= 4 { total_cpus - 4 } else { 0 };
+                let start = total_cpus.saturating_sub(4);
                 (start..total_cpus).collect()
             }
             CpuAffinity::Balanced => {
@@ -94,7 +94,7 @@ impl CpuAffinity {
             }
             CpuAffinity::Isolated => {
                 // Use only the last 2 cores, isolated from system processes
-                let start = if total_cpus >= 2 { total_cpus - 2 } else { 0 };
+                let start = total_cpus.saturating_sub(2);
                 (start..total_cpus).collect()
             }
             CpuAffinity::NumaAware => {

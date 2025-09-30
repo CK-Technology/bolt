@@ -1,6 +1,5 @@
 use super::ProjectType;
 use crate::Result;
-use std::collections::HashMap;
 use tracing::info;
 
 #[derive(Debug)]

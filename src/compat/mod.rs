@@ -252,7 +252,7 @@ impl DockerApiCompat {
                     "Ports": c.ports.iter().map(|p| {
                         let parts: Vec<&str> = p.split(':').collect();
                         serde_json::json!({
-                            "PublicPort": parts.get(0).unwrap_or(&"0").parse::<u32>().unwrap_or(0),
+                            "PublicPort": parts.first().unwrap_or(&"0").parse::<u32>().unwrap_or(0),
                             "PrivatePort": parts.get(1).unwrap_or(&"0").parse::<u32>().unwrap_or(0),
                             "Type": "tcp"
                         })
@@ -345,7 +345,7 @@ impl DockerApiCompat {
 
         let container_id = format!(
             "bolt-{}",
-            uuid::Uuid::new_v4().to_string().replace("-", "")[..12].to_string()
+            &uuid::Uuid::new_v4().to_string().replace("-", "")[..12]
         );
 
         Ok(serde_json::json!({
@@ -415,7 +415,7 @@ impl DockerApiCompat {
         .to_string())
     }
 
-    async fn build_image(&self, body: &str) -> Result<String> {
+    async fn build_image(&self, _body: &str) -> Result<String> {
         // Extract build context and Dockerfile
         self.runtime
             .build_image(".", Some("bolt-built:latest"), "Dockerfile")

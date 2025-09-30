@@ -1,8 +1,7 @@
 use anyhow::Result;
 use reqwest::{Client, Response};
 use serde::de::DeserializeOwned;
-use std::collections::HashMap;
-use tracing::{debug, info, warn};
+use tracing::info;
 
 use super::*;
 
@@ -29,7 +28,7 @@ impl DriftClient {
 
         let response = self
             .client
-            .post(&format!("{}{}", self.base_url, endpoints::AUTH_LOGIN))
+            .post(format!("{}{}", self.base_url, endpoints::AUTH_LOGIN))
             .json(&auth_request)
             .send()
             .await?;
@@ -55,7 +54,6 @@ impl DriftClient {
     }
 
     /// Profile Management
-
     pub async fn list_profiles(
         &self,
         page: Option<u32>,
@@ -86,7 +84,7 @@ impl DriftClient {
     ) -> Result<SearchResponse<ProfileSummary>> {
         let response = self
             .client
-            .post(&format!("{}{}", self.base_url, endpoints::PROFILES_SEARCH))
+            .post(format!("{}{}", self.base_url, endpoints::PROFILES_SEARCH))
             .json(request)
             .send()
             .await?;
@@ -125,7 +123,7 @@ impl DriftClient {
     pub async fn upload_profile(&self, request: &ProfileUploadRequest) -> Result<()> {
         let response = self
             .client
-            .post(&format!("{}{}", self.base_url, endpoints::PROFILES_UPLOAD))
+            .post(format!("{}{}", self.base_url, endpoints::PROFILES_UPLOAD))
             .header("Authorization", self.get_auth_header()?)
             .header("Content-Type", media_types::BOLT_PROFILE)
             .json(request)
@@ -163,7 +161,6 @@ impl DriftClient {
     }
 
     /// Plugin Management
-
     pub async fn list_plugins(
         &self,
         page: Option<u32>,
@@ -194,7 +191,7 @@ impl DriftClient {
     ) -> Result<SearchResponse<PluginSummary>> {
         let response = self
             .client
-            .post(&format!("{}{}", self.base_url, endpoints::PLUGINS_SEARCH))
+            .post(format!("{}{}", self.base_url, endpoints::PLUGINS_SEARCH))
             .json(request)
             .send()
             .await?;
@@ -233,7 +230,7 @@ impl DriftClient {
     pub async fn upload_plugin(&self, request: &PluginUploadRequest) -> Result<()> {
         let response = self
             .client
-            .post(&format!("{}{}", self.base_url, endpoints::PLUGINS_UPLOAD))
+            .post(format!("{}{}", self.base_url, endpoints::PLUGINS_UPLOAD))
             .header("Authorization", self.get_auth_header()?)
             .header("Content-Type", media_types::BOLT_PLUGIN_BINARY)
             .json(request)
@@ -250,7 +247,6 @@ impl DriftClient {
     }
 
     /// Metrics
-
     pub async fn get_metrics(&self) -> Result<RegistryMetrics> {
         let response = self
             .get(&format!("{}{}", self.base_url, endpoints::METRICS_OVERVIEW))
@@ -259,7 +255,6 @@ impl DriftClient {
     }
 
     /// Health Check
-
     pub async fn health_check(&self) -> Result<serde_json::Value> {
         let response = self
             .get(&format!("{}{}", self.base_url, endpoints::HEALTH))
@@ -275,7 +270,6 @@ impl DriftClient {
     }
 
     /// Utility Methods
-
     async fn get(&self, url: &str) -> Result<Response> {
         let mut request = self.client.get(url);
 
@@ -318,7 +312,6 @@ impl DriftClient {
 }
 
 /// High-level convenience methods for common operations
-
 impl DriftClient {
     /// Install a profile to local system
     pub async fn install_profile(&self, name: &str, install_path: &std::path::Path) -> Result<()> {
@@ -352,7 +345,7 @@ impl DriftClient {
         let plugin_data = self.download_plugin(name).await?;
 
         // Create plugin directory
-        let plugin_dir = install_path.join(&name);
+        let plugin_dir = install_path.join(name);
         tokio::fs::create_dir_all(&plugin_dir).await?;
 
         // Save plugin manifest

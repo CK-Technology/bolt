@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info};
 
 use super::NetworkInterface;
 
@@ -49,6 +49,7 @@ pub struct AccelerationConfig {
 }
 
 /// eBPF manager for container network acceleration
+#[derive(Debug)]
 pub struct EBPFManager {
     programs: Arc<RwLock<HashMap<String, EBPFProgram>>>,
     container_configs: Arc<RwLock<HashMap<String, AccelerationConfig>>>,

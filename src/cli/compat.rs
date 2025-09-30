@@ -200,7 +200,7 @@ async fn handle_api_server(port: u16, bind: String, runtime: BoltRuntime) -> Res
                 return;
             }
 
-            let parts: Vec<&str> = request_line.trim().split_whitespace().collect();
+            let parts: Vec<&str> = request_line.split_whitespace().collect();
             if parts.len() < 2 {
                 return;
             }

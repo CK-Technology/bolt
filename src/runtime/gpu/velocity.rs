@@ -1,4 +1,4 @@
-use super::{GPUInfo, GPUManager};
+use super::GPUManager;
 use anyhow::Result;
 use nix::unistd;
 use std::path::Path;

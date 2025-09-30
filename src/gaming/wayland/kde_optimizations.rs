@@ -155,7 +155,7 @@ impl KDEGamingOptimizer {
 
         // Try to activate gaming mode via D-Bus if available
         if let Ok(_) = Command::new("qdbus")
-            .args(&[
+            .args([
                 "org.kde.plasmashell",
                 "/PlasmaShell",
                 "org.kde.PlasmaShell.toggleDashboard",
@@ -235,7 +235,7 @@ impl KDEGamingOptimizer {
 
         // Try to enable VRR via xrandr for hybrid setup
         if let Ok(_) = Command::new("xrandr")
-            .args(&["--output", "DP-1", "--set", "vrr_capable", "1"])
+            .args(["--output", "DP-1", "--set", "vrr_capable", "1"])
             .output()
         {
             debug!("      VRR enabled via xrandr");
@@ -265,7 +265,7 @@ impl KDEGamingOptimizer {
 
         // Apply compositor-specific gaming settings
         if let Err(e) = Command::new("kwriteconfig5")
-            .args(&[
+            .args([
                 "--file",
                 "kwinrc",
                 "--group",
@@ -283,7 +283,7 @@ impl KDEGamingOptimizer {
 
         // Set animation speed for gaming
         if let Err(e) = Command::new("kwriteconfig5")
-            .args(&[
+            .args([
                 "--file",
                 "kwinrc",
                 "--group",

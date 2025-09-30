@@ -131,7 +131,7 @@ async fn setup_podman_nvidia_gpu(device_id: u32, dlss: bool, raytracing: bool) -
     info!("🐙 Configuring Podman NVIDIA GPU passthrough");
 
     // Configure CDI (Container Device Interface) for NVIDIA
-    let cdi_config = format!("/etc/cdi/nvidia.yaml");
+    let cdi_config = "/etc/cdi/nvidia.yaml".to_string();
     if !std::path::Path::new(&cdi_config).exists() {
         info!("  📋 Setting up NVIDIA CDI configuration");
         // In real implementation, would create CDI config
@@ -438,7 +438,7 @@ async fn launch_wine_game(game_path: &str, args: &[String]) -> Result<()> {
     info!("🍷 Launching Wine game: {}", game_path);
 
     // Check for Wine installation
-    if !Command::new("wine").arg("--version").output().is_ok() {
+    if Command::new("wine").arg("--version").output().is_err() {
         return Err(BoltError::Other(anyhow!("Wine not installed")));
     }
 

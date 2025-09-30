@@ -4,11 +4,11 @@ use crate::runtime::input::{
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::path::Path;
+use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::process::Command as AsyncCommand;
+use tokio::process::Command as TokioCommand;
 use tokio::sync::{RwLock, Semaphore};
 use tracing::{debug, error, info, warn};
 
@@ -85,7 +85,7 @@ pub struct GpuContext {
 
 #[derive(Debug)]
 pub struct GpuPerformanceMonitor {
-    metrics: RwLock<HashMap<String, GpuMetrics>>,
+    metrics: Arc<RwLock<HashMap<String, GpuMetrics>>>,
     monitoring_active: Arc<Mutex<bool>>,
 }
 
@@ -346,17 +346,17 @@ impl NvbindRuntime {
         command: &[String],
         selected_gpus: &[GpuInfo],
         container_rootfs: &Path,
-    ) -> Result<AsyncCommand> {
-        let mut cmd = AsyncCommand::new(&self.config.nvbind_path);
+    ) -> Result<TokioCommand> {
+        let mut cmd = TokioCommand::new(&self.config.nvbind_path);
 
         // nvbind run command
         cmd.arg("run");
 
         // Container name/ID
-        cmd.args(&["--name", container_id]);
+        cmd.args(["--name", container_id]);
 
         // Runtime configuration
-        cmd.args(&["--runtime", "bolt"]);
+        cmd.args(["--runtime", "bolt"]);
 
         // Performance profile
         let profile_str = match self.config.performance_profile {
@@ -366,7 +366,7 @@ impl NvbindRuntime {
             PerformanceProfile::Development => "development",
             PerformanceProfile::AI => "ai",
         };
-        cmd.args(&["--profile", profile_str]);
+        cmd.args(["--profile", profile_str]);
 
         // Driver mode
         let driver_str = match self.config.driver_mode {
@@ -375,11 +375,11 @@ impl NvbindRuntime {
             DriverMode::NvidiaOpen => "nvidia-open",
             DriverMode::Nouveau => "nouveau",
         };
-        cmd.args(&["--driver", driver_str]);
+        cmd.args(["--driver", driver_str]);
 
         // GPU device selection
         for gpu in selected_gpus {
-            cmd.args(&["--gpu", &gpu.id]);
+            cmd.args(["--gpu", &gpu.id]);
         }
 
         // Rootless optimization
@@ -388,16 +388,16 @@ impl NvbindRuntime {
         }
 
         // Container rootfs path
-        cmd.args(&["--rootfs", &container_rootfs.to_string_lossy()]);
+        cmd.args(["--rootfs", &container_rootfs.to_string_lossy()]);
 
         // Environment variables
         for (key, value) in &self.config.env_vars {
-            cmd.args(&["--env", &format!("{}={}", key, value)]);
+            cmd.args(["--env", &format!("{}={}", key, value)]);
         }
 
         // Add gaming-specific optimizations
         cmd.arg("--gaming");
-        cmd.args(&["--isolation", "exclusive"]);
+        cmd.args(["--isolation", "exclusive"]);
 
         // Image and command
         cmd.arg(image_name);
@@ -471,9 +471,10 @@ impl NvbindRuntime {
 
     async fn check_driver_status(&self) -> Result<DriverStatus> {
         // Use nvbind to check driver status
-        let output = Command::new(&self.config.nvbind_path)
-            .args(&["info", "--driver-check"])
+        let output = TokioCommand::new(&self.config.nvbind_path)
+            .args(["info", "--driver-check"])
             .output()
+            .await
             .context("Failed to check driver status via nvbind")?;
 
         if output.status.success() {
@@ -591,9 +592,10 @@ pub struct DriverStatus {
 async fn verify_nvbind_available(nvbind_path: &str) -> Result<()> {
     info!("🔍 Verifying nvbind is available at: {}", nvbind_path);
 
-    let output = Command::new(nvbind_path)
+    let output = TokioCommand::new(nvbind_path)
         .arg("--version")
         .output()
+        .await
         .context("Failed to execute nvbind --version")?;
 
     if !output.status.success() {
@@ -613,9 +615,10 @@ async fn verify_nvbind_available(nvbind_path: &str) -> Result<()> {
 async fn discover_gpus(config: &NvbindConfig) -> Result<Vec<GpuInfo>> {
     info!("🔍 Discovering available GPUs via nvbind");
 
-    let output = Command::new(&config.nvbind_path)
-        .args(&["info", "--gpus", "--format=json"])
+    let output = TokioCommand::new(&config.nvbind_path)
+        .args(["info", "--gpus", "--format=json"])
         .output()
+        .await
         .context("Failed to discover GPUs via nvbind")?;
 
     if !output.status.success() {
@@ -858,7 +861,7 @@ impl GpuPerformanceMonitor {
         }
 
         let monitor = Self {
-            metrics: RwLock::new(metrics),
+            metrics: Arc::new(RwLock::new(metrics)),
             monitoring_active: Arc::new(Mutex::new(true)),
         };
 

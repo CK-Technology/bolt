@@ -1,14 +1,11 @@
-use crate::{BoltError, Result};
-use anyhow::Context;
+use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::fs;
 use tokio::process::Command as AsyncCommand;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioConfig {
@@ -127,8 +124,8 @@ impl AudioManager {
     }
 
     async fn detect_audio_subsystem(config: &AudioConfig) -> Result<AudioSubsystem> {
-        match config.subsystem {
-            AudioSubsystem::Auto => {
+        match &config.subsystem {
+            &AudioSubsystem::Auto => {
                 // Check for PipeWire first (most modern)
                 if Self::is_pipewire_available().await {
                     info!("✅ PipeWire detected and available");
@@ -148,14 +145,14 @@ impl AudioManager {
                     Ok(AudioSubsystem::ALSA)
                 }
             }
-            specific => Ok(specific),
+            specific => Ok(specific.clone()),
         }
     }
 
     async fn is_pipewire_available() -> bool {
         // Check if PipeWire daemon is running
         if let Ok(output) = AsyncCommand::new("systemctl")
-            .args(&["--user", "is-active", "pipewire"])
+            .args(["--user", "is-active", "pipewire"])
             .output()
             .await
         {
@@ -202,7 +199,7 @@ impl AudioManager {
 
     async fn discover_pipewire_devices() -> Result<Vec<AudioDevice>> {
         let output = AsyncCommand::new("pw-cli")
-            .args(&["list-objects"])
+            .args(["list-objects"])
             .output()
             .await;
 
@@ -243,7 +240,7 @@ impl AudioManager {
 
     async fn discover_pulseaudio_devices() -> Result<Vec<AudioDevice>> {
         let output = AsyncCommand::new("pactl")
-            .args(&["list", "sinks", "short"])
+            .args(["list", "sinks", "short"])
             .output()
             .await;
 
@@ -283,7 +280,7 @@ impl AudioManager {
     }
 
     async fn discover_alsa_devices() -> Result<Vec<AudioDevice>> {
-        let output = AsyncCommand::new("aplay").args(&["-l"]).output().await;
+        let output = AsyncCommand::new("aplay").args(["-l"]).output().await;
 
         match output {
             Ok(output) if output.status.success() => {

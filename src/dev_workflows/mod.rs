@@ -1,11 +1,9 @@
 use crate::{BoltError, Result};
-use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::info;
 
 pub mod ai_assistant;
 pub mod auto_deployment;
@@ -20,6 +18,10 @@ pub struct DevWorkflowManager {
     ai_assistant: Arc<ai_assistant::AIAssistant>,
     dependency_cache: Arc<dependency_cache::IntelligentDependencyCache>,
     hot_reload: Arc<hot_reload::HotReloadManager>,
+    ide_integration: Arc<PlaceholderManager>,
+    performance_profiler: Arc<PlaceholderManager>,
+    security_scanner: Arc<PlaceholderManager>,
+    test_automation: Arc<PlaceholderManager>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -180,6 +182,12 @@ impl DevWorkflowManager {
         let hot_reload =
             Arc::new(hot_reload::HotReloadManager::new(config.ultra_fast_hot_reload).await?);
 
+        // Initialize placeholder managers for other features
+        let ide_integration = Arc::new(PlaceholderManager::new());
+        let performance_profiler = Arc::new(PlaceholderManager::new());
+        let security_scanner = Arc::new(PlaceholderManager::new());
+        let test_automation = Arc::new(PlaceholderManager::new());
+
         info!("✅ Advanced Developer Workflow Manager initialized");
 
         Ok(Self {
@@ -188,6 +196,10 @@ impl DevWorkflowManager {
             ai_assistant,
             dependency_cache,
             hot_reload,
+            ide_integration,
+            performance_profiler,
+            security_scanner,
+            test_automation,
         })
     }
 
@@ -202,7 +214,7 @@ impl DevWorkflowManager {
         info!("   Project Type: {:?}", project_type);
         info!("   Performance Tier: {:?}", performance_tier);
 
-        let env_id = format!("bolt-dev-{}", uuid::Uuid::new_v4().to_string()[..8]);
+        let env_id = format!("bolt-dev-{}", &uuid::Uuid::new_v4().to_string()[..8]);
 
         // Determine optimal configuration based on project type
         let (language_stack, frameworks, ai_features, resource_limits) = self
@@ -214,7 +226,7 @@ impl DevWorkflowManager {
             name: name.to_string(),
             language_stack: language_stack.clone(),
             frameworks: frameworks.clone(),
-            project_type,
+            project_type: project_type.clone(),
             performance_tier,
             ai_features: ai_features.clone(),
             hot_reload_enabled: self.config.ultra_fast_hot_reload,
@@ -260,7 +272,7 @@ impl DevWorkflowManager {
         // Initialize security scanning
         if self.config.security_scanning {
             self.security_scanner
-                .setup_environment(&env_id, &SecurityLevel::Enhanced)
+                .setup_environment_sec(&env_id, &SecurityLevel::Enhanced)
                 .await?;
         }
 
@@ -603,6 +615,57 @@ pub struct DevelopmentMetrics {
 pub struct ResourceUtilization {
     pub cpu_percent: f64,
     pub memory_percent: f64,
+    pub disk_io_mbps: f64,
+    pub network_io_mbps: f64,
+}
+
+/// Placeholder manager for features not yet implemented
+#[derive(Debug)]
+pub struct PlaceholderManager;
+
+impl Default for PlaceholderManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PlaceholderManager {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub async fn setup_environment(&self, _env_id: &str, _config: &[String]) -> Result<()> {
+        Ok(())
+    }
+
+    pub async fn setup_environment_sec(&self, _env_id: &str, _level: &SecurityLevel) -> Result<()> {
+        Ok(())
+    }
+
+    pub async fn start_profiling(&self, _env_id: &str) -> Result<()> {
+        Ok(())
+    }
+
+    pub async fn enable_instant_testing(&self, _env_id: &str) -> Result<()> {
+        Ok(())
+    }
+
+    pub async fn get_metrics(&self, _env_id: &str) -> Result<PlaceholderMetrics> {
+        Ok(PlaceholderMetrics::default())
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct PlaceholderMetrics {
+    pub suggestions_provided: u64,
+    pub average_reload_time_ms: f64,
+    pub completion_accuracy_percent: f64,
+    pub issues_detected: u32,
+    pub tests_executed: u64,
+    pub success_rate_percent: f64,
+    pub overall_score: u32,
+    pub cpu_utilization_percent: f64,
+    pub memory_utilization_percent: f64,
     pub disk_io_mbps: f64,
     pub network_io_mbps: f64,
 }

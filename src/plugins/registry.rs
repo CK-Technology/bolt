@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::PluginManifest;
 
@@ -78,7 +78,7 @@ impl PluginRegistry {
         Ok(())
     }
 
-    pub async fn uninstall(&self, plugin_name: &str, install_path: &PathBuf) -> Result<()> {
+    pub async fn uninstall(&self, plugin_name: &str, install_path: &Path) -> Result<()> {
         let plugin_path = install_path.join(plugin_name);
         if plugin_path.exists() {
             tokio::fs::remove_dir_all(plugin_path).await?;
@@ -111,7 +111,7 @@ impl PluginRegistry {
         Ok(())
     }
 
-    async fn download_plugin(&self, entry: &RegistryEntry, install_path: &PathBuf) -> Result<()> {
+    async fn download_plugin(&self, entry: &RegistryEntry, install_path: &Path) -> Result<()> {
         let plugin_dir = install_path.join(&entry.manifest.name);
         tokio::fs::create_dir_all(&plugin_dir).await?;
 
@@ -126,7 +126,7 @@ impl PluginRegistry {
         Ok(())
     }
 
-    async fn verify_plugin(&self, entry: &RegistryEntry, install_path: &PathBuf) -> Result<()> {
+    async fn verify_plugin(&self, entry: &RegistryEntry, install_path: &Path) -> Result<()> {
         let plugin_dir = install_path.join(&entry.manifest.name);
         let archive_path = plugin_dir.join("plugin.tar.gz");
 

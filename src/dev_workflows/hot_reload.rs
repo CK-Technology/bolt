@@ -24,7 +24,7 @@ pub struct HotReloadState {
     pub reload_success_rate: f64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FileWatcher {
     pub watched_paths: Vec<String>,
     pub file_patterns: Vec<String>,
@@ -273,8 +273,8 @@ impl HotReloadManager {
 
                 let tasks: Vec<ReloadTask> = {
                     let mut queue = reload_queue.lock().await;
-                    let tasks = queue.drain(..).collect();
-                    tasks
+
+                    queue.drain(..).collect()
                 };
 
                 for task in tasks {

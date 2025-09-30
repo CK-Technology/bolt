@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -56,6 +56,12 @@ pub struct PluginManager {
     gpu_plugins: Arc<RwLock<HashMap<String, Box<dyn GpuPlugin>>>>,
     optimization_plugins: Arc<RwLock<HashMap<String, Box<dyn OptimizationPlugin>>>>,
     plugin_registry: registry::PluginRegistry,
+}
+
+impl Default for PluginManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PluginManager {
@@ -153,7 +159,7 @@ impl PluginManager {
         plugins
     }
 
-    async fn load_manifest(&self, path: &PathBuf) -> Result<PluginManifest> {
+    async fn load_manifest(&self, path: &Path) -> Result<PluginManifest> {
         let manifest_path = path.join("plugin.toml");
         let content = tokio::fs::read_to_string(manifest_path).await?;
         Ok(toml::from_str(&content)?)
@@ -161,15 +167,12 @@ impl PluginManager {
 
     fn validate_permissions(&self, manifest: &PluginManifest) -> Result<()> {
         for permission in &manifest.permissions {
-            match permission {
-                Permission::SystemControl => {
-                    if !self.has_root_privileges() {
-                        return Err(anyhow::anyhow!(
-                            "Plugin requires system control but running without privileges"
-                        ));
-                    }
+            if let Permission::SystemControl = permission {
+                if !self.has_root_privileges() {
+                    return Err(anyhow::anyhow!(
+                        "Plugin requires system control but running without privileges"
+                    ));
                 }
-                _ => {}
             }
         }
         Ok(())

@@ -1,10 +1,15 @@
+//! Advanced networking features (partial implementation)
+//! VPN, mesh networking, service mesh capabilities
+
+#![allow(dead_code)]
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::info;
 
 #[derive(Debug, Clone)]
 pub struct VPNPolicy {
@@ -808,19 +813,19 @@ impl BoltAdvancedNetworking {
                 // Create VPN based on preferred protocol
                 match vpn_config.preferred_protocol {
                     VPNProtocolType::WireGuard => {
-                        self.vpn_manager.wireguard_manager.create_network();
+                        self.vpn_manager.wireguard_manager.create_network()?;
                     }
                     VPNProtocolType::Tailscale => {
-                        self.vpn_manager.tailscale_integration.create_network();
+                        self.vpn_manager.tailscale_integration.create_network()?;
                     }
                     VPNProtocolType::GhostWire => {
-                        self.vpn_manager.ghostwire_manager.create_network();
+                        self.vpn_manager.ghostwire_manager.create_network()?;
                     }
                     VPNProtocolType::OpenVPN => {
-                        self.vpn_manager.openvpn_manager.create_network();
+                        self.vpn_manager.openvpn_manager.create_network()?;
                     }
                     VPNProtocolType::IPSec => {
-                        self.vpn_manager.ipsec_manager.create_network();
+                        self.vpn_manager.ipsec_manager.create_network()?;
                     }
                 }
 
@@ -1374,6 +1379,12 @@ pub struct NetworkIntent;
 pub struct RoutingConfig;
 
 // Stub implementations for missing methods
+impl Default for MeshNetworkManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MeshNetworkManager {
     pub fn new() -> Self {
         Self {
@@ -1408,6 +1419,12 @@ impl MeshNetworkManager {
     ) -> Result<()> {
         info!("Initializing mesh network");
         Ok(())
+    }
+}
+
+impl Default for SDNController {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -1448,6 +1465,12 @@ impl SDNController {
     }
 }
 
+impl Default for NetworkMonitoring {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NetworkMonitoring {
     pub fn new() -> Self {
         Self {
@@ -1483,6 +1506,12 @@ impl NetworkMonitoring {
     }
 }
 
+impl Default for ZeroTrustManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ZeroTrustManager {
     pub fn new() -> Self {
         Self {
@@ -1501,6 +1530,12 @@ impl ZeroTrustManager {
     }
 }
 
+impl Default for AdvancedLoadBalancer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AdvancedLoadBalancer {
     pub fn new() -> Self {
         Self {
@@ -1516,6 +1551,12 @@ impl AdvancedLoadBalancer {
     ) -> Result<()> {
         info!("Configuring load balancing");
         Ok(())
+    }
+}
+
+impl Default for TrafficShaper {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

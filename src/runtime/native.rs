@@ -1,31 +1,50 @@
-use crate::{BoltError, Result};
-use anyhow::{anyhow, Context};
+use crate::Result;
+use anyhow::{Context, anyhow};
+use nix::sys::signal::{self, Signal};
+use nix::unistd::Pid;
+#[cfg(unix)]
+use nix::unistd::Uid;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+#[cfg(unix)]
+use std::os::unix::fs as unix_fs;
 use std::path::PathBuf;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
-use nix::sys::signal::{self, Signal};
-use nix::unistd::Pid;
 
-use super::oci::{ContainerConfig, ContainerState, execute_container};
-use super::storage::{StorageManager, ImageMetadata};
+use super::gpu_integration::{
+    AppliedCdiSpec, BoltGpuIntegration, GpuConfig, GpuIsolationLevel, GpuMetrics, GpuWorkloadType,
+};
+use super::hardware_detection::{HardwareProfile, WorkloadType as HwWorkloadType};
+use super::networking::{
+    BoltNetworkManager, ContainerNetworkConfig, NetworkDriver, NetworkPerformanceMode,
+    PortMapping as NetworkPortMapping, Protocol as NetworkProtocol,
+};
+use super::oci::{self, ContainerConfig, ContainerState};
+use super::performance::{BenchmarkResults, BoltPerformanceOptimizer, PerformanceMetrics};
 use super::security::{BoltSecurityManager, SecurityMetrics};
-use super::performance::{BoltPerformanceOptimizer, PerformanceMetrics, BenchmarkResults};
-use super::networking::{BoltNetworkManager, ContainerNetworkConfig, NetworkPerformanceMode};
-use super::gpu_integration::{BoltGpuIntegration, GpuConfig, GpuWorkloadType, GpuIsolationLevel, GpuMetrics};
+use super::storage::StorageManager;
+use std::{env, fs};
+
+const DEFAULT_ROOTFS_DIRS: &[&str] = &[
+    "bin", "etc", "lib", "tmp", "var", "usr", "dev", "proc", "sys",
+];
 
 /// Enhanced Native Bolt container runtime with cutting-edge security and performance
 #[derive(Debug)]
 pub struct BoltNativeRuntime {
     storage: StorageManager,
     containers: HashMap<String, ContainerState>,
+    container_networks: HashMap<String, String>,
     runtime_dir: PathBuf,
     security_manager: BoltSecurityManager,
     performance_optimizer: BoltPerformanceOptimizer,
     network_manager: BoltNetworkManager,
     gpu_integration: BoltGpuIntegration,
+    hardware_profile: Option<HardwareProfile>, // Cached hardware detection
     gaming_mode: bool,
+    rootless: bool,
+    default_network_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,6 +59,17 @@ pub struct NativeContainerConfig {
     pub working_dir: Option<String>,
     pub user: Option<String>,
     pub gpu_config: Option<GpuConfig>,
+    pub cpu_affinity: Option<Vec<usize>>, // CPU cores to pin to
+    pub workload_hint: Option<WorkloadHint>, // Hint for auto-optimization
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum WorkloadHint {
+    Gaming,
+    HighPerformance,
+    Balanced,
+    Background,
+    Batch,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,11 +99,24 @@ impl BoltNativeRuntime {
     }
 
     pub async fn new_with_gaming_mode(gaming_mode: bool) -> Result<Self> {
-        info!("🚀 Initializing Enhanced Bolt Native Runtime (gaming: {})", gaming_mode);
+        info!(
+            "🚀 Initializing Enhanced Bolt Native Runtime (gaming: {})",
+            gaming_mode
+        );
 
-        let runtime_dir = std::env::temp_dir().join("bolt-runtime");
-        std::fs::create_dir_all(&runtime_dir)
-            .context("Failed to create runtime directory")?;
+        let rootless = Self::detect_rootless_mode();
+        let runtime_dir = Self::resolve_runtime_dir(rootless)?;
+        fs::create_dir_all(&runtime_dir).with_context(|| {
+            format!(
+                "Failed to create runtime directory at {}",
+                runtime_dir.display()
+            )
+        })?;
+        info!(
+            "🧭 Runtime initialized in {} mode (dir: {})",
+            if rootless { "rootless" } else { "rootful" },
+            runtime_dir.display()
+        );
 
         // Initialize all subsystems
         let storage = StorageManager::new().await?;
@@ -90,15 +133,39 @@ impl BoltNativeRuntime {
 
         info!("✅ All subsystems initialized successfully");
 
+        // Detect hardware profile for CPU affinity optimization
+        let hardware_profile = match HardwareProfile::detect().await {
+            Ok(profile) => {
+                info!("🔍 Hardware profile detected:");
+                if profile.cpu.has_3d_vcache {
+                    info!("   ⚡ AMD 3D V-Cache detected - gaming optimizations enabled");
+                }
+                if profile.cpu.hybrid_architecture.is_some() {
+                    info!(
+                        "   🔀 Intel hybrid architecture detected - P/E core optimization enabled"
+                    );
+                }
+                Some(profile)
+            }
+            Err(e) => {
+                warn!("⚠️  Failed to detect hardware profile: {}", e);
+                None
+            }
+        };
+
         Ok(Self {
             storage,
             containers: HashMap::new(),
+            container_networks: HashMap::new(),
             runtime_dir,
             security_manager,
             performance_optimizer,
             network_manager,
             gpu_integration,
+            hardware_profile,
             gaming_mode,
+            rootless,
+            default_network_id: None,
         })
     }
 
@@ -119,10 +186,7 @@ impl BoltNativeRuntime {
         // Create container configuration
         let container_config = self.create_container_config(&container_id, &config).await?;
 
-        // Create OCI spec from configuration
-        let spec = self.create_oci_spec(&container_config).await?;
-
-        // Create container state
+        // Create container state (spec will be generated after rootfs preparation)
         let container_state = ContainerState {
             id: container_id.clone(),
             status: super::oci::ContainerStatus::Created,
@@ -133,33 +197,176 @@ impl BoltNativeRuntime {
         };
 
         // Create bundle directory
-        std::fs::create_dir_all(&container_state.bundle_path)
+        fs::create_dir_all(&container_state.bundle_path)
             .context("Failed to create container bundle")?;
 
-        // Write OCI spec to bundle
-        let spec_path = container_state.bundle_path.join("config.json");
-        let spec_json = serde_json::to_string_pretty(&spec)?;
-        std::fs::write(&spec_path, spec_json)
-            .context("Failed to write OCI spec")?;
+        // Prepare persistent root filesystem storage
+        let persistent_rootfs = self
+            .storage
+            .create_container_rootfs(&container_id, &config.image)
+            .await?;
+
+        // Prepare bundle root filesystem (until layers are applied, create minimal structure)
+        let bundle_rootfs = container_state.bundle_path.join("rootfs");
+        if bundle_rootfs.exists() {
+            let metadata = fs::symlink_metadata(&bundle_rootfs)?;
+            if metadata.file_type().is_symlink() {
+                fs::remove_file(&bundle_rootfs).with_context(|| {
+                    format!(
+                        "Failed to remove existing bundle rootfs symlink for {}",
+                        container_id
+                    )
+                })?;
+            } else {
+                fs::remove_dir_all(&bundle_rootfs).with_context(|| {
+                    format!("Failed to reset bundle rootfs for {}", container_id)
+                })?;
+            }
+        }
+        #[cfg(unix)]
+        {
+            unix_fs::symlink(&persistent_rootfs, &bundle_rootfs).with_context(|| {
+                format!(
+                    "Failed to symlink bundle rootfs to persistent storage for {}",
+                    container_id
+                )
+            })?;
+        }
+        #[cfg(not(unix))]
+        {
+            fs::create_dir_all(&bundle_rootfs)
+                .with_context(|| format!("Failed to create bundle rootfs for {}", container_id))?;
+            for dir in DEFAULT_ROOTFS_DIRS {
+                fs::create_dir_all(bundle_rootfs.join(dir))
+                    .with_context(|| format!("Failed to create rootfs directory '{}'", dir))?;
+            }
+        }
+
+        let mut applied_cdi: Option<AppliedCdiSpec> = None;
+
+        // Determine optimal CPU affinity
+        let cpu_affinity = if let Some(explicit_affinity) = &config.cpu_affinity {
+            // User explicitly specified CPU cores
+            Some(explicit_affinity.clone())
+        } else if let Some(ref hw_profile) = self.hardware_profile {
+            // Auto-determine based on workload hint
+            let workload = match config.workload_hint {
+                Some(WorkloadHint::Gaming) => HwWorkloadType::Gaming,
+                Some(WorkloadHint::HighPerformance) => HwWorkloadType::HighPerformance,
+                Some(WorkloadHint::Balanced) => HwWorkloadType::Balanced,
+                Some(WorkloadHint::Background) => HwWorkloadType::Background,
+                Some(WorkloadHint::Batch) => HwWorkloadType::Batch,
+                None if self.gaming_mode => HwWorkloadType::Gaming,
+                None => HwWorkloadType::Balanced,
+            };
+
+            match hw_profile.optimal_cpu_affinity(workload) {
+                super::hardware_detection::CpuAffinity::Specific(cores) => {
+                    info!("🎯 Auto CPU affinity ({:?}): {:?}", workload, cores);
+                    Some(cores)
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
 
         // Apply security hardening before execution
         let security_profile = if self.gaming_mode { "gaming" } else { "secure" };
-        self.security_manager.harden_container(&container_id, security_profile).await?;
+        self.security_manager
+            .harden_container(&container_id, security_profile)
+            .await?;
 
         // Apply performance optimizations
-        self.performance_optimizer.optimize_container(&container_id).await?;
+        self.performance_optimizer
+            .optimize_container(&container_id)
+            .await?;
 
         // Setup networking
-        self.setup_container_networking(&container_id, &config).await?;
+        self.setup_container_networking(&container_id, &config)
+            .await?;
+        let mut network_attached = self.container_networks.contains_key(&container_id);
 
         // Setup GPU if requested
         if let Some(ref gpu_config) = config.gpu_config {
             info!("🎮 Setting up GPU for container: {}", container_id);
-            self.gpu_integration.setup_gpu_for_container(&container_id, gpu_config).await?;
+            match self
+                .gpu_integration
+                .setup_gpu_for_container(&container_id, gpu_config)
+                .await
+            {
+                Ok(cdi_artifacts) => {
+                    applied_cdi = Some(cdi_artifacts);
+                }
+                Err(err) => {
+                    if network_attached {
+                        if let Err(clean_err) =
+                            self.teardown_container_networking(&container_id).await
+                        {
+                            warn!(
+                                "Failed to clean up networking after GPU setup error for {}: {}",
+                                container_id, clean_err
+                            );
+                        }
+                        network_attached = false;
+                    }
+                    return Err(err);
+                }
+            }
         }
 
+        // Create OCI spec from configuration
+        let spec = self
+            .create_oci_spec(
+                &container_state.config,
+                applied_cdi.as_ref(),
+                cpu_affinity.as_ref(),
+            )
+            .await?;
+
+        if let Some(ref cdi) = applied_cdi {
+            debug!(
+                devices = ?cdi.device_nodes,
+                mounts = ?cdi.mounts,
+                hooks = ?cdi.hooks,
+                "CDI artifacts prepared for container {}",
+                container_id
+            );
+        }
+
+        // Write OCI spec to bundle
+        let spec_path = container_state.bundle_path.join("config.json");
+        let spec_json = serde_json::to_string_pretty(&spec)?;
+        fs::write(&spec_path, spec_json).context("Failed to write OCI spec")?;
+
         // Execute container with native OCI runtime
-        let pid = execute_container(&container_state, &spec).await?;
+        let pid = match oci::execute_container(&container_state, &spec).await {
+            Ok(pid) => pid,
+            Err(err) => {
+                if network_attached {
+                    if let Err(clean_err) = self.teardown_container_networking(&container_id).await
+                    {
+                        warn!(
+                            "Failed to clean up networking after execution error for {}: {}",
+                            container_id, clean_err
+                        );
+                    }
+                }
+                return Err(err);
+            }
+        };
+
+        if pid > 0 {
+            if let Err(err) = self
+                .finalize_container_networking(&container_id, pid as i32)
+                .await
+            {
+                warn!(
+                    "Failed to finalize networking for container {}: {}",
+                    container_id, err
+                );
+            }
+        }
 
         // Update container state
         let mut updated_state = container_state;
@@ -179,7 +386,7 @@ impl BoltNativeRuntime {
             }
         });
 
-        info!("✅ Enhanced native container started: {}", container_id);
+        // info!("✅ Enhanced native container started: {}", container_id);
         Ok(container_id)
     }
 
@@ -187,7 +394,9 @@ impl BoltNativeRuntime {
     pub async fn stop_container(&mut self, id: &str) -> Result<()> {
         info!("🛑 Stopping container: {}", id);
 
-        let container = self.containers.get_mut(id)
+        let container = self
+            .containers
+            .get_mut(id)
             .ok_or_else(|| anyhow!("Container not found: {}", id))?;
 
         if let Some(pid) = container.pid {
@@ -231,26 +440,46 @@ impl BoltNativeRuntime {
     pub async fn remove_container(&mut self, id: &str, force: bool) -> Result<()> {
         info!("🗑️  Removing container: {}", id);
 
-        let container = self.containers.get(id)
-            .ok_or_else(|| anyhow!("Container not found: {}", id))?;
+        // Check if container exists and get its status and bundle path
+        let (is_running, bundle_path) = {
+            let container = self
+                .containers
+                .get(id)
+                .ok_or_else(|| anyhow!("Container not found: {}", id))?;
+
+            (
+                matches!(container.status, super::oci::ContainerStatus::Running),
+                container.bundle_path.clone(),
+            )
+        };
 
         // Stop if running
-        if matches!(container.status, super::oci::ContainerStatus::Running) {
+        if is_running {
             if force {
                 self.stop_container(id).await?;
             } else {
-                return Err(anyhow!("Container is running. Use force=true to stop and remove.").into());
+                return Err(
+                    anyhow!("Container is running. Use force=true to stop and remove.").into(),
+                );
             }
         }
 
         // Clean up bundle directory
-        if container.bundle_path.exists() {
-            std::fs::remove_dir_all(&container.bundle_path)
-                .context("Failed to remove container bundle")?;
+        if bundle_path.exists() {
+            fs::remove_dir_all(&bundle_path).context("Failed to remove container bundle")?;
         }
 
-        // Remove from containers map
+        if let Err(err) = self.teardown_container_networking(id).await {
+            warn!(
+                "Networking teardown encountered an issue for container {}: {}",
+                id, err
+            );
+        }
+
+        // Remove from containers map and persistent storage
         self.containers.remove(id);
+
+        self.storage.remove_container(id).await?;
 
         info!("✅ Container removed: {}", id);
         Ok(())
@@ -276,7 +505,10 @@ impl BoltNativeRuntime {
                     super::oci::ContainerStatus::Exited(code) => ContainerStatus::Exited(*code),
                 },
                 created: state.created,
-                ports: state.config.ports.iter()
+                ports: state
+                    .config
+                    .ports
+                    .iter()
                     .map(|p| format!("{}:{}", p.host_port, p.container_port))
                     .collect(),
                 pid: state.pid,
@@ -292,7 +524,6 @@ impl BoltNativeRuntime {
     pub async fn pull_image_native(&mut self, image: &str) -> Result<()> {
         info!("⬇️  Pulling image with native client: {}", image);
 
-        // Use the native storage manager to pull
         let metadata = self.storage.pull_image(image).await?;
 
         info!("✅ Image pulled: {} ({})", image, metadata.digest);
@@ -300,18 +531,32 @@ impl BoltNativeRuntime {
     }
 
     /// Build an image (replaces docker/podman build)
-    pub async fn build_image_native(&mut self, context: &str, tag: Option<&str>, dockerfile: &str) -> Result<()> {
+    pub async fn build_image_native(
+        &mut self,
+        context: &str,
+        tag: Option<&str>,
+        dockerfile: &str,
+    ) -> Result<()> {
         info!("🔨 Building image natively from: {}", context);
 
         // Use native image builder
-        self.storage.build_image(context, tag.unwrap_or("latest"), dockerfile).await?;
+        self.storage
+            .build_image(context, tag.unwrap_or("latest"), dockerfile)
+            .await?;
 
         info!("✅ Image built successfully");
         Ok(())
     }
 
     // Helper methods
-    async fn create_container_config(&self, id: &str, config: &NativeContainerConfig) -> Result<ContainerConfig> {
+    async fn create_container_config(
+        &self,
+        id: &str,
+        config: &NativeContainerConfig,
+    ) -> Result<ContainerConfig> {
+        // Pull image metadata for defaults
+        let image_metadata = self.storage.get_cached_image_metadata(&config.image);
+
         // Parse ports
         let mut ports = Vec::new();
         for port_str in &config.ports {
@@ -328,6 +573,15 @@ impl BoltNativeRuntime {
 
         // Parse environment variables
         let mut env = HashMap::new();
+        if let Some(ref metadata) = image_metadata {
+            for env_str in &metadata.config.env {
+                if let Some(eq_pos) = env_str.find('=') {
+                    let key = &env_str[..eq_pos];
+                    let value = &env_str[eq_pos + 1..];
+                    env.insert(key.to_string(), value.to_string());
+                }
+            }
+        }
         for env_str in &config.env {
             if let Some(eq_pos) = env_str.find('=') {
                 let key = &env_str[..eq_pos];
@@ -349,24 +603,61 @@ impl BoltNativeRuntime {
             }
         }
 
+        // Determine command/entrypoint behavior
+        let mut command = Vec::new();
+        if let Some(ref metadata) = image_metadata {
+            if let Some(ref entrypoint) = metadata.config.entrypoint {
+                command.extend(entrypoint.clone());
+            }
+        }
+
+        if let Some(custom_cmd) = config.command.clone() {
+            command.extend(custom_cmd);
+        } else if let Some(ref metadata) = image_metadata {
+            if let Some(ref default_cmd) = metadata.config.cmd {
+                command.extend(default_cmd.clone());
+            }
+        }
+
+        if command.is_empty() {
+            command.push("/bin/sh".to_string());
+        }
+
+        let working_dir = config.working_dir.clone().or_else(|| {
+            image_metadata
+                .as_ref()
+                .and_then(|m| m.config.working_dir.clone())
+        });
+
+        let user = config
+            .user
+            .clone()
+            .or_else(|| image_metadata.as_ref().and_then(|m| m.config.user.clone()));
+
         Ok(ContainerConfig {
             id: id.to_string(),
             name: config.name.clone(),
             image: config.image.clone(),
-            command: config.command.clone().unwrap_or_else(|| vec!["sh".to_string()]),
+            command,
             args: vec![],
             env,
-            working_dir: config.working_dir.clone(),
-            user: config.user.clone(),
+            working_dir,
+            user,
             ports,
             volumes,
             capabilities: vec![], // Default capabilities
             resource_limits: None,
             gaming_config: None, // Will be set later if needed
+            detach: config.detach,
         })
     }
 
-    async fn create_oci_spec(&self, config: &ContainerConfig) -> Result<oci_spec::runtime::Spec> {
+    async fn create_oci_spec(
+        &self,
+        config: &ContainerConfig,
+        applied_cdi: Option<&AppliedCdiSpec>,
+        cpu_affinity: Option<&Vec<usize>>,
+    ) -> Result<oci_spec::runtime::Spec> {
         use oci_spec::runtime::*;
 
         // Create basic OCI runtime spec
@@ -382,10 +673,27 @@ impl BoltNativeRuntime {
             process.set_cwd(PathBuf::from(cwd));
         }
 
+        if let Some(user) = self.process_user_for(config) {
+            process.set_user(user);
+        }
+
         // Set environment variables
-        let env_vec: Vec<String> = config.env.iter()
+        let mut combined_env: std::collections::HashMap<String, String> = config.env.clone();
+        if let Some(cdi) = applied_cdi {
+            for entry in &cdi.env {
+                if let Some((key, value)) = entry.split_once('=') {
+                    combined_env.insert(key.to_string(), value.to_string());
+                } else {
+                    combined_env.insert(entry.clone(), "1".to_string());
+                }
+            }
+        }
+
+        let mut env_vec: Vec<String> = combined_env
+            .into_iter()
             .map(|(k, v)| format!("{}={}", k, v))
             .collect();
+        env_vec.sort();
         if !env_vec.is_empty() {
             process.set_env(Some(env_vec));
         }
@@ -398,99 +706,563 @@ impl BoltNativeRuntime {
         spec_builder.set_root(Some(root));
 
         // Create basic mounts
-        let mounts = vec![
-            // Proc filesystem
-            Mount {
-                destination: PathBuf::from("/proc"),
-                typ: Some("proc".to_string()),
-                source: Some(PathBuf::from("proc")),
-                options: Some(vec!["nosuid".to_string(), "noexec".to_string(), "nodev".to_string()]),
-            },
-            // Sys filesystem
-            Mount {
-                destination: PathBuf::from("/sys"),
-                typ: Some("sysfs".to_string()),
-                source: Some(PathBuf::from("sysfs")),
-                options: Some(vec!["nosuid".to_string(), "noexec".to_string(), "nodev".to_string(), "ro".to_string()]),
-            },
-            // Dev filesystem
-            Mount {
-                destination: PathBuf::from("/dev"),
-                typ: Some("tmpfs".to_string()),
-                source: Some(PathBuf::from("tmpfs")),
-                options: Some(vec!["nosuid".to_string(), "strictatime".to_string(), "mode=755".to_string(), "size=65536k".to_string()]),
-            },
-        ];
+        let mut mounts = Vec::new();
+
+        // Proc filesystem
+        let mut proc_mount = Mount::default();
+        proc_mount.set_destination(PathBuf::from("/proc"));
+        proc_mount.set_typ(Some("proc".to_string()));
+        proc_mount.set_source(Some(PathBuf::from("proc")));
+        proc_mount.set_options(Some(vec![
+            "nosuid".to_string(),
+            "noexec".to_string(),
+            "nodev".to_string(),
+        ]));
+        mounts.push(proc_mount);
+
+        // Sys filesystem
+        let mut sys_mount = Mount::default();
+        sys_mount.set_destination(PathBuf::from("/sys"));
+        sys_mount.set_typ(Some("sysfs".to_string()));
+        sys_mount.set_source(Some(PathBuf::from("sysfs")));
+        sys_mount.set_options(Some(vec![
+            "nosuid".to_string(),
+            "noexec".to_string(),
+            "nodev".to_string(),
+            "ro".to_string(),
+        ]));
+        mounts.push(sys_mount);
+
+        // Dev filesystem
+        let mut dev_mount = Mount::default();
+        dev_mount.set_destination(PathBuf::from("/dev"));
+        dev_mount.set_typ(Some("tmpfs".to_string()));
+        dev_mount.set_source(Some(PathBuf::from("tmpfs")));
+        dev_mount.set_options(Some(vec![
+            "nosuid".to_string(),
+            "strictatime".to_string(),
+            "mode=755".to_string(),
+            "size=65536k".to_string(),
+        ]));
+        mounts.push(dev_mount);
+
+        // Add container volume mounts (OCI 7.0 compliant)
+        for volume in &config.volumes {
+            info!(
+                "📁 Adding volume mount: {} -> {}",
+                volume.source, volume.destination
+            );
+
+            // Resolve volume name to actual path
+            let source_path = self.resolve_volume_source(&volume.source).await?;
+
+            let mut volume_mount = Mount::default();
+            volume_mount.set_destination(PathBuf::from(&volume.destination));
+            volume_mount.set_typ(Some("bind".to_string()));
+            volume_mount.set_source(Some(PathBuf::from(&source_path)));
+
+            // Set mount options according to OCI 7.0 spec
+            let mut mount_options = vec!["bind".to_string()];
+            if volume.readonly {
+                mount_options.push("ro".to_string());
+            } else {
+                mount_options.push("rw".to_string());
+            }
+
+            // Add security and reliability options
+            mount_options.extend(vec!["relatime".to_string()]);
+
+            volume_mount.set_options(Some(mount_options));
+            mounts.push(volume_mount);
+
+            info!(
+                "✅ Volume mount configured: {} -> {} ({})",
+                source_path,
+                volume.destination,
+                if volume.readonly {
+                    "readonly"
+                } else {
+                    "readwrite"
+                }
+            );
+        }
+
+        // Inject CDI-provided mounts (bind-mount host paths to same container path)
+        if let Some(cdi) = applied_cdi {
+            for mount in &cdi.mounts {
+                let host = PathBuf::from(&mount.host_path);
+                if !host.exists() {
+                    warn!("Skipping CDI mount for missing path: {}", mount.host_path);
+                    continue;
+                }
+
+                let mut options = mount.options.clone();
+                if options.is_empty() {
+                    options.push("bind".to_string());
+                } else if !options.iter().any(|opt| {
+                    opt.eq_ignore_ascii_case("bind") || opt.eq_ignore_ascii_case("rbind")
+                }) {
+                    options.insert(0, "bind".to_string());
+                }
+
+                let mut cdi_mount = Mount::default();
+                cdi_mount.set_destination(PathBuf::from(&mount.container_path));
+                cdi_mount.set_typ(Some("bind".to_string()));
+                cdi_mount.set_source(Some(host));
+                cdi_mount.set_options(Some(options));
+                mounts.push(cdi_mount);
+            }
+        }
 
         spec_builder.set_mounts(Some(mounts));
+
+        let mut hook_section = Hooks::default();
+        let mut hooks_added = false;
+        if let Some(cdi) = applied_cdi {
+            for hook in &cdi.hooks {
+                let mut oci_hook = Hook::default();
+                oci_hook.set_path(PathBuf::from(&hook.path));
+                if !hook.args.is_empty() {
+                    oci_hook.set_args(Some(hook.args.clone()));
+                }
+                if !hook.env.is_empty() {
+                    oci_hook.set_env(Some(hook.env.clone()));
+                }
+                if let Some(timeout) = hook.timeout {
+                    oci_hook.set_timeout(Some(timeout as i64));
+                }
+
+                let target = hook.hook_name.replace(['-', '_'], "").to_lowercase();
+
+                match target.as_str() {
+                    "prestart" => {
+                        hook_section
+                            .prestart_mut()
+                            .get_or_insert_with(Vec::new)
+                            .push(oci_hook);
+                        hooks_added = true;
+                    }
+                    "createruntime" => {
+                        hook_section
+                            .create_runtime_mut()
+                            .get_or_insert_with(Vec::new)
+                            .push(oci_hook);
+                        hooks_added = true;
+                    }
+                    "createcontainer" => {
+                        hook_section
+                            .create_container_mut()
+                            .get_or_insert_with(Vec::new)
+                            .push(oci_hook);
+                        hooks_added = true;
+                    }
+                    "startcontainer" => {
+                        hook_section
+                            .start_container_mut()
+                            .get_or_insert_with(Vec::new)
+                            .push(oci_hook);
+                        hooks_added = true;
+                    }
+                    "poststart" => {
+                        hook_section
+                            .poststart_mut()
+                            .get_or_insert_with(Vec::new)
+                            .push(oci_hook);
+                        hooks_added = true;
+                    }
+                    "poststop" => {
+                        hook_section
+                            .poststop_mut()
+                            .get_or_insert_with(Vec::new)
+                            .push(oci_hook);
+                        hooks_added = true;
+                    }
+                    _ => {
+                        warn!(
+                            "Ignoring CDI hook '{}' (unsupported lifecycle event)",
+                            hook.hook_name
+                        );
+                    }
+                }
+            }
+        }
+
+        if hooks_added {
+            spec_builder.set_hooks(Some(hook_section));
+        }
 
         // Set Linux-specific configuration
         let mut linux = Linux::default();
 
         // Configure namespaces
-        let namespaces = vec![
-            LinuxNamespace {
-                typ: LinuxNamespaceType::Pid,
-                path: None,
-            },
-            LinuxNamespace {
-                typ: LinuxNamespaceType::Network,
-                path: None,
-            },
-            LinuxNamespace {
-                typ: LinuxNamespaceType::Mount,
-                path: None,
-            },
-            LinuxNamespace {
-                typ: LinuxNamespaceType::Ipc,
-                path: None,
-            },
-            LinuxNamespace {
-                typ: LinuxNamespaceType::Uts,
-                path: None,
-            },
-        ];
+        let mut namespaces = Vec::new();
+
+        let mut pid_ns = LinuxNamespace::default();
+        pid_ns.set_typ(LinuxNamespaceType::Pid);
+        namespaces.push(pid_ns);
+
+        let mut net_ns = LinuxNamespace::default();
+        net_ns.set_typ(LinuxNamespaceType::Network);
+        namespaces.push(net_ns);
+
+        let mut mount_ns = LinuxNamespace::default();
+        mount_ns.set_typ(LinuxNamespaceType::Mount);
+        namespaces.push(mount_ns);
+
+        let mut ipc_ns = LinuxNamespace::default();
+        ipc_ns.set_typ(LinuxNamespaceType::Ipc);
+        namespaces.push(ipc_ns);
+
+        let mut uts_ns = LinuxNamespace::default();
+        uts_ns.set_typ(LinuxNamespaceType::Uts);
+        namespaces.push(uts_ns);
+
+        if self.rootless {
+            let mut user_ns = LinuxNamespace::default();
+            user_ns.set_typ(LinuxNamespaceType::User);
+            namespaces.push(user_ns);
+
+            // TODO: Add uid/gid mappings for rootless containers
+            // The oci_spec API for LinuxIdMapping needs to be investigated
+        }
 
         linux.set_namespaces(Some(namespaces));
+
+        // Add CDI device nodes when available
+        if let Some(cdi) = applied_cdi {
+            fn parse_device_type(value: Option<&str>) -> Option<LinuxDeviceType> {
+                value.and_then(|raw| match raw.to_ascii_lowercase().as_str() {
+                    "a" | "all" => Some(LinuxDeviceType::A),
+                    "b" | "block" => Some(LinuxDeviceType::B),
+                    "c" | "char" | "character" => Some(LinuxDeviceType::C),
+                    "u" | "unbuffered" => Some(LinuxDeviceType::U),
+                    "p" | "fifo" | "pipe" => Some(LinuxDeviceType::P),
+                    _ => None,
+                })
+            }
+
+            let mut linux_devices = Vec::new();
+            for node in &cdi.device_nodes {
+                let path_buf = PathBuf::from(&node.path);
+                if !path_buf.exists() {
+                    warn!("Skipping CDI device for missing path: {}", node.path);
+                    continue;
+                }
+
+                let needs_stat = node.major.is_none()
+                    || node.minor.is_none()
+                    || node.device_type.is_none()
+                    || node.file_mode.is_none()
+                    || node.uid.is_none()
+                    || node.gid.is_none();
+
+                let stat_info = if needs_stat {
+                    match nix::sys::stat::stat(&path_buf) {
+                        Ok(stat) => Some(stat),
+                        Err(err) => {
+                            warn!("Failed to stat CDI device {}: {}", node.path, err);
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+
+                let device_type = parse_device_type(node.device_type.as_deref()).or_else(|| {
+                    stat_info.as_ref().and_then(|stat| {
+                        let file_type = nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode);
+                        if file_type.contains(nix::sys::stat::SFlag::S_IFCHR) {
+                            Some(LinuxDeviceType::C)
+                        } else if file_type.contains(nix::sys::stat::SFlag::S_IFBLK) {
+                            Some(LinuxDeviceType::B)
+                        } else {
+                            None
+                        }
+                    })
+                });
+
+                let Some(device_type) = device_type else {
+                    warn!(
+                        "Skipping CDI device {} (unable to determine device type)",
+                        node.path
+                    );
+                    continue;
+                };
+
+                let major = node.major.or_else(|| {
+                    stat_info
+                        .as_ref()
+                        .map(|stat| nix::sys::stat::major(stat.st_rdev) as i64)
+                });
+                let minor = node.minor.or_else(|| {
+                    stat_info
+                        .as_ref()
+                        .map(|stat| nix::sys::stat::minor(stat.st_rdev) as i64)
+                });
+
+                let (Some(major), Some(minor)) = (major, minor) else {
+                    warn!(
+                        "Skipping CDI device {} (missing major/minor numbers)",
+                        node.path
+                    );
+                    continue;
+                };
+
+                let mut device = LinuxDevice::default();
+                device.set_path(path_buf);
+                device.set_typ(device_type);
+                device.set_major(major);
+                device.set_minor(minor);
+
+                let file_mode = node
+                    .file_mode
+                    .or_else(|| stat_info.as_ref().map(|stat| (stat.st_mode & 0o7777)));
+                if let Some(mode) = file_mode {
+                    device.set_file_mode(Some(mode));
+                } else {
+                    device.set_file_mode(Some(0o666));
+                }
+
+                if let Some(uid) = node
+                    .uid
+                    .or_else(|| stat_info.as_ref().map(|stat| stat.st_uid))
+                {
+                    device.set_uid(Some(uid));
+                }
+                if let Some(gid) = node
+                    .gid
+                    .or_else(|| stat_info.as_ref().map(|stat| stat.st_gid))
+                {
+                    device.set_gid(Some(gid));
+                }
+
+                linux_devices.push(device);
+            }
+
+            if !linux_devices.is_empty() {
+                linux.set_devices(Some(linux_devices));
+            }
+        }
+
+        // Apply CPU affinity if specified
+        if let Some(cpu_cores) = cpu_affinity {
+            let mut resources = match linux.resources() {
+                Some(r) => r.clone(),
+                None => oci_spec::runtime::LinuxResources::default(),
+            };
+            let mut cpu = match resources.cpu() {
+                Some(c) => c.clone(),
+                None => oci_spec::runtime::LinuxCpu::default(),
+            };
+
+            // Convert core list to cpuset format (e.g., "0-3,6-7")
+            let cpuset = if cpu_cores.is_empty() {
+                None
+            } else {
+                let mut sorted_cores = cpu_cores.clone();
+                sorted_cores.sort_unstable();
+                Some(Self::format_cpuset(&sorted_cores))
+            };
+
+            if let Some(ref cpuset_str) = cpuset {
+                cpu.set_cpus(Some(cpuset_str.clone()));
+                info!("🎯 CPU affinity applied: {}", cpuset_str);
+            }
+
+            resources.set_cpu(Some(cpu));
+            linux.set_resources(Some(resources));
+        }
+
         spec_builder.set_linux(Some(linux));
 
         Ok(spec_builder)
     }
 
-    /// Setup container networking with advanced optimization
-    async fn setup_container_networking(&self, container_id: &str, config: &NativeContainerConfig) -> Result<()> {
-        info!("🌐 Setting up advanced networking for container: {}", container_id);
+    /// Helper to format CPU cores into cpuset format
+    fn format_cpuset(cores: &[usize]) -> String {
+        if cores.is_empty() {
+            return String::new();
+        }
 
-        // Create network configuration
-        let network_config = ContainerNetworkConfig {
-            port_mappings: config.ports.iter().map(|port_str| {
+        let mut ranges = Vec::new();
+        let mut start = cores[0];
+        let mut end = cores[0];
+
+        for &core in &cores[1..] {
+            if core == end + 1 {
+                end = core;
+            } else {
+                if start == end {
+                    ranges.push(format!("{}", start));
+                } else {
+                    ranges.push(format!("{}-{}", start, end));
+                }
+                start = core;
+                end = core;
+            }
+        }
+
+        // Add final range
+        if start == end {
+            ranges.push(format!("{}", start));
+        } else {
+            ranges.push(format!("{}-{}", start, end));
+        }
+
+        ranges.join(",")
+    }
+
+    /// Resolve volume source path (handle named volumes and host paths)
+    async fn resolve_volume_source(&self, source: &str) -> Result<String> {
+        // Check if it's an absolute path (host mount)
+        if source.starts_with('/') {
+            info!("🗂️ Using host path mount: {}", source);
+
+            // Ensure the host path exists
+            if !std::path::Path::new(source).exists() {
+                return Err(anyhow!("Host path does not exist: {}", source).into());
+            }
+
+            return Ok(source.to_string());
+        }
+
+        // Handle named volumes from our volume management system
+        info!("📦 Resolving named volume: {}", source);
+
+        // Use our volume manager to get the volume path
+        let volume_manager = crate::volume::VolumeManager::new_async(
+            self.runtime_dir
+                .parent()
+                .unwrap_or(&self.runtime_dir)
+                .join("volumes"),
+        )
+        .await?;
+
+        if let Some(mount_path) = volume_manager.get_volume_mount_path(source) {
+            let path_str = mount_path.to_string_lossy().to_string();
+            info!("✅ Named volume resolved: {} -> {}", source, path_str);
+
+            // Ensure volume directory exists
+            tokio::fs::create_dir_all(&mount_path)
+                .await
+                .with_context(|| format!("Failed to create volume directory: {}", path_str))?;
+
+            Ok(path_str)
+        } else {
+            Err(anyhow!("Named volume '{}' not found", source).into())
+        }
+    }
+
+    /// Setup container networking with advanced optimization
+    async fn setup_container_networking(
+        &mut self,
+        container_id: &str,
+        config: &NativeContainerConfig,
+    ) -> Result<()> {
+        if self.rootless {
+            warn!(
+                "Rootless mode detected; skipping privileged network setup for container {}",
+                container_id
+            );
+            return Ok(());
+        }
+
+        info!(
+            "🌐 Setting up advanced networking for container: {}",
+            container_id
+        );
+
+        // Ensure a dedicated network namespace exists for the container
+        oci::setup_network_namespace(container_id).await?;
+
+        let port_mappings = config
+            .ports
+            .iter()
+            .map(|port_str| {
                 let parts: Vec<&str> = port_str.split(':').collect();
                 if parts.len() == 2 {
-                    super::networking::PortMapping {
+                    NetworkPortMapping {
                         host_port: parts[0].parse().unwrap_or(8080),
                         container_port: parts[1].parse().unwrap_or(8080),
-                        protocol: super::networking::Protocol::Tcp,
+                        protocol: NetworkProtocol::Tcp,
                         quic_enabled: self.gaming_mode,
                     }
                 } else {
-                    super::networking::PortMapping {
+                    NetworkPortMapping {
                         host_port: 8080,
                         container_port: 8080,
-                        protocol: super::networking::Protocol::Tcp,
+                        protocol: NetworkProtocol::Tcp,
                         quic_enabled: self.gaming_mode,
                     }
                 }
-            }).collect(),
+            })
+            .collect();
+
+        let network_config = ContainerNetworkConfig {
+            port_mappings,
             bandwidth_limit: None,
-            latency_target: if self.gaming_mode { Some(100) } else { None }, // 100μs for gaming
-            dns_servers: vec![], // Use system DNS
+            latency_target: if self.gaming_mode { Some(100) } else { None },
+            dns_servers: vec![],
         };
 
-        // Create or get default network
-        let network_id = "default".to_string();
+        let network_id = match &self.default_network_id {
+            Some(id) => id.clone(),
+            None => {
+                let performance = if self.gaming_mode {
+                    NetworkPerformanceMode::Gaming
+                } else {
+                    NetworkPerformanceMode::Balanced
+                };
+                let created = self
+                    .network_manager
+                    .create_network(
+                        "bolt-native",
+                        NetworkDriver::BoltBridge,
+                        "172.18.0.0/16",
+                        performance,
+                    )
+                    .await?;
+                self.default_network_id = Some(created.clone());
+                created
+            }
+        };
 
-        // Connect container to network
-        // self.network_manager.connect_container(&network_id, container_id, network_config).await?;
+        self.network_manager
+            .connect_container(&network_id, container_id, network_config)
+            .await?;
+
+        self.container_networks
+            .insert(container_id.to_string(), network_id);
+
+        Ok(())
+    }
+
+    async fn teardown_container_networking(&mut self, container_id: &str) -> Result<()> {
+        if self.rootless {
+            return Ok(());
+        }
+
+        if let Some(network_id) = self.container_networks.get(container_id).cloned() {
+            if let Err(err) = self
+                .network_manager
+                .disconnect_container(&network_id, container_id)
+                .await
+            {
+                warn!(
+                    "Failed to disconnect container {} from network {}: {}",
+                    container_id, network_id, err
+                );
+            }
+        }
+
+        if let Err(err) = oci::cleanup_network_namespace(container_id).await {
+            warn!(
+                "Failed to clean up network namespace for container {}: {}",
+                container_id, err
+            );
+        }
+
+        self.container_networks.remove(container_id);
 
         Ok(())
     }
@@ -507,35 +1279,69 @@ impl BoltNativeRuntime {
             interval.tick().await;
 
             // Monitor security
-            if let Ok(security_metrics) = security_manager.monitor_container_security(&container_id).await {
-                if matches!(security_metrics.threat_level, super::security::ThreatLevel::High | super::security::ThreatLevel::Critical) {
-                    warn!("🚨 High threat level detected for container: {}", container_id);
+            if let Ok(security_metrics) = security_manager
+                .monitor_container_security(&container_id)
+                .await
+            {
+                if matches!(
+                    security_metrics.threat_level,
+                    super::security::ThreatLevel::High | super::security::ThreatLevel::Critical
+                ) {
+                    warn!(
+                        "🚨 High threat level detected for container: {}",
+                        container_id
+                    );
                 }
             }
 
             // Monitor performance
-            if let Ok(perf_metrics) = performance_optimizer.monitor_performance(&container_id).await {
-                debug!("📊 Container {} performance: CPU {:.1}%, Memory {}MB",
-                       container_id, perf_metrics.cpu_usage, perf_metrics.memory_usage / 1024 / 1024);
+            if let Ok(perf_metrics) = performance_optimizer
+                .monitor_performance(&container_id)
+                .await
+            {
+                debug!(
+                    "📊 Container {} performance: CPU {:.1}%, Memory {}MB",
+                    container_id,
+                    perf_metrics.cpu_usage,
+                    perf_metrics.memory_usage / 1024 / 1024
+                );
             }
         }
     }
 
     /// Get enhanced container metrics including GPU
-    pub async fn get_container_metrics(&self, container_id: &str) -> Result<(SecurityMetrics, PerformanceMetrics, Option<GpuMetrics>)> {
-        let security_metrics = self.security_manager.monitor_container_security(container_id).await?;
-        let performance_metrics = self.performance_optimizer.monitor_performance(container_id).await?;
+    pub async fn get_container_metrics(
+        &self,
+        container_id: &str,
+    ) -> Result<(SecurityMetrics, PerformanceMetrics, Option<GpuMetrics>)> {
+        let security_metrics = self
+            .security_manager
+            .monitor_container_security(container_id)
+            .await?;
+        let performance_metrics = self
+            .performance_optimizer
+            .monitor_performance(container_id)
+            .await?;
 
         // Get GPU metrics if GPU is enabled for this container
-        let gpu_metrics = self.gpu_integration.get_gpu_metrics(container_id).await.ok();
+        let gpu_metrics = self
+            .gpu_integration
+            .get_gpu_metrics(container_id)
+            .await
+            .ok();
 
         Ok((security_metrics, performance_metrics, gpu_metrics))
     }
 
     /// Benchmark container performance
     pub async fn benchmark_container(&self, container_id: &str) -> Result<BenchmarkResults> {
-        info!("🏁 Running comprehensive benchmark for container: {}", container_id);
-        self.performance_optimizer.benchmark_container(container_id).await
+        info!(
+            "🏁 Running comprehensive benchmark for container: {}",
+            container_id
+        );
+        self.performance_optimizer
+            .benchmark_container(container_id)
+            .await
     }
 
     /// Enable gaming mode for existing runtime
@@ -548,8 +1354,15 @@ impl BoltNativeRuntime {
 
         // Apply gaming optimizations to all running containers
         for container_id in self.containers.keys() {
-            if let Err(e) = self.performance_optimizer.optimize_container(container_id).await {
-                warn!("Failed to apply gaming optimizations to container {}: {}", container_id, e);
+            if let Err(e) = self
+                .performance_optimizer
+                .optimize_container(container_id)
+                .await
+            {
+                warn!(
+                    "Failed to apply gaming optimizations to container {}: {}",
+                    container_id, e
+                );
             }
         }
 
@@ -576,6 +1389,7 @@ impl BoltNativeRuntime {
             isolation_level: GpuIsolationLevel::Exclusive,
             memory_limit: Some("8GB".to_string()),
             snapshot_support: true,
+            quick_sync: None, // Intel Quick Sync not used for gaming
         };
 
         let config = NativeContainerConfig {
@@ -589,6 +1403,8 @@ impl BoltNativeRuntime {
             working_dir: None,
             user: None,
             gpu_config: Some(gpu_config),
+            cpu_affinity: None,
+            workload_hint: Some(WorkloadHint::Gaming),
         };
 
         self.run_container(config).await
@@ -614,6 +1430,7 @@ impl BoltNativeRuntime {
             isolation_level: GpuIsolationLevel::Virtual,
             memory_limit: Some("12GB".to_string()),
             snapshot_support: false,
+            quick_sync: None, // Intel Quick Sync not used for AI/ML
         };
 
         let config = NativeContainerConfig {
@@ -627,6 +1444,8 @@ impl BoltNativeRuntime {
             working_dir: None,
             user: None,
             gpu_config: Some(gpu_config),
+            cpu_affinity: None,
+            workload_hint: Some(WorkloadHint::Gaming),
         };
 
         self.run_container(config).await
@@ -635,5 +1454,95 @@ impl BoltNativeRuntime {
     /// Check if nvbind GPU acceleration is available
     pub fn is_nvbind_available(&self) -> bool {
         self.gpu_integration.is_nvbind_available()
+    }
+
+    async fn finalize_container_networking(&self, container_id: &str, pid: i32) -> Result<()> {
+        if self.rootless {
+            return Ok(());
+        }
+
+        let network_id = match self.container_networks.get(container_id) {
+            Some(id) => id.clone(),
+            None => return Ok(()),
+        };
+
+        self.network_manager
+            .configure_container_namespace(&network_id, container_id, pid)
+            .await?;
+
+        Ok(())
+    }
+
+    fn process_user_for(&self, config: &ContainerConfig) -> Option<oci_spec::runtime::User> {
+        if let Some(ref user_str) = config.user {
+            return Self::parse_user_spec(user_str);
+        }
+
+        if self.rootless {
+            #[cfg(unix)]
+            {
+                let mut user = oci_spec::runtime::User::default();
+                user.set_uid(0);
+                user.set_gid(0);
+                return Some(user);
+            }
+        }
+
+        None
+    }
+
+    fn parse_user_spec(value: &str) -> Option<oci_spec::runtime::User> {
+        use oci_spec::runtime::User;
+
+        if value.is_empty() {
+            return None;
+        }
+
+        let mut user = User::default();
+
+        if let Some((uid_str, gid_str)) = value.split_once(':') {
+            if let Ok(uid) = uid_str.parse::<u32>() {
+                user.set_uid(uid);
+                if let Ok(gid) = gid_str.parse::<u32>() {
+                    user.set_gid(gid);
+                }
+                return Some(user);
+            }
+        } else if let Ok(uid) = value.parse::<u32>() {
+            user.set_uid(uid);
+            return Some(user);
+        }
+
+        None
+    }
+
+    fn detect_rootless_mode() -> bool {
+        if env::var_os("BOLT_FORCE_ROOTFUL").is_some() {
+            return false;
+        }
+        if env::var_os("BOLT_FORCE_ROOTLESS").is_some() {
+            return true;
+        }
+
+        #[cfg(unix)]
+        {
+            !Uid::current().is_root()
+        }
+
+        #[cfg(not(unix))]
+        {
+            false
+        }
+    }
+
+    fn resolve_runtime_dir(rootless: bool) -> Result<PathBuf> {
+        if rootless {
+            let base = dirs::runtime_dir()
+                .or_else(dirs::data_dir)
+                .unwrap_or_else(env::temp_dir);
+            Ok(base.join("bolt").join("runtime"))
+        } else {
+            Ok(PathBuf::from("/run/bolt"))
+        }
     }
 }

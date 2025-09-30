@@ -1,14 +1,12 @@
-use crate::{BoltError, Result};
-use anyhow::{anyhow, Context};
+use crate::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::time::{Duration, Instant};
-use tracing::{debug, info, warn, error};
-use tokio::sync::RwLock;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
+use tracing::{debug, info};
 
 /// Bolt Performance Optimizer - Revolutionary container performance
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoltPerformanceOptimizer {
     pub cpu_optimizer: CpuOptimizer,
     pub memory_optimizer: MemoryOptimizer,
@@ -86,7 +84,7 @@ pub enum IoScheduler {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum IoPriority {
-    RealTime(u8), // 0-7, 0 highest
+    RealTime(u8),   // 0-7, 0 highest
     BestEffort(u8), // 0-7, 0 highest
     Idle,
 }
@@ -117,7 +115,10 @@ pub struct PerformanceMetrics {
 impl BoltPerformanceOptimizer {
     /// Initialize performance optimizer with gaming-first defaults
     pub fn new(gaming_mode: bool) -> Self {
-        info!("⚡ Initializing Bolt Performance Optimizer (gaming: {})", gaming_mode);
+        info!(
+            "⚡ Initializing Bolt Performance Optimizer (gaming: {})",
+            gaming_mode
+        );
 
         Self {
             cpu_optimizer: CpuOptimizer::gaming_optimized(gaming_mode),
@@ -152,7 +153,10 @@ impl BoltPerformanceOptimizer {
         }
 
         let optimization_time = start_time.elapsed();
-        info!("✅ Container optimization completed in {:?}", optimization_time);
+        info!(
+            "✅ Container optimization completed in {:?}",
+            optimization_time
+        );
 
         // Update metrics
         let mut metrics = self.metrics.write().await;
@@ -163,7 +167,10 @@ impl BoltPerformanceOptimizer {
 
     /// CPU performance optimization
     async fn optimize_cpu(&self, container_id: &str) -> Result<()> {
-        info!("🔧 Optimizing CPU performance for container: {}", container_id);
+        info!(
+            "🔧 Optimizing CPU performance for container: {}",
+            container_id
+        );
 
         let cpu = &self.cpu_optimizer;
 
@@ -209,7 +216,10 @@ impl BoltPerformanceOptimizer {
 
     /// Memory performance optimization
     async fn optimize_memory(&self, container_id: &str) -> Result<()> {
-        info!("🧠 Optimizing memory performance for container: {}", container_id);
+        info!(
+            "🧠 Optimizing memory performance for container: {}",
+            container_id
+        );
 
         let mem = &self.memory_optimizer;
 
@@ -252,7 +262,10 @@ impl BoltPerformanceOptimizer {
 
     /// I/O performance optimization
     async fn optimize_io(&self, container_id: &str) -> Result<()> {
-        info!("💾 Optimizing I/O performance for container: {}", container_id);
+        info!(
+            "💾 Optimizing I/O performance for container: {}",
+            container_id
+        );
 
         let io = &self.io_optimizer;
 
@@ -293,7 +306,10 @@ impl BoltPerformanceOptimizer {
 
     /// Network performance optimization
     async fn optimize_network(&self, container_id: &str) -> Result<()> {
-        info!("🌐 Optimizing network performance for container: {}", container_id);
+        info!(
+            "🌐 Optimizing network performance for container: {}",
+            container_id
+        );
 
         let net = &self.network_optimizer;
 
@@ -332,7 +348,10 @@ impl BoltPerformanceOptimizer {
 
     /// Gaming-specific performance optimizations
     async fn apply_gaming_optimizations(&self, container_id: &str) -> Result<()> {
-        info!("🎮 Applying gaming-specific optimizations for container: {}", container_id);
+        info!(
+            "🎮 Applying gaming-specific optimizations for container: {}",
+            container_id
+        );
 
         // Disable CPU power saving
         info!("Disabling CPU power saving features");
@@ -385,7 +404,10 @@ impl BoltPerformanceOptimizer {
 
     /// Benchmark container performance
     pub async fn benchmark_container(&self, container_id: &str) -> Result<BenchmarkResults> {
-        info!("🏁 Running performance benchmark for container: {}", container_id);
+        info!(
+            "🏁 Running performance benchmark for container: {}",
+            container_id
+        );
 
         let start_time = Instant::now();
 

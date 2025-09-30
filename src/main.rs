@@ -1,7 +1,7 @@
 mod cli;
 
 use anyhow::Result;
-use bolt::{BoltConfig, BoltRuntime, gaming, network, surge};
+use bolt::{BoltConfig, BoltRuntime, gaming, surge};
 use clap::Parser;
 use cli::{Cli, Commands, GamingCommands, NetworkCommands, SurgeCommands, VolumeCommands, compat};
 use tracing::info;
@@ -371,8 +371,13 @@ async fn main() -> Result<()> {
 
             NetworkCommands::Remove { name } => {
                 info!("Removing network: {}", name);
-                network::remove_network(&name).await?;
-                info!("✅ Network '{}' removed successfully", name);
+
+                // Use the enhanced NetworkManager to remove QUIC networks
+                let mut network_manager = bolt::networking::NetworkManager::new(
+                    bolt::networking::NetworkConfig::default(),
+                )
+                .await?;
+                network_manager.remove_bolt_network(&name).await?;
             }
         },
 
@@ -390,87 +395,139 @@ async fn main() -> Result<()> {
                 if !opt.is_empty() {
                     info!("  Options: {:?}", opt);
                 }
-                // Create volume with real implementation
-                let mut volume_manager = bolt::volume::VolumeManager::new()?;
-                let options = bolt::volume::VolumeCreateOptions {
-                    driver: "local".to_string(),
-                    size: size.clone(),
-                    labels: std::collections::HashMap::new(),
-                    options: opt
-                        .iter()
-                        .map(|s| {
-                            let parts: Vec<&str> = s.splitn(2, '=').collect();
-                            if parts.len() == 2 {
-                                (parts[0].to_string(), parts[1].to_string())
-                            } else {
-                                (s.clone(), "".to_string())
-                            }
-                        })
-                        .collect(),
-                };
-                volume_manager.create_volume(&name, options)?;
-                info!("✅ Volume '{}' created successfully", name);
+
+                let volume_info = runtime
+                    .create_volume(&name, &driver, size.as_deref(), &opt)
+                    .await?;
+                info!("✅ Volume '{}' created successfully", volume_info.name);
+                info!("   Mountpoint: {}", volume_info.mountpoint.display());
             }
 
             VolumeCommands::List => {
                 info!("📋 Listing volumes...");
-                // List volumes with real implementation
-                let volume_manager = bolt::volume::VolumeManager::new()?;
-                let volumes = volume_manager.list_volumes();
+                let volumes = runtime.list_volumes().await?;
 
-                println!("VOLUME NAME    DRIVER    SIZE      CREATED");
-                println!("─────────────────────────────────────────────");
+                if volumes.is_empty() {
+                    println!("No volumes found");
+                    return Ok(());
+                }
+
+                println!(
+                    "{:<15} {:<10} {:<20} {:<25} {:<15}",
+                    "NAME", "DRIVER", "CREATED", "MOUNTPOINT", "SIZE"
+                );
+                println!("{}", "─".repeat(85));
 
                 for volume in volumes {
+                    let created_display = volume.created.format("%Y-%m-%d %H:%M");
+                    let mountpoint_display = volume.mountpoint.to_string_lossy();
+                    let size_display = if let Some(limit) = volume.size_limit {
+                        format!("{} bytes", limit)
+                    } else {
+                        "unlimited".to_string()
+                    };
+
                     println!(
-                        "{:<14} {:<9} {:<9} {}",
-                        volume.name, volume.driver, volume.size, volume.created
+                        "{:<15} {:<10} {:<20} {:<25} {:<15}",
+                        volume.name,
+                        volume.driver,
+                        created_display,
+                        mountpoint_display,
+                        size_display
                     );
                 }
             }
 
             VolumeCommands::Remove { name, force } => {
                 info!("Removing volume: {} (force: {})", name, force);
-                // Remove volume with real implementation
-                let mut volume_manager = bolt::volume::VolumeManager::new()?;
-                volume_manager.remove_volume(&name, force)?;
+                runtime.remove_volume(&name, force).await?;
                 info!("✅ Volume '{}' removed successfully", name);
             }
 
             VolumeCommands::Inspect { name } => {
                 info!("Inspecting volume: {}", name);
-                // Inspect volume with real implementation
-                let volume_manager = bolt::volume::VolumeManager::new()?;
-                let volume = volume_manager.inspect_volume(&name)?;
+                let volumes = runtime.list_volumes().await?;
+                let volume = volumes.iter().find(|v| v.name == name);
 
-                println!("Volume details for '{}':", name);
-                println!("  Driver: {}", volume.driver);
-                println!("  Mount Point: {:?}", volume.mount_point);
-                println!(
-                    "  Size: {}",
-                    if let Some(size) = volume.size_bytes {
-                        format!("{} bytes", size)
-                    } else {
-                        "N/A".to_string()
+                match volume {
+                    Some(vol) => {
+                        println!("Volume details for '{}':", name);
+                        println!("  Name: {}", vol.name);
+                        println!("  Driver: {}", vol.driver);
+                        println!("  Mountpoint: {}", vol.mountpoint.display());
+                        println!("  Created: {}", vol.created.format("%Y-%m-%d %H:%M:%S UTC"));
+                        println!("  Scope: {:?}", vol.scope);
+                        if let Some(limit) = vol.size_limit {
+                            println!("  Size Limit: {} bytes", limit);
+                        } else {
+                            println!("  Size Limit: unlimited");
+                        }
+                        if !vol.used_by.is_empty() {
+                            println!("  Used By: {}", vol.used_by.join(", "));
+                        } else {
+                            println!("  Used By: none");
+                        }
+                        if !vol.labels.is_empty() {
+                            println!("  Labels:");
+                            for (key, value) in &vol.labels {
+                                println!("    {}: {}", key, value);
+                            }
+                        }
+                        if !vol.options.is_empty() {
+                            println!("  Options:");
+                            for (key, value) in &vol.options {
+                                println!("    {}: {}", key, value);
+                            }
+                        }
                     }
-                );
-                println!("  Created: {:?}", volume.created_at);
-                println!("  In Use: {}", volume.in_use);
-                println!("  Used By: {:?}", volume.used_by);
-                println!("  Labels: {:?}", volume.labels);
-                println!("  Options: {:?}", volume.options);
+                    None => {
+                        println!("Volume '{}' not found", name);
+                        std::process::exit(1);
+                    }
+                }
             }
 
             VolumeCommands::Prune { force } => {
                 info!("Pruning unused volumes (force: {})", force);
-                // Prune volumes with real implementation
-                let mut volume_manager = bolt::volume::VolumeManager::new()?;
-                let removed_volumes = volume_manager.prune_volumes(force)?;
-                info!(
-                    "✅ Pruned {} unused volumes: {:?}",
-                    removed_volumes.len(),
-                    removed_volumes
-                );
+                let volumes = runtime.list_volumes().await?;
+                let unused_volumes: Vec<_> =
+                    volumes.iter().filter(|v| v.used_by.is_empty()).collect();
+
+                if unused_volumes.is_empty() {
+                    info!("No unused volumes to prune");
+                    return Ok(());
+                }
+
+                if !force {
+                    println!("The following volumes will be removed:");
+                    for volume in &unused_volumes {
+                        println!("  {}", volume.name);
+                    }
+                    print!("Are you sure? [y/N] ");
+                    std::io::Write::flush(&mut std::io::stdout())?;
+
+                    let mut input = String::new();
+                    std::io::stdin().read_line(&mut input)?;
+                    if !input.trim().to_lowercase().starts_with('y') {
+                        info!("Aborted");
+                        return Ok(());
+                    }
+                }
+
+                let mut removed_count = 0;
+                for volume in unused_volumes {
+                    match runtime.remove_volume(&volume.name, true).await {
+                        Ok(_) => {
+                            info!("Removed volume: {}", volume.name);
+                            removed_count += 1;
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to remove volume {}: {}", volume.name, e);
+                        }
+                    }
+                }
+
+                info!("✅ Pruned {} unused volumes", removed_count);
             }
         },
 
@@ -541,6 +598,284 @@ async fn main() -> Result<()> {
                     info!("Managing automatic snapshots");
                     // TODO: Implement automatic snapshots
                     info!("✅ Automatic snapshot settings configured");
+                }
+            }
+        }
+
+        Commands::Hardware { command } => {
+            use bolt::runtime::hardware_detection::{
+                HardwareProfile, WorkloadType as HwWorkloadType,
+            };
+            use cli::HardwareCommands;
+
+            match command {
+                HardwareCommands::Detect { format } => {
+                    info!("🔍 Detecting hardware...");
+                    let hw = HardwareProfile::detect().await?;
+
+                    if format == "json" {
+                        println!("{}", serde_json::to_string_pretty(&hw)?);
+                    } else {
+                        println!("\n🖥️  CPU: {} ({:?})", hw.cpu.model_name, hw.cpu.vendor);
+                        println!(
+                            "   Cores: {} physical, {} logical",
+                            hw.cpu.cores_physical, hw.cpu.cores_logical
+                        );
+                        if let Some(ref zen) = hw.cpu.zen_generation {
+                            println!(
+                                "   AMD Zen: {:?}{}",
+                                zen,
+                                if hw.cpu.has_3d_vcache {
+                                    " with 3D V-Cache"
+                                } else {
+                                    ""
+                                }
+                            );
+                        }
+                        if let Some(ref hybrid) = hw.cpu.hybrid_architecture {
+                            println!(
+                                "   Intel Hybrid: {}P + {}E cores",
+                                hybrid.p_cores, hybrid.e_cores
+                            );
+                        }
+                        println!("\n🎮 GPUs: {}", hw.gpu.len());
+                        for (i, gpu) in hw.gpu.iter().enumerate() {
+                            println!(
+                                "   GPU {}: {:?} at {}",
+                                i,
+                                gpu.vendor,
+                                gpu.device_path.display()
+                            );
+                        }
+                        println!("\n💾 Memory: {} GB", hw.memory.total_mb / 1024);
+                    }
+                }
+                HardwareCommands::Cpu { verbose } => {
+                    let hw = HardwareProfile::detect().await?;
+                    println!("🖥️  CPU Information:\n");
+                    println!("Vendor: {:?}", hw.cpu.vendor);
+                    println!("Model: {}", hw.cpu.model_name);
+                    println!("Architecture: {:?}", hw.cpu.architecture);
+                    println!("Physical Cores: {}", hw.cpu.cores_physical);
+                    println!("Logical Cores: {}", hw.cpu.cores_logical);
+
+                    if let Some(cache) = hw.cpu.cache_l3_kb {
+                        println!("L3 Cache: {} MB", cache / 1024);
+                    }
+                    println!("NUMA Nodes: {}", hw.cpu.numa_nodes);
+
+                    if let Some(ref zen) = hw.cpu.zen_generation {
+                        println!("\n⚡ AMD Ryzen Details:");
+                        println!("  Zen Generation: {:?}", zen);
+                        println!(
+                            "  3D V-Cache: {}",
+                            if hw.cpu.has_3d_vcache {
+                                "YES 🎮"
+                            } else {
+                                "No"
+                            }
+                        );
+                        if let Some(ccd) = hw.cpu.ccd_count {
+                            println!("  CCD Count: {}", ccd);
+                        }
+                    }
+
+                    if let Some(ref hybrid) = hw.cpu.hybrid_architecture {
+                        println!("\n🔀 Intel Hybrid Architecture:");
+                        println!(
+                            "  P-cores: {} @ {:.1} GHz",
+                            hybrid.p_cores, hybrid.p_core_base_freq
+                        );
+                        println!(
+                            "  E-cores: {} @ {:.1} GHz",
+                            hybrid.e_cores, hybrid.e_core_base_freq
+                        );
+                        println!(
+                            "  Thread Director: {}",
+                            if hybrid.thread_director { "✅" } else { "❌" }
+                        );
+                    }
+
+                    if verbose {
+                        println!("\n📋 CPU Features:");
+                        for (i, feature) in hw.cpu.features.iter().take(20).enumerate() {
+                            if i % 5 == 0 {
+                                println!();
+                            }
+                            print!("  {:<12}", feature);
+                        }
+                        if hw.cpu.features.len() > 20 {
+                            println!("\n  ... and {} more", hw.cpu.features.len() - 20);
+                        }
+                    }
+                }
+                HardwareCommands::Gpu { verbose } => {
+                    let hw = HardwareProfile::detect().await?;
+                    println!("🎮 GPU Information:\n");
+
+                    if hw.gpu.is_empty() {
+                        println!("No GPUs detected");
+                    } else {
+                        for (i, gpu) in hw.gpu.iter().enumerate() {
+                            println!("GPU {}: {:?}", i, gpu.vendor);
+                            println!("  Device: {}", gpu.device_path.display());
+                            if let Some(ref render) = gpu.render_node {
+                                println!("  Render Node: {}", render.display());
+                            }
+                            if let Some(ref pci) = gpu.pci_id {
+                                println!("  PCI ID: {}", pci);
+                            }
+
+                            if verbose {
+                                println!("  Capabilities:");
+                                if gpu.capabilities.cuda {
+                                    println!("    ✅ CUDA");
+                                }
+                                if gpu.capabilities.rocm {
+                                    println!("    ✅ ROCm");
+                                }
+                                if gpu.capabilities.opencl {
+                                    println!("    ✅ OpenCL");
+                                }
+                                if gpu.capabilities.vulkan {
+                                    println!("    ✅ Vulkan");
+                                }
+                                if gpu.capabilities.vaapi {
+                                    println!("    ✅ VA-API");
+                                }
+                                if gpu.capabilities.quick_sync {
+                                    println!("    ✅ Quick Sync (Intel)");
+                                }
+                                if gpu.capabilities.nvenc_nvdec {
+                                    println!("    ✅ NVENC/NVDEC");
+                                }
+                                if gpu.capabilities.vce_vcn {
+                                    println!("    ✅ VCE/VCN (AMD)");
+                                }
+                                if gpu.capabilities.ray_tracing {
+                                    println!("    ✅ Ray Tracing");
+                                }
+                                if gpu.capabilities.dlss {
+                                    println!("    ✅ DLSS");
+                                }
+                                if gpu.capabilities.fsr {
+                                    println!("    ✅ FSR");
+                                }
+                                if gpu.capabilities.xess {
+                                    println!("    ✅ XeSS");
+                                }
+                            }
+                            println!();
+                        }
+                    }
+                }
+                HardwareCommands::Memory => {
+                    let hw = HardwareProfile::detect().await?;
+                    println!("💾 Memory Information:\n");
+                    println!("Total: {} GB", hw.memory.total_mb / 1024);
+                    println!("NUMA Nodes: {}", hw.memory.numa_nodes);
+                    println!("2MB Hugepages: {}", hw.memory.hugepages_2mb);
+                    println!("1GB Hugepages: {}", hw.memory.hugepages_1gb);
+                }
+                HardwareCommands::Affinity { workload } => {
+                    let hw = HardwareProfile::detect().await?;
+                    println!("🎯 CPU Affinity Recommendations:\n");
+
+                    let workloads = if let Some(wl) = workload {
+                        vec![match wl {
+                            cli::WorkloadType::Gaming => HwWorkloadType::Gaming,
+                            cli::WorkloadType::Performance => HwWorkloadType::HighPerformance,
+                            cli::WorkloadType::Balanced => HwWorkloadType::Balanced,
+                            cli::WorkloadType::Background => HwWorkloadType::Background,
+                            cli::WorkloadType::Batch => HwWorkloadType::Batch,
+                        }]
+                    } else {
+                        vec![
+                            HwWorkloadType::Gaming,
+                            HwWorkloadType::HighPerformance,
+                            HwWorkloadType::Balanced,
+                            HwWorkloadType::Background,
+                            HwWorkloadType::Batch,
+                        ]
+                    };
+
+                    for wl in workloads {
+                        let affinity = hw.optimal_cpu_affinity(wl);
+                        println!("{:?}: {:?}", wl, affinity);
+                    }
+                }
+                HardwareCommands::Governor { mode } => {
+                    use bolt::runtime::hardware_detection::CpuGovernor;
+
+                    if let Some(ref mode_str) = mode {
+                        // Parse and set governor
+                        let governor = CpuGovernor::from_str(mode_str)
+                            .ok_or_else(|| anyhow::anyhow!("Unknown governor: {}", mode_str))?;
+
+                        info!("Setting system-wide CPU governor to: {}", mode_str);
+
+                        match CpuGovernor::set_system_governor(governor) {
+                            Ok(()) => {
+                                println!("✅ CPU governor set to '{}'", mode_str);
+                                println!(
+                                    "   Note: This change is temporary and will reset on reboot."
+                                );
+                            }
+                            Err(e) => {
+                                eprintln!("❌ Failed to set CPU governor: {}", e);
+                                eprintln!("   Hint: Try running with sudo/root privileges");
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        // Show current governor
+                        match CpuGovernor::get_system_governor() {
+                            Ok(gov) => {
+                                println!("Current CPU governor: {}", gov.as_str());
+
+                                // Show frequency info
+                                if let Ok(freq) = CpuGovernor::get_current_frequency(0) {
+                                    println!(
+                                        "Current frequency (CPU 0): {:.2} GHz",
+                                        freq as f64 / 1_000_000.0
+                                    );
+                                }
+                                if let Ok((min, max)) = CpuGovernor::get_frequency_range(0) {
+                                    println!(
+                                        "Frequency range: {:.2} - {:.2} GHz",
+                                        min as f64 / 1_000_000.0,
+                                        max as f64 / 1_000_000.0
+                                    );
+                                }
+
+                                println!("\nAvailable governors:");
+                                match CpuGovernor::list_available() {
+                                    Ok(governors) => {
+                                        for gov in governors {
+                                            let marker = if gov.as_str() == gov.as_str() {
+                                                "➜"
+                                            } else {
+                                                " "
+                                            };
+                                            println!("  {} {}", marker, gov.as_str());
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Failed to list available governors: {}", e);
+                                    }
+                                }
+
+                                println!("\nRecommended governors by workload:");
+                                println!("  • Gaming/High Performance: performance");
+                                println!("  • Balanced: schedutil");
+                                println!("  • Power Saving: powersave");
+                            }
+                            Err(e) => {
+                                eprintln!("❌ Failed to read current governor: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
+                    }
                 }
             }
         }

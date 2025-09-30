@@ -1,10 +1,14 @@
-use crate::{BoltError, Result};
-use anyhow::Context;
+//! Container orchestration (partial implementation)
+//! Auto-scaling, load balancing, cluster management
+
+#![allow(dead_code)]
+
+use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::info;
 
 pub mod auto_scaling;
 pub mod cluster_management;
@@ -67,7 +71,7 @@ pub struct ClusterNode {
     pub specializations: Vec<NodeSpecialization>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum NodeRole {
     /// Control plane node
     ControlPlane,
@@ -92,7 +96,7 @@ pub enum NodeStatus {
     Unknown,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum NodeSpecialization {
     /// High-performance gaming containers
     Gaming,
@@ -542,11 +546,11 @@ impl OrchestrationManager {
 
         let replicas_per_batch = (deployment.replicas as f64 * 0.25).ceil() as u32; // 25% at a time
 
-        for batch in 0..((deployment.replicas + replicas_per_batch - 1) / replicas_per_batch) {
+        for batch in 0..deployment.replicas.div_ceil(replicas_per_batch) {
             info!(
                 "   📦 Deploying batch {} of {}",
                 batch + 1,
-                (deployment.replicas + replicas_per_batch - 1) / replicas_per_batch
+                deployment.replicas.div_ceil(replicas_per_batch)
             );
 
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;

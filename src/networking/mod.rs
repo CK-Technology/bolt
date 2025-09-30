@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
@@ -61,6 +61,7 @@ pub struct NetworkMetrics {
 }
 
 /// Bolt Network Manager - handles container networking with QUIC optimization
+#[derive(Debug)]
 pub struct NetworkManager {
     interfaces: Arc<RwLock<HashMap<String, NetworkInterface>>>,
     metrics: Arc<RwLock<HashMap<String, NetworkMetrics>>>,
@@ -493,7 +494,7 @@ impl NetworkManager {
 
         // Use ip command to create bridge
         let output = std::process::Command::new("ip")
-            .args(&["link", "add", "name", bridge_name, "type", "bridge"])
+            .args(["link", "add", "name", bridge_name, "type", "bridge"])
             .output();
 
         match output {
@@ -503,7 +504,7 @@ impl NetworkManager {
 
                     // Bring bridge up
                     let _ = std::process::Command::new("ip")
-                        .args(&["link", "set", bridge_name, "up"])
+                        .args(["link", "set", bridge_name, "up"])
                         .output();
 
                     info!("    ✓ Bridge interface activated");
@@ -533,7 +534,7 @@ impl NetworkManager {
 
         // Assign IP to bridge
         let output = std::process::Command::new("ip")
-            .args(&["addr", "add", &gateway_ip, "dev", bridge_name])
+            .args(["addr", "add", &gateway_ip, "dev", bridge_name])
             .output();
 
         match output {
@@ -565,7 +566,7 @@ impl NetworkManager {
         );
 
         let output = std::process::Command::new("ip")
-            .args(&[
+            .args([
                 "link",
                 "add",
                 vxlan_name,
@@ -586,7 +587,7 @@ impl NetworkManager {
 
                     // Bring interface up
                     let _ = std::process::Command::new("ip")
-                        .args(&["link", "set", vxlan_name, "up"])
+                        .args(["link", "set", vxlan_name, "up"])
                         .output();
                 } else {
                     let stderr = String::from_utf8_lossy(&result.stderr);
@@ -610,7 +611,7 @@ impl NetworkManager {
         let gateway_ip = self.calculate_gateway_ip(subnet)?;
 
         let output = std::process::Command::new("ip")
-            .args(&["addr", "add", &gateway_ip, "dev", vxlan_name])
+            .args(["addr", "add", &gateway_ip, "dev", vxlan_name])
             .output();
 
         match output {
@@ -640,7 +641,7 @@ impl NetworkManager {
         );
 
         let output = std::process::Command::new("ip")
-            .args(&[
+            .args([
                 "link",
                 "add",
                 macvlan_name,
@@ -660,7 +661,7 @@ impl NetworkManager {
 
                     // Bring interface up
                     let _ = std::process::Command::new("ip")
-                        .args(&["link", "set", macvlan_name, "up"])
+                        .args(["link", "set", macvlan_name, "up"])
                         .output();
                 } else {
                     let stderr = String::from_utf8_lossy(&result.stderr);
@@ -706,46 +707,149 @@ impl NetworkManager {
 
         // Get system network interfaces
         let output = std::process::Command::new("ip")
-            .args(&["link", "show"])
+            .args(["link", "show"])
             .output();
+
+        if let Ok(result) = output {
+            if result.status.success() {
+                let output_str = String::from_utf8_lossy(&result.stdout);
+
+                // Parse bridge interfaces
+                for line in output_str.lines() {
+                    if line.contains("br-") && line.contains("state UP") {
+                        if let Some(name_start) = line.find("br-") {
+                            if let Some(name_end) = line[name_start..].find(':') {
+                                let bridge_name = &line[name_start..name_start + name_end];
+                                let network_name =
+                                    bridge_name.strip_prefix("br-").unwrap_or(bridge_name);
+
+                                networks.push(BoltNetworkInfo {
+                                    id: format!(
+                                        "{:x}",
+                                        bridge_name.as_bytes().iter().fold(0u64, |acc, &b| acc
+                                            .wrapping_mul(31)
+                                            .wrapping_add(b as u64))
+                                    ),
+                                    name: network_name.to_string(),
+                                    driver: "bolt".to_string(),
+                                    scope: "local".to_string(),
+                                    subnet: "172.20.0.0/16".to_string(), // Would be detected from interface
+                                    gateway: "172.20.0.1 (QUIC)".to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(networks)
+    }
+
+    /// Remove a Bolt network
+    pub async fn remove_bolt_network(&mut self, name: &str) -> Result<()> {
+        info!("🗑️ Removing Bolt network: {}", name);
+
+        // Validate network name
+        if name.is_empty() {
+            return Err(anyhow::anyhow!("Network name cannot be empty"));
+        }
+
+        // Check if network exists and get its type
+        let bridge_name = format!("br-{}", name);
+
+        // First, check if any containers are using this network
+        let containers_using_network = self.get_containers_on_network(name).await?;
+        if !containers_using_network.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Network '{}' is in use by containers: {}",
+                name,
+                containers_using_network.join(", ")
+            ));
+        }
+
+        // Remove the bridge interface
+        let result = std::process::Command::new("ip")
+            .args(["link", "delete", &bridge_name])
+            .output();
+
+        match result {
+            Ok(output) => {
+                if !output.status.success() {
+                    let error = String::from_utf8_lossy(&output.stderr);
+                    warn!("Failed to remove bridge {}: {}", bridge_name, error);
+                    // Don't fail if bridge doesn't exist
+                    if !error.contains("Cannot find device") {
+                        return Err(anyhow::anyhow!(
+                            "Failed to remove network bridge: {}",
+                            error
+                        ));
+                    }
+                }
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!("Failed to execute ip command: {}", e));
+            }
+        }
+
+        // Remove from internal tracking
+        let mut interfaces = self.interfaces.write().await;
+        interfaces.retain(|_, interface| !interface.interface_name.starts_with(&bridge_name));
+
+        let mut metrics = self.metrics.write().await;
+        metrics.remove(name);
+
+        info!("✅ Network '{}' removed successfully", name);
+        Ok(())
+    }
+
+    /// Get containers using a specific network
+    async fn get_containers_on_network(&self, network_name: &str) -> Result<Vec<String>> {
+        // This would normally query running containers
+        // For now, return empty list as a placeholder
+        // In a real implementation, this would check:
+        // 1. Container runtime state
+        // 2. Network namespace associations
+        // 3. Bridge interface memberships
+
+        let _bridge_name = format!("br-{}", network_name);
+
+        // Placeholder: Check if any containers are connected to this bridge
+        let output = std::process::Command::new("ip")
+            .args(["link", "show", "type", "veth"])
+            .output();
+
+        let mut containers = Vec::new();
 
         match output {
             Ok(result) => {
                 if result.status.success() {
                     let output_str = String::from_utf8_lossy(&result.stdout);
 
-                    // Parse bridge interfaces
+                    // Look for veth pairs that might be connected to our bridge
                     for line in output_str.lines() {
-                        if line.contains("br-") && line.contains("state UP") {
-                            if let Some(name_start) = line.find("br-") {
-                                if let Some(name_end) = line[name_start..].find(':') {
-                                    let bridge_name = &line[name_start..name_start + name_end];
-                                    let network_name =
-                                        bridge_name.strip_prefix("br-").unwrap_or(bridge_name);
-
-                                    networks.push(BoltNetworkInfo {
-                                        id: format!(
-                                            "{:x}",
-                                            bridge_name.as_bytes().iter().fold(0u64, |acc, &b| acc
-                                                .wrapping_mul(31)
-                                                .wrapping_add(b as u64))
-                                        ),
-                                        name: network_name.to_string(),
-                                        driver: "bolt".to_string(),
-                                        scope: "local".to_string(),
-                                        subnet: "172.20.0.0/16".to_string(), // Would be detected from interface
-                                        gateway: "172.20.0.1 (QUIC)".to_string(),
-                                    });
+                        if line.contains("veth") && line.contains("master") {
+                            // Parse container ID from veth interface name
+                            // This is a simplified implementation
+                            if let Some(start) = line.find("veth") {
+                                if let Some(colon) = line[start..].find(':') {
+                                    let interface_name = &line[start..start + colon];
+                                    // Extract container ID from interface name (simplified)
+                                    if interface_name.len() > 8 {
+                                        containers.push(interface_name[4..].to_string());
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-            Err(_) => {}
+            Err(_) => {
+                // If we can't check, be safe and assume no containers
+            }
         }
 
-        Ok(networks)
+        Ok(containers)
     }
 }
 

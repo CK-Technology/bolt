@@ -7,7 +7,7 @@ pub async fn status_info(config: &BoltConfig) -> Result<SurgeStatus> {
     let boltfile = config.load_boltfile()?;
 
     let mut services = Vec::new();
-    for (name, _service) in &boltfile.services {
+    for name in boltfile.services.keys() {
         services.push(ServiceInfo {
             name: name.clone(),
             status: "not running".to_string(), // TODO: Implement actual status

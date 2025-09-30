@@ -1,10 +1,8 @@
 use crate::{BoltError, Result};
-use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::info;
 
 use super::{
     ClusterNode, ClusterState, NodeRole, NodeSpecialization, NodeStatus, ResourceCapacity,
@@ -95,16 +93,14 @@ impl ClusterManager {
             return Err(BoltError::InvalidInput(format!(
                 "Node with ID {} already exists",
                 node.id
-            ))
-            .into());
+            )));
         }
 
         // Check cluster capacity
         if state.nodes.len() >= self.config.max_nodes as usize {
             return Err(BoltError::ResourceExhausted(
                 "Cluster has reached maximum node capacity".to_string(),
-            )
-            .into());
+            ));
         }
 
         // Update total capacity
@@ -134,15 +130,16 @@ impl ClusterManager {
             .position(|n| n.id == node_id)
             .ok_or_else(|| BoltError::NotFound(format!("Node {} not found", node_id)))?;
 
-        let node = &state.nodes[node_index];
+        // Clone the capacity before removing to avoid borrow issues
+        let node_capacity = state.nodes[node_index].capacity.clone();
 
         // Update total capacity
-        state.total_capacity.cpu_cores -= node.capacity.cpu_cores;
-        state.total_capacity.memory_gb -= node.capacity.memory_gb;
-        state.total_capacity.storage_gb -= node.capacity.storage_gb;
-        state.total_capacity.network_gbps -= node.capacity.network_gbps;
-        state.total_capacity.gpu_count -= node.capacity.gpu_count;
-        state.total_capacity.gpu_memory_gb -= node.capacity.gpu_memory_gb;
+        state.total_capacity.cpu_cores -= node_capacity.cpu_cores;
+        state.total_capacity.memory_gb -= node_capacity.memory_gb;
+        state.total_capacity.storage_gb -= node_capacity.storage_gb;
+        state.total_capacity.network_gbps -= node_capacity.network_gbps;
+        state.total_capacity.gpu_count -= node_capacity.gpu_count;
+        state.total_capacity.gpu_memory_gb -= node_capacity.gpu_memory_gb;
 
         state.nodes.remove(node_index);
         state.last_updated = std::time::Instant::now();

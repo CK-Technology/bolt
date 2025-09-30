@@ -37,9 +37,57 @@ Bolt's networking system is designed from the ground up to solve the pain points
 
 ## 🔧 Core Components
 
-### 1. BoltAdvancedNetworking
+### 1. Enhanced QUIC NetworkManager
 
-The main networking orchestrator that coordinates all networking subsystems.
+The main networking orchestrator that coordinates all networking subsystems with full OCI 7.0 compliance.
+
+```bash
+# Create QUIC-optimized networks
+bolt network create gaming-net --driver bolt --subnet 172.20.0.0/16
+bolt network create web-tier --driver bolt --subnet 172.21.0.0/16
+
+# List networks with detailed information
+bolt network ls
+
+# Remove networks
+bolt network rm gaming-net
+```
+
+### 2. Volume and Network Integration
+
+Seamless integration between persistent storage and QUIC networking for optimal performance.
+
+```bash
+# Create volumes with various drivers
+bolt volume create app-data --driver local --size 50GB
+bolt volume create logs --driver local --size 10GB
+
+# Run containers with both volumes and custom networks
+bolt run \
+  --name web-app \
+  --network gaming-net \
+  --volume app-data:/app/data \
+  --volume logs:/app/logs \
+  --ports 8080:80 \
+  nginx:alpine
+
+# Inspect volume and network usage
+bolt volume inspect app-data
+bolt network inspect gaming-net
+```
+
+### 3. OCI 7.0 Compliant Container Runtime
+
+Native container execution with proper volume mounting and namespace isolation.
+
+- **Named Volume Resolution**: `myvolume:/data` → `/var/lib/bolt/volumes/myvolume/_data:/data`
+- **Host Path Validation**: Ensures source paths exist before mounting
+- **Network Namespace Creation**: Isolated networking per container with veth pairs
+- **QUIC Protocol Support**: Ultra-low latency container communication
+
+### 4. BoltAdvancedNetworking
+
+The advanced networking orchestrator that coordinates all networking subsystems.
 
 ```rust
 use bolt::networking::BoltAdvancedNetworking;

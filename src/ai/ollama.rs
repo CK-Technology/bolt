@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::process::Command;
 use tracing::{debug, info, warn};
 
-use super::{AiOptimizer, AiWorkloadConfig, ModelSize};
+use super::{AiOptimizer, AiWorkloadConfig};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OllamaManager {
@@ -56,7 +56,7 @@ impl OllamaManager {
         );
 
         let gpu_memory = self.get_available_gpu_memory().await?;
-        let system_memory = self.get_available_system_memory()?;
+        let _system_memory = self.get_available_system_memory()?;
 
         let optimizer = AiOptimizer::new();
         let mut config = optimizer
@@ -121,7 +121,7 @@ impl OllamaManager {
     pub async fn pull_model(&self, model_name: &str) -> Result<()> {
         info!("📥 Pulling Ollama model: {}", model_name);
 
-        let output = Command::new("ollama").args(&["pull", model_name]).output();
+        let output = Command::new("ollama").args(["pull", model_name]).output();
 
         match output {
             Ok(result) => {
@@ -137,7 +137,7 @@ impl OllamaManager {
                     ))
                 }
             }
-            Err(e) => {
+            Err(_e) => {
                 warn!("❌ Ollama command not found, trying container-based pull");
                 self.pull_model_via_container(model_name).await
             }
@@ -147,7 +147,7 @@ impl OllamaManager {
     pub async fn list_models(&self) -> Result<Vec<OllamaModel>> {
         let client = reqwest::Client::new();
         let response = client
-            .get(&format!("{}/api/tags", self.base_url))
+            .get(format!("{}/api/tags", self.base_url))
             .send()
             .await?;
 
@@ -181,7 +181,7 @@ impl OllamaManager {
     pub async fn get_model_info(&self, model_name: &str) -> Result<serde_json::Value> {
         let client = reqwest::Client::new();
         let response = client
-            .post(&format!("{}/api/show", self.base_url))
+            .post(format!("{}/api/show", self.base_url))
             .json(&serde_json::json!({"name": model_name}))
             .send()
             .await?;
@@ -307,7 +307,7 @@ impl OllamaManager {
     async fn apply_system_optimizations(&self, profile: &OllamaOptimizationProfile) -> Result<()> {
         // Set CPU governor for AI workloads
         let _ = Command::new("cpupower")
-            .args(&["frequency-set", "-g", "performance"])
+            .args(["frequency-set", "-g", "performance"])
             .output();
 
         // Enable huge pages if recommended
@@ -337,7 +337,7 @@ impl OllamaManager {
     async fn pull_model_via_container(&self, model_name: &str) -> Result<()> {
         // Fallback method using container
         let output = Command::new("docker")
-            .args(&[
+            .args([
                 "run",
                 "--rm",
                 "--gpus",
@@ -371,7 +371,7 @@ impl OllamaManager {
     async fn get_available_gpu_memory(&self) -> Result<u32> {
         // Try nvidia-smi first
         if let Ok(output) = Command::new("nvidia-smi")
-            .args(&["--query-gpu=memory.total", "--format=csv,noheader,nounits"])
+            .args(["--query-gpu=memory.total", "--format=csv,noheader,nounits"])
             .output()
         {
             if output.status.success() {

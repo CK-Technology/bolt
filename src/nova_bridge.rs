@@ -30,6 +30,12 @@ pub struct NovaBridgeManager {
     bridges: HashMap<String, NovaBridgeConfig>,
 }
 
+impl Default for NovaBridgeManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NovaBridgeManager {
     /// Create a new bridge manager
     pub fn new() -> Self {
@@ -73,23 +79,23 @@ impl NovaBridgeManager {
 
         // Create veth pair
         let veth_host = format!("veth-{}", &container_id[..8]);
-        let veth_cont = format!("eth-nova");
+        let veth_cont = "eth-nova".to_string();
 
         // Create the veth pair
         std::process::Command::new("ip")
-            .args(&[
+            .args([
                 "link", "add", &veth_host, "type", "veth", "peer", "name", &veth_cont,
             ])
             .status()?;
 
         // Attach host end to bridge
         std::process::Command::new("ip")
-            .args(&["link", "set", &veth_host, "master", &bridge.name])
+            .args(["link", "set", &veth_host, "master", &bridge.name])
             .status()?;
 
         // Enable the host end
         std::process::Command::new("ip")
-            .args(&["link", "set", &veth_host, "up"])
+            .args(["link", "set", &veth_host, "up"])
             .status()?;
 
         Ok(veth_cont)
@@ -106,7 +112,7 @@ impl NovaBridgeManager {
 
         // Delete the veth pair (this automatically removes both ends)
         std::process::Command::new("ip")
-            .args(&["link", "delete", &veth_host])
+            .args(["link", "delete", &veth_host])
             .status()?;
 
         Ok(())
@@ -128,24 +134,24 @@ impl NovaBridgeManager {
 
         // Check if bridge already exists
         let check = std::process::Command::new("ip")
-            .args(&["link", "show", &config.name])
+            .args(["link", "show", &config.name])
             .status()?;
 
         if !check.success() {
             // Create the bridge
             std::process::Command::new("ip")
-                .args(&["link", "add", "name", &config.name, "type", "bridge"])
+                .args(["link", "add", "name", &config.name, "type", "bridge"])
                 .status()?;
         }
 
         // Set MTU
         std::process::Command::new("ip")
-            .args(&["link", "set", &config.name, "mtu", &config.mtu.to_string()])
+            .args(["link", "set", &config.name, "mtu", &config.mtu.to_string()])
             .status()?;
 
         // Enable the bridge
         std::process::Command::new("ip")
-            .args(&["link", "set", &config.name, "up"])
+            .args(["link", "set", &config.name, "up"])
             .status()?;
 
         Ok(())
@@ -157,13 +163,13 @@ impl NovaBridgeManager {
 
         // Add IP address to bridge
         std::process::Command::new("ip")
-            .args(&[
+            .args([
                 "addr",
                 "add",
                 &format!(
                     "{}/{}",
                     config.gateway,
-                    config.subnet.split('/').last().unwrap_or("24")
+                    config.subnet.split('/').next_back().unwrap_or("24")
                 ),
                 "dev",
                 &config.name,
@@ -182,7 +188,7 @@ impl NovaBridgeManager {
 
         // Add MASQUERADE rule for outbound traffic
         std::process::Command::new("iptables")
-            .args(&[
+            .args([
                 "-t",
                 "nat",
                 "-A",
@@ -199,12 +205,12 @@ impl NovaBridgeManager {
 
         // Allow forwarding from the bridge
         std::process::Command::new("iptables")
-            .args(&["-A", "FORWARD", "-i", &config.name, "-j", "ACCEPT"])
+            .args(["-A", "FORWARD", "-i", &config.name, "-j", "ACCEPT"])
             .status()?;
 
         // Allow forwarding to the bridge
         std::process::Command::new("iptables")
-            .args(&[
+            .args([
                 "-A",
                 "FORWARD",
                 "-o",
@@ -262,6 +268,12 @@ pub struct ServiceEntry {
     pub ip_address: String,
     pub ports: Vec<u16>,
     pub metadata: HashMap<String, String>,
+}
+
+impl Default for NovaServiceDiscovery {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl NovaServiceDiscovery {

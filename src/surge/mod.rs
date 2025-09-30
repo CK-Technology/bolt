@@ -1,10 +1,9 @@
-use crate::config::{BoltConfig, BoltFile};
+use crate::config::BoltConfig;
 use crate::error::RuntimeError;
 use crate::runtime;
 use crate::runtime::unified::UnifiedRuntime;
 use crate::{BoltError, Result};
 use anyhow::anyhow;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
@@ -13,14 +12,12 @@ pub mod status_api;
 /// Enhanced Surge with native runtime integration
 pub async fn up_with_native_runtime(
     config: &BoltConfig,
+    runtime: Arc<UnifiedRuntime>,
     services: &[String],
     detach: bool,
     force_recreate: bool,
 ) -> Result<()> {
     info!("🚀 Surge orchestration starting with native runtime...");
-
-    // Initialize unified runtime (native with fallback)
-    let runtime = UnifiedRuntime::new().await?;
 
     let boltfile = config.load_boltfile().map_err(|e| {
         error!("Failed to load Boltfile: {}", e);
@@ -63,7 +60,7 @@ pub async fn up_with_native_runtime(
 
                 // Prepare container arguments
                 let container_name = format!("{}_{}", boltfile.project, service_name);
-                let ports = service.ports.as_ref().map(|p| p.as_slice()).unwrap_or(&[]);
+                let ports = service.ports.as_deref().unwrap_or(&[]);
                 let env_vars = service
                     .env
                     .as_ref()
@@ -73,11 +70,7 @@ pub async fn up_with_native_runtime(
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();
-                let volumes = service
-                    .volumes
-                    .as_ref()
-                    .map(|v| v.as_slice())
-                    .unwrap_or(&[]);
+                let volumes = service.volumes.as_deref().unwrap_or(&[]);
 
                 // Stop existing container if force_recreate
                 if force_recreate {
@@ -93,15 +86,22 @@ pub async fn up_with_native_runtime(
                 // Check if this is a GPU-enabled service
                 let container_id = if let Some(ref gaming) = service.gaming {
                     if gaming.gpu_passthrough || gaming.gpu.is_some() {
-                        info!("🎮 Creating GPU-enabled gaming container for service: {}", service_name);
+                        info!(
+                            "🎮 Creating GPU-enabled gaming container for service: {}",
+                            service_name
+                        );
 
                         // Determine GPU configuration from service
-                        let dlss_enabled = gaming.gpu.as_ref()
+                        let dlss_enabled = gaming
+                            .gpu
+                            .as_ref()
                             .and_then(|g| g.nvidia.as_ref())
                             .and_then(|n| n.dlss)
                             .unwrap_or(false);
 
-                        let raytracing_enabled = gaming.gpu.as_ref()
+                        let raytracing_enabled = gaming
+                            .gpu
+                            .as_ref()
                             .and_then(|g| g.nvidia.as_ref())
                             .and_then(|n| n.raytracing)
                             .unwrap_or(false);
@@ -111,50 +111,64 @@ pub async fn up_with_native_runtime(
                             // Create gaming container with nvbind if native runtime available
                             let native_runtime_arc = runtime.get_native_runtime();
                             let mut native_runtime = native_runtime_arc.write().await;
-                            native_runtime.create_gaming_container(
-                                image,
-                                Some(&container_name),
-                                dlss_enabled,
-                                raytracing_enabled,
-                            ).await?
+                            native_runtime
+                                .create_gaming_container(
+                                    image,
+                                    Some(&container_name),
+                                    dlss_enabled,
+                                    raytracing_enabled,
+                                )
+                                .await?
                         } else {
                             // Fallback to standard container creation
-                            runtime.run_container(
+                            runtime
+                                .run_container(
+                                    image,
+                                    Some(&container_name),
+                                    &ports.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+                                    &env_vars,
+                                    &volumes.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+                                    detach,
+                                )
+                                .await?
+                        }
+                    } else {
+                        // Standard container creation
+                        runtime
+                            .run_container(
                                 image,
                                 Some(&container_name),
                                 &ports.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
                                 &env_vars,
                                 &volumes.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
                                 detach,
-                            ).await?
-                        }
-                    } else {
-                        // Standard container creation
-                        runtime.run_container(
+                            )
+                            .await?
+                    }
+                } else {
+                    // Standard container creation for non-gaming services
+                    runtime
+                        .run_container(
                             image,
                             Some(&container_name),
                             &ports.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
                             &env_vars,
                             &volumes.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
                             detach,
-                        ).await?
-                    }
-                } else {
-                    // Standard container creation for non-gaming services
-                    runtime.run_container(
-                        image,
-                        Some(&container_name),
-                        &ports.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
-                        &env_vars,
-                        &volumes.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
-                        detach,
-                    ).await?
+                        )
+                        .await?
                 };
 
                 if service.gaming.is_some() {
-                    info!("✅ GPU-enabled service {} started successfully (container: {})", service_name, container_id);
+                    info!(
+                        "✅ GPU-enabled service {} started successfully (container: {})",
+                        service_name, container_id
+                    );
                 } else {
-                    info!("✅ Service {} started successfully (container: {})", service_name, container_id);
+                    info!(
+                        "✅ Service {} started successfully (container: {})",
+                        service_name, container_id
+                    );
                 }
             } else if let Some(ref capsule) = service.capsule {
                 info!("  🔧 Capsule: {}", capsule);
@@ -162,10 +176,14 @@ pub async fn up_with_native_runtime(
                 let container_name = format!("{}_{}", boltfile.project, service_name);
                 let bolt_image = format!("bolt://{}", capsule);
 
-                let container_id = runtime.run_container(&bolt_image, Some(&container_name), &[], &[], &[], detach)
+                let container_id = runtime
+                    .run_container(&bolt_image, Some(&container_name), &[], &[], &[], detach)
                     .await?;
 
-                info!("✅ Capsule {} started successfully (container: {})", service_name, container_id);
+                info!(
+                    "✅ Capsule {} started successfully (container: {})",
+                    service_name, container_id
+                );
             } else if let Some(ref build) = service.build {
                 info!("  🔨 Build context: {}", build);
 
@@ -173,11 +191,13 @@ pub async fn up_with_native_runtime(
                 let dockerfile = "Dockerfile"; // Default dockerfile name
 
                 // Build the image using unified runtime
-                runtime.build_image(build, Some(&image_tag), dockerfile).await?;
+                runtime
+                    .build_image(build, Some(&image_tag), dockerfile)
+                    .await?;
 
                 // Run the built image
                 let container_name = format!("{}_{}", boltfile.project, service_name);
-                let ports = service.ports.as_ref().map(|p| p.as_slice()).unwrap_or(&[]);
+                let ports = service.ports.as_deref().unwrap_or(&[]);
                 let env_vars = service
                     .env
                     .as_ref()
@@ -187,23 +207,23 @@ pub async fn up_with_native_runtime(
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();
-                let volumes = service
-                    .volumes
-                    .as_ref()
-                    .map(|v| v.as_slice())
-                    .unwrap_or(&[]);
+                let volumes = service.volumes.as_deref().unwrap_or(&[]);
 
-                let container_id = runtime.run_container(
-                    &image_tag,
-                    Some(&container_name),
-                    &ports.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
-                    &env_vars,
-                    &volumes.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
-                    detach,
-                )
-                .await?;
+                let container_id = runtime
+                    .run_container(
+                        &image_tag,
+                        Some(&container_name),
+                        &ports.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+                        &env_vars,
+                        &volumes.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+                        detach,
+                    )
+                    .await?;
 
-                info!("✅ Service {} built and started successfully (container: {})", service_name, container_id);
+                info!(
+                    "✅ Service {} built and started successfully (container: {})",
+                    service_name, container_id
+                );
             } else {
                 error!(
                     "Service {} has no image, capsule, or build configuration",
@@ -263,7 +283,7 @@ pub async fn up(
 
                 // Prepare container arguments
                 let container_name = format!("{}_{}", boltfile.project, service_name);
-                let ports = service.ports.as_ref().map(|p| p.as_slice()).unwrap_or(&[]);
+                let ports = service.ports.as_deref().unwrap_or(&[]);
                 let env_vars = service
                     .env
                     .as_ref()
@@ -273,11 +293,7 @@ pub async fn up(
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();
-                let volumes = service
-                    .volumes
-                    .as_ref()
-                    .map(|v| v.as_slice())
-                    .unwrap_or(&[]);
+                let volumes = service.volumes.as_deref().unwrap_or(&[]);
 
                 // Stop existing container if force_recreate
                 if force_recreate {
@@ -323,7 +339,7 @@ pub async fn up(
 
                 // Run the built image
                 let container_name = format!("{}_{}", boltfile.project, service_name);
-                let ports = service.ports.as_ref().map(|p| p.as_slice()).unwrap_or(&[]);
+                let ports = service.ports.as_deref().unwrap_or(&[]);
                 let env_vars = service
                     .env
                     .as_ref()
@@ -333,11 +349,7 @@ pub async fn up(
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();
-                let volumes = service
-                    .volumes
-                    .as_ref()
-                    .map(|v| v.as_slice())
-                    .unwrap_or(&[]);
+                let volumes = service.volumes.as_deref().unwrap_or(&[]);
 
                 runtime::run_container(
                     &image_tag,
@@ -415,8 +427,8 @@ pub async fn status(config: &BoltConfig) -> Result<()> {
     println!("Project: {}", boltfile.project);
     println!();
     println!(
-        "{:<15} {:<12} {:<15} {}",
-        "SERVICE", "STATUS", "CONTAINER", "PORTS"
+        "{:<15} {:<12} {:<15} PORTS",
+        "SERVICE", "STATUS", "CONTAINER"
     );
 
     for (name, service) in &boltfile.services {
@@ -553,7 +565,7 @@ pub async fn scale(config: &BoltConfig, services: &[String]) -> Result<()> {
                 let instance_name = format!("{}_{}", container_prefix, i + 1);
 
                 if let Some(ref image) = service.image {
-                    let ports = service.ports.as_ref().map(|p| p.as_slice()).unwrap_or(&[]);
+                    let ports = service.ports.as_deref().unwrap_or(&[]);
                     let env_vars = service
                         .env
                         .as_ref()
@@ -563,11 +575,7 @@ pub async fn scale(config: &BoltConfig, services: &[String]) -> Result<()> {
                                 .collect::<Vec<_>>()
                         })
                         .unwrap_or_default();
-                    let volumes = service
-                        .volumes
-                        .as_ref()
-                        .map(|v| v.as_slice())
-                        .unwrap_or(&[]);
+                    let volumes = service.volumes.as_deref().unwrap_or(&[]);
 
                     runtime::run_container(
                         image,

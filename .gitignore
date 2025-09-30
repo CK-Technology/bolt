@@ -2,7 +2,7 @@
 /zig-out/
 *.o
 *.exe
-
+archive/
 
 # Added by cargo
 
@@ -11,3 +11,4 @@ CLAUDE.md
 TODO.md 
 PRIORITY.md
 PRIORITY_GP.md
+NVBIND_DEV_RESPONSE.md

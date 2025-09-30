@@ -1,14 +1,17 @@
-use bolt::{BoltError, Result};
 use bolt::runtime::gpu_integration::{BoltGpuIntegration, GpuConfig, GpuDriver, PerformanceLevel};
 use bolt::runtime::native::BoltNativeRuntime;
 use bolt::runtime::unified::UnifiedRuntime;
+use bolt::{BoltError, Result};
 use std::collections::HashMap;
 use tokio;
 
 #[tokio::test]
 async fn test_gpu_integration_initialization() {
     let gpu_integration = BoltGpuIntegration::new().await;
-    assert!(gpu_integration.is_ok(), "GPU integration should initialize successfully");
+    assert!(
+        gpu_integration.is_ok(),
+        "GPU integration should initialize successfully"
+    );
 }
 
 #[tokio::test]
@@ -36,7 +39,10 @@ async fn test_gpu_config_validation() {
 
     let gpu_integration = BoltGpuIntegration::new().await.unwrap();
     let validation_result = gpu_integration.validate_config(&valid_config).await;
-    assert!(validation_result.is_ok(), "Valid GPU config should pass validation");
+    assert!(
+        validation_result.is_ok(),
+        "Valid GPU config should pass validation"
+    );
 }
 
 #[cfg(feature = "nvbind-support")]
@@ -62,7 +68,9 @@ async fn test_nvbind_integration() {
         };
 
         // Test setup (should not fail even if no GPU hardware)
-        let setup_result = gpu_integration.setup_container_gpu(container_id, &gpu_config).await;
+        let setup_result = gpu_integration
+            .setup_container_gpu(container_id, &gpu_config)
+            .await;
         assert!(setup_result.is_ok() || matches!(setup_result, Err(BoltError::Runtime(_))));
 
         // Test cleanup
@@ -132,7 +140,11 @@ async fn test_performance_levels() {
         };
 
         let validation_result = gpu_integration.validate_config(&config).await;
-        assert!(validation_result.is_ok(), "Performance level {:?} should be valid", level);
+        assert!(
+            validation_result.is_ok(),
+            "Performance level {:?} should be valid",
+            level
+        );
     }
 }
 
@@ -163,7 +175,11 @@ async fn test_gpu_driver_types() {
         };
 
         let validation_result = gpu_integration.validate_config(&config).await;
-        assert!(validation_result.is_ok(), "Driver {:?} should be valid", driver);
+        assert!(
+            validation_result.is_ok(),
+            "Driver {:?} should be valid",
+            driver
+        );
     }
 }
 
@@ -186,7 +202,9 @@ async fn test_container_runtime_fallback() {
     };
 
     // Should handle gracefully whether nvbind is available or not
-    let setup_result = gpu_integration.setup_container_gpu(container_id, &gpu_config).await;
+    let setup_result = gpu_integration
+        .setup_container_gpu(container_id, &gpu_config)
+        .await;
 
     // Either succeeds with nvbind or falls back gracefully
     match setup_result {

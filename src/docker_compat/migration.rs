@@ -1,6 +1,4 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::process::Command;
 use tracing::{info, warn};
 
@@ -48,10 +46,7 @@ impl MigrationHelper {
     /// Check if Docker Compose is available
     async fn check_docker_compose_availability() -> bool {
         // Try docker compose (new)
-        if let Ok(output) = Command::new("docker")
-            .args(&["compose", "version"])
-            .output()
-        {
+        if let Ok(output) = Command::new("docker").args(["compose", "version"]).output() {
             if output.status.success() {
                 let version = String::from_utf8_lossy(&output.stdout);
                 info!("✅ Docker Compose (plugin) detected: {}", version.trim());
@@ -123,7 +118,7 @@ impl MigrationHelper {
         info!("📦 Analyzing Docker containers");
 
         // Get running containers
-        if let Ok(output) = Command::new("docker").args(&["ps", "-q"]).output() {
+        if let Ok(output) = Command::new("docker").args(["ps", "-q"]).output() {
             if output.status.success() {
                 let running_containers = String::from_utf8_lossy(&output.stdout)
                     .lines()
@@ -135,7 +130,7 @@ impl MigrationHelper {
         }
 
         // Get all containers
-        if let Ok(output) = Command::new("docker").args(&["ps", "-a", "-q"]).output() {
+        if let Ok(output) = Command::new("docker").args(["ps", "-a", "-q"]).output() {
             if output.status.success() {
                 let total_containers = String::from_utf8_lossy(&output.stdout)
                     .lines()
@@ -148,7 +143,7 @@ impl MigrationHelper {
 
         // Check for GPU containers
         if let Ok(output) = Command::new("docker")
-            .args(&["ps", "--filter", "label=gpu=true", "-q"])
+            .args(["ps", "--filter", "label=gpu=true", "-q"])
             .output()
         {
             if output.status.success() {
@@ -172,7 +167,7 @@ impl MigrationHelper {
     async fn analyze_images(&self, analysis: &mut DockerEnvironmentAnalysis) -> Result<()> {
         info!("🖼️ Analyzing Docker images");
 
-        if let Ok(output) = Command::new("docker").args(&["images", "-q"]).output() {
+        if let Ok(output) = Command::new("docker").args(["images", "-q"]).output() {
             if output.status.success() {
                 let image_count = String::from_utf8_lossy(&output.stdout)
                     .lines()
@@ -191,7 +186,7 @@ impl MigrationHelper {
 
         // Check for gaming-related images
         if let Ok(output) = Command::new("docker")
-            .args(&["images", "--format", "{{.Repository}}"])
+            .args(["images", "--format", "{{.Repository}}"])
             .output()
         {
             if output.status.success() {
@@ -201,7 +196,7 @@ impl MigrationHelper {
                 for keyword in gaming_keywords {
                     if images_output.to_lowercase().contains(keyword) {
                         analysis.migration_recommendations.push(
-                            format!("Gaming-related images detected - Bolt provides optimized gaming container runtime with QUIC networking")
+                            "Gaming-related images detected - Bolt provides optimized gaming container runtime with QUIC networking".to_string()
                         );
                         break;
                     }
@@ -216,10 +211,7 @@ impl MigrationHelper {
     async fn analyze_volumes(&self, analysis: &mut DockerEnvironmentAnalysis) -> Result<()> {
         info!("💾 Analyzing Docker volumes");
 
-        if let Ok(output) = Command::new("docker")
-            .args(&["volume", "ls", "-q"])
-            .output()
-        {
+        if let Ok(output) = Command::new("docker").args(["volume", "ls", "-q"]).output() {
             if output.status.success() {
                 let volume_count = String::from_utf8_lossy(&output.stdout)
                     .lines()
@@ -244,7 +236,7 @@ impl MigrationHelper {
         info!("🌐 Analyzing Docker networks");
 
         if let Ok(output) = Command::new("docker")
-            .args(&["network", "ls", "-q"])
+            .args(["network", "ls", "-q"])
             .output()
         {
             if output.status.success() {
@@ -412,7 +404,7 @@ impl MigrationHelper {
             for compose_file in &analysis.compose_files {
                 report.push_str(&format!("- {}\n", compose_file));
             }
-            report.push_str("\n");
+            report.push('\n');
         }
 
         // Migration Benefits
@@ -441,7 +433,7 @@ impl MigrationHelper {
             for (i, recommendation) in analysis.migration_recommendations.iter().enumerate() {
                 report.push_str(&format!("{}. {}\n", i + 1, recommendation));
             }
-            report.push_str("\n");
+            report.push('\n');
         }
 
         // Migration Steps
@@ -469,7 +461,7 @@ impl MigrationHelper {
             report.push_str("# No compose files found\n");
             report.push_str("```\n");
         }
-        report.push_str("\n");
+        report.push('\n');
 
         report.push_str("### 4. Import Volumes\n");
         report.push_str("```bash\n");
@@ -494,7 +486,7 @@ impl MigrationHelper {
             for (i, issue) in analysis.compatibility_issues.iter().enumerate() {
                 report.push_str(&format!("{}. {}\n", i + 1, issue));
             }
-            report.push_str("\n");
+            report.push('\n');
         }
 
         // Support Information
@@ -524,7 +516,7 @@ impl MigrationHelper {
 
         // Get list of Docker images
         let output = Command::new("docker")
-            .args(&["images", "--format", "{{.Repository}}:{{.Tag}}"])
+            .args(["images", "--format", "{{.Repository}}:{{.Tag}}"])
             .output()?;
 
         if !output.status.success() {
@@ -561,7 +553,7 @@ impl MigrationHelper {
 
         // Get list of Docker volumes
         let output = Command::new("docker")
-            .args(&["volume", "ls", "--format", "{{.Name}}"])
+            .args(["volume", "ls", "--format", "{{.Name}}"])
             .output()?;
 
         if !output.status.success() {
@@ -608,7 +600,7 @@ impl MigrationHelper {
 
         // Get list of Docker networks (excluding defaults)
         let output = Command::new("docker")
-            .args(&["network", "ls", "--format", "{{.Name}}\t{{.Driver}}"])
+            .args(["network", "ls", "--format", "{{.Name}}\t{{.Driver}}"])
             .output()?;
 
         if !output.status.success() {

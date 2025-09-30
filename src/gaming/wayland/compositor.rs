@@ -1,9 +1,9 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use super::{GamingPerformanceMetrics, WaylandGamingConfig};
 
@@ -113,6 +113,12 @@ pub struct PerformanceMonitor {
     gpu_utilization: f64,
     memory_usage: u64,
     last_update: Instant,
+}
+
+impl Default for PerformanceMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PerformanceMonitor {

@@ -2,15 +2,11 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::SystemTime;
-use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 use warp::Filter;
 
-use super::{
-    ContainerMetrics, GPUMetrics, MetricsCollector, NetworkMetrics, RuntimeMetrics, StorageMetrics,
-    SystemMetrics,
-};
+use super::{MetricsCollector, SystemMetrics};
 
 /// Prometheus metrics exporter for Bolt
 pub struct PrometheusExporter {

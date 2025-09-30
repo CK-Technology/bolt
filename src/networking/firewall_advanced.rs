@@ -1,10 +1,10 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
 use std::process::Command;
 use tokio::process::Command as AsyncCommand;
-use tracing::{debug, error, info, warn};
+use tracing::{info, warn};
 
 #[derive(Debug, Clone)]
 pub struct FirewallRule {
@@ -559,13 +559,13 @@ impl AdvancedFirewallManager {
     /// Check if a port has conflicts
     async fn is_port_conflicted(&self, port: u16) -> Result<bool> {
         // Check if port is in use by system
-        let output = Command::new("netstat").args(&["-tuln"]).output()?;
+        let output = Command::new("netstat").args(["-tuln"]).output()?;
 
         let netstat_output = String::from_utf8_lossy(&output.stdout);
         let is_system_used = netstat_output.contains(&format!(":{}", port));
 
         // Check Docker's port usage
-        let docker_output = Command::new("docker").args(&["port", "--all"]).output();
+        let docker_output = Command::new("docker").args(["port", "--all"]).output();
 
         let is_docker_used = if let Ok(output) = docker_output {
             String::from_utf8_lossy(&output.stdout).contains(&format!(":{}", port))
@@ -663,7 +663,7 @@ impl AdvancedFirewallManager {
         info!("📦 Grouping similar rules together");
 
         let mut grouped_rules = Vec::new();
-        let mut ungrouped_rules = std::mem::take(&mut self.iptables_engine.rules);
+        let ungrouped_rules = std::mem::take(&mut self.iptables_engine.rules);
 
         // Group by table and chain first
         let mut table_groups: HashMap<String, HashMap<String, Vec<IPTablesRule>>> = HashMap::new();
@@ -1110,7 +1110,7 @@ impl AdvancedFirewallManager {
 
         // Apply NFTables configuration
         let output = AsyncCommand::new("nft")
-            .args(&["-f", nft_file])
+            .args(["-f", nft_file])
             .output()
             .await?;
 

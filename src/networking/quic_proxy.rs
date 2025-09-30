@@ -1,17 +1,14 @@
 use anyhow::{Context, Result};
-use bytes::{BufMut, Bytes, BytesMut};
-use futures::stream::{FuturesUnordered, StreamExt};
+use futures::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::{RwLock, Semaphore, mpsc};
 use tracing::{debug, error, info, instrument, warn};
-
-use crate::networking::NetworkConfig;
 
 /// High-performance QUIC-based socket proxy for container networking
 /// Provides TCP/UDP proxying over QUIC with gaming optimizations

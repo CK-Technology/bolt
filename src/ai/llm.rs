@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::{AiWorkloadConfig, ModelSize, QuantizationType};
+use super::{ModelSize, QuantizationType};
 
 /// LLM-specific optimizations and utilities for various inference engines
 
@@ -220,7 +220,7 @@ impl LlmOptimizer {
         Ok(LlmOptimizationProfile {
             engine: LlmEngineType::LlamaCpp,
             model_path: format!("{}.gguf", model_name),
-            quantization: QuantizationType::GGML_Q4_1,
+            quantization: QuantizationType::GgmlQ4_1,
             context_length: self.get_context_length(model_size),
             batch_size: if gpu_memory_gb > 8 { 512 } else { 256 },
             gpu_layers: self.calculate_gpu_layers(model_size, gpu_memory_gb),
@@ -293,11 +293,11 @@ impl LlmOptimizer {
     fn select_quantization(&self, model_size: &ModelSize, gpu_memory_gb: u32) -> QuantizationType {
         match (model_size, gpu_memory_gb) {
             (ModelSize::XLarge, mem) if mem >= 80 => QuantizationType::FP16,
-            (ModelSize::XLarge, _) => QuantizationType::GGML_Q4_0,
+            (ModelSize::XLarge, _) => QuantizationType::GgmlQ4_0,
             (ModelSize::Large, mem) if mem >= 48 => QuantizationType::FP16,
-            (ModelSize::Large, _) => QuantizationType::GGML_Q4_1,
+            (ModelSize::Large, _) => QuantizationType::GgmlQ4_1,
             (ModelSize::Medium, mem) if mem >= 16 => QuantizationType::FP16,
-            (ModelSize::Medium, _) => QuantizationType::GGML_Q5_0,
+            (ModelSize::Medium, _) => QuantizationType::GgmlQ5_0,
             (ModelSize::Small, _) => QuantizationType::FP16,
         }
     }
@@ -337,10 +337,10 @@ impl LlmOptimizer {
                 gpu_support: true,
                 quantization_support: vec![
                     QuantizationType::FP16,
-                    QuantizationType::GGML_Q4_0,
-                    QuantizationType::GGML_Q4_1,
-                    QuantizationType::GGML_Q5_0,
-                    QuantizationType::GGML_Q8_0,
+                    QuantizationType::GgmlQ4_0,
+                    QuantizationType::GgmlQ4_1,
+                    QuantizationType::GgmlQ5_0,
+                    QuantizationType::GgmlQ8_0,
                 ],
             },
             LlmEngine {

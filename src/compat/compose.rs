@@ -1,4 +1,3 @@
-use super::*;
 use crate::config::{Auth, BoltFile, Service, Storage};
 use crate::error::{BoltError, Result};
 use serde::{Deserialize, Serialize};
@@ -169,7 +168,7 @@ impl ComposeCompat {
             || compose_service.user.is_some()
         {
             // For complex configurations, suggest using capsules
-            if compose_service.image.as_ref().map_or(false, |img| {
+            if compose_service.image.as_ref().is_some_and(|img| {
                 img.contains("postgres")
                     || img.contains("mysql")
                     || img.contains("redis")

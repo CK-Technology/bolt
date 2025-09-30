@@ -1,10 +1,12 @@
+//! Real QUIC protocol implementation (partial)
+
+#![allow(dead_code)]
+
 use anyhow::Result;
-use bytes::Bytes;
-use quinn::{ClientConfig, Connection, ConnectionError, Endpoint, ServerConfig, VarInt};
+use quinn::{ClientConfig, Connection, ConnectionError, Endpoint, VarInt};
 use rcgen::generate_simple_self_signed;
-use rustls::ServerConfig as TlsServerConfig;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
+use rustls::pki_types::{CertificateDer, ServerName};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -589,16 +591,15 @@ impl RealQUICClient {
         let mut endpoint = Endpoint::client("0.0.0.0:0".parse()?)?;
 
         // Configure client with insecure TLS for development
-        let mut tls_config = rustls::ClientConfig::builder()
-            .with_safe_default_cipher_suites()
-            .with_safe_default_kx_groups()
-            .with_safe_default_protocol_versions()?
+        let crypto = rustls::ClientConfig::builder()
+            .dangerous()
             .with_custom_certificate_verifier(Arc::new(InsecureServerCertVerifier))
             .with_no_client_auth();
 
-        tls_config.alpn_protocols = vec![b"bolt-quic".to_vec()];
+        let client_config = ClientConfig::new(Arc::new(
+            quinn::crypto::rustls::QuicClientConfig::try_from(crypto)?,
+        ));
 
-        let client_config = ClientConfig::with_native_roots();
         endpoint.set_default_client_config(client_config);
 
         let config = QUICClientConfig::default();

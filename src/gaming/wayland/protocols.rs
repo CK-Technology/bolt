@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use tracing::{debug, info};
 
 /// Gaming-specific Wayland protocol extensions
@@ -24,6 +24,12 @@ pub enum GamingProtocol {
 
 pub struct ProtocolManager {
     enabled_protocols: Vec<GamingProtocol>,
+}
+
+impl Default for ProtocolManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ProtocolManager {

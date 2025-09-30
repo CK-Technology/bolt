@@ -1,7 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use tracing::{info, warn};
 
 pub mod api_server;
@@ -152,7 +151,7 @@ impl DockerCompatLayer {
         info!("  Converted command: {}", bolt_command);
 
         // Execute with bolt runtime
-        let bolt_args: Vec<&str> = bolt_command.split_whitespace().collect();
+        let _bolt_args: Vec<&str> = bolt_command.split_whitespace().collect();
         crate::runtime::run_container(
             &docker_run.image,
             docker_run.name.as_deref(),

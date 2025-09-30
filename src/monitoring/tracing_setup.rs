@@ -2,8 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io;
-use std::time::{Duration, Instant};
-use tracing::Level;
+use std::time::Duration;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Comprehensive tracing configuration for Bolt
@@ -87,7 +86,6 @@ impl TracingConfig {
 
     /// Setup file logging
     fn setup_file_logging(&self) -> Result<()> {
-        use std::fs::OpenOptions;
         use tracing_appender;
 
         println!("📝 Setting up file logging: {}", self.log_file_path);
@@ -145,7 +143,7 @@ impl TracingConfig {
         );
 
         for (key, value) in attrs {
-            span.record(key.as_str(), &tracing::field::display(&value));
+            span.record(key.as_str(), tracing::field::display(&value));
         }
 
         span
@@ -254,7 +252,7 @@ impl TracingConfig {
         );
 
         for (key, value) in context {
-            span.record(key.as_str(), &tracing::field::display(&value));
+            span.record(key.as_str(), tracing::field::display(&value));
         }
 
         span

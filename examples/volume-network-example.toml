@@ -1,0 +1,125 @@
+# Bolt Volume and QUIC Network Example
+# Demonstrates advanced volume mounting and QUIC networking
+
+[project]
+name = "webapp-with-storage"
+version = "1.0"
+description = "Web application with persistent storage and QUIC networking"
+
+# Create QUIC-optimized network for low-latency communication
+[networks.webapp-net]
+driver = "bolt"                 # QUIC networking for ultra-low latency
+subnet = "172.25.0.0/16"
+gateway = "172.25.0.1"
+performance_mode = "gaming"     # Sub-microsecond optimization
+enable_quic = true
+low_latency = true
+bandwidth_optimization = true
+
+# Create another network for database isolation
+[networks.db-net]
+driver = "bolt"
+subnet = "172.26.0.0/16"
+gateway = "172.26.0.1"
+performance_mode = "balanced"
+
+# Named volumes for persistent storage
+[volumes.webapp-data]
+driver = "local"
+size = "50GB"
+labels.purpose = "webapp-storage"
+labels.backup = "daily"
+
+[volumes.db-data]
+driver = "local"
+size = "100GB"
+labels.purpose = "database-storage"
+labels.backup = "hourly"
+
+[volumes.logs]
+driver = "local"
+size = "10GB"
+labels.purpose = "application-logs"
+
+# Frontend web service
+[services.frontend]
+image = "nginx:alpine"
+ports = ["8080:80"]
+networks = ["webapp-net"]
+volumes = [
+    "webapp-data:/usr/share/nginx/html",  # Named volume
+    "./nginx.conf:/etc/nginx/nginx.conf:ro",  # Host path (read-only)
+    "logs:/var/log/nginx"  # Shared log volume
+]
+environment = [
+    "NGINX_HOST=webapp.local",
+    "NGINX_PORT=80"
+]
+depends_on = ["backend"]
+
+# Backend API service
+[services.backend]
+image = "node:18-alpine"
+command = ["npm", "start"]
+networks = ["webapp-net", "db-net"]  # Connected to both networks
+volumes = [
+    "./app:/app:ro",  # Application code (read-only)
+    "logs:/app/logs"  # Shared log volume
+]
+environment = [
+    "NODE_ENV=production",
+    "DATABASE_URL=postgresql://user:pass@database:5432/app",
+    "LOG_LEVEL=info"
+]
+working_dir = "/app"
+depends_on = ["database"]
+
+# Database service (isolated network)
+[services.database]
+image = "postgres:15-alpine"
+networks = ["db-net"]  # Only accessible from db-net
+volumes = [
+    "db-data:/var/lib/postgresql/data",  # Persistent database storage
+    "./init.sql:/docker-entrypoint-initdb.d/init.sql:ro"  # Initialization script
+]
+environment = [
+    "POSTGRES_DB=app",
+    "POSTGRES_USER=user",
+    "POSTGRES_PASSWORD=pass",
+    "POSTGRES_INITDB_ARGS=--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+]
+
+# Performance settings for QUIC networking
+[performance]
+networking_mode = "gaming"     # Enable gaming optimizations
+enable_quic = true            # Use QUIC protocol
+low_latency = true           # Minimize network latency
+zero_copy = true             # Enable zero-copy networking where possible
+
+# Security settings
+[security]
+enable_selinux = false       # Disable for development
+enable_apparmor = false      # Disable for development
+allow_privileged = false     # Security best practice
+readonly_rootfs = false      # Allow writes for this example
+
+# Snapshot configuration for backups
+[snapshots]
+enable = true
+retention.daily = 7
+retention.weekly = 4
+retention.monthly = 3
+
+# Automatic snapshots before updates
+[snapshots.triggers]
+before_update = true
+before_volume_remove = true
+on_service_stop = false
+
+# Labels for organization
+[labels]
+environment = "development"
+project = "webapp-demo"
+stack = "nginx-node-postgres"
+networking = "quic-optimized"
+storage = "persistent-volumes"

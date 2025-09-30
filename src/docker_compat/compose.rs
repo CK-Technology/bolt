@@ -966,7 +966,7 @@ impl DockerComposeParser {
                             }),
                             internal: network.internal,
                             labels: network.labels.clone(),
-                            external: network.external.map(|ext| DockerComposeExternal::Bool(ext)),
+                            external: network.external.map(DockerComposeExternal::Bool),
                             name: network.name.clone(),
                         },
                     )
@@ -983,7 +983,7 @@ impl DockerComposeParser {
                         DockerComposeVolumeSpec::Named {
                             driver: volume.driver.clone(),
                             driver_opts: volume.driver_opts.clone(),
-                            external: volume.external.map(|ext| DockerComposeExternal::Bool(ext)),
+                            external: volume.external.map(DockerComposeExternal::Bool),
                             labels: volume.labels.clone(),
                             name: volume.name.clone(),
                         },

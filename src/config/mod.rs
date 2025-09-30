@@ -741,7 +741,7 @@ impl BoltFile {
 
         if let Some(ref perf) = gaming.performance {
             if let Some(nice) = perf.nice_level {
-                if nice < -20 || nice > 19 {
+                if !(-20..=19).contains(&nice) {
                     return Err(anyhow!(
                         "Service '{}': nice level {} out of range (-20 to 19)",
                         service_name,

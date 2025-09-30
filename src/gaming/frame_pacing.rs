@@ -1,5 +1,9 @@
-use crate::{BoltError, Result};
-use anyhow::Context;
+//! Frame pacing and FPS management for gaming containers (partial implementation)
+//! Handles VRR, frame time prediction, and GPU synchronization.
+
+#![allow(dead_code)]
+
+use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -7,7 +11,7 @@ use std::time::{Duration, Instant};
 use tokio::process::Command as AsyncCommand;
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::interval;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FramePacingConfig {
@@ -238,7 +242,7 @@ impl FramePacingManager {
 
     async fn is_wayland_session() -> bool {
         std::env::var("WAYLAND_DISPLAY").is_ok()
-            || std::env::var("XDG_SESSION_TYPE").map_or(false, |t| t == "wayland")
+            || std::env::var("XDG_SESSION_TYPE").is_ok_and(|t| t == "wayland")
     }
 
     async fn get_wayland_display_info() -> Result<DisplayInfo> {
@@ -250,7 +254,7 @@ impl FramePacingManager {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 Self::parse_wayland_display_info(&stdout)
             }
-            _ => Err(anyhow::anyhow!("Failed to get Wayland display info")),
+            _ => Err(anyhow::anyhow!("Failed to get Wayland display info").into()),
         }
     }
 
@@ -297,7 +301,7 @@ impl FramePacingManager {
     async fn get_x11_display_info() -> Result<DisplayInfo> {
         // Use xrandr for X11 display info
         let output = AsyncCommand::new("xrandr")
-            .args(&["--verbose"])
+            .args(["--verbose"])
             .output()
             .await;
 
@@ -306,7 +310,7 @@ impl FramePacingManager {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 Self::parse_x11_display_info(&stdout)
             }
-            _ => Err(anyhow::anyhow!("Failed to get X11 display info")),
+            _ => Err(anyhow::anyhow!("Failed to get X11 display info").into()),
         }
     }
 
@@ -514,7 +518,7 @@ impl FramePacingManager {
             metrics.current_fps
         };
 
-        let mut current_mode = vsync_controller.current_mode.write().await;
+        let current_mode = vsync_controller.current_mode.write().await;
 
         match &*current_mode {
             VSyncMode::Adaptive => {

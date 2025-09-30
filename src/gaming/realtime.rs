@@ -1,8 +1,7 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 /// Real-time gaming optimizations for maximum performance
 /// This module handles CPU scheduling, memory management, and system-level optimizations
@@ -360,7 +359,7 @@ impl RealtimeOptimizer {
         }
 
         // Disable CPU idle states for lower latency
-        if let Err(e) = fs::write("/dev/cpu_dma_latency", &[0u8; 4]) {
+        if let Err(e) = fs::write("/dev/cpu_dma_latency", [0u8; 4]) {
             warn!("Failed to disable CPU idle: {}", e);
         }
 
@@ -420,7 +419,7 @@ impl RealtimeOptimizer {
 
         // Use chrt command to set real-time priority
         let output = tokio::process::Command::new("chrt")
-            .args(&[
+            .args([
                 "-f",
                 "-p",
                 &self.config.realtime_priority.to_string(),
@@ -456,7 +455,7 @@ impl RealtimeOptimizer {
             .join(",");
 
         let output = tokio::process::Command::new("taskset")
-            .args(&["-cp", &cpu_list, &pid.to_string()])
+            .args(["-cp", &cpu_list, &pid.to_string()])
             .output()
             .await?;
 

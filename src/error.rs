@@ -27,6 +27,15 @@ pub enum BoltError {
     #[error("YAML error: {0}")]
     Yaml(#[from] serde_yaml::Error),
 
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+
+    #[error("Resource exhausted: {0}")]
+    ResourceExhausted(String),
+
+    #[error("Resource not found: {0}")]
+    NotFound(String),
+
     #[error("Generic error: {0}")]
     Other(#[from] anyhow::Error),
 }

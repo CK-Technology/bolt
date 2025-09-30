@@ -1,9 +1,9 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use super::WaylandGamingConfig;
 
@@ -44,6 +44,12 @@ pub struct LatencyMonitor {
     measurements: Vec<Duration>,
     last_input_time: Option<Instant>,
     average_latency: Duration,
+}
+
+impl Default for LatencyMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LatencyMonitor {

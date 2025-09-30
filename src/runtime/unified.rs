@@ -1,6 +1,4 @@
-use crate::{BoltError, Result};
-use anyhow::anyhow;
-use serde::{Deserialize, Serialize};
+use crate::Result;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
@@ -74,6 +72,8 @@ impl UnifiedRuntime {
                     working_dir: None,
                     user: None,
                     gpu_config: None,
+                    cpu_affinity: None,
+                    workload_hint: None,
                 };
 
                 let mut native = self.native.write().await;
@@ -81,7 +81,8 @@ impl UnifiedRuntime {
             }
             RuntimeMode::Delegate(runtime) => {
                 // Fall back to old delegation method
-                super::run_oci_container_delegate(runtime, image, name, ports, env, volumes, detach).await
+                super::run_oci_container_delegate(runtime, image, name, ports, env, volumes, detach)
+                    .await
             }
         }
     }
@@ -93,9 +94,7 @@ impl UnifiedRuntime {
                 let mut native = self.native.write().await;
                 native.stop_container(id).await
             }
-            RuntimeMode::Delegate(runtime) => {
-                super::stop_container_delegate(runtime, id).await
-            }
+            RuntimeMode::Delegate(runtime) => super::stop_container_delegate(runtime, id).await,
         }
     }
 
@@ -119,9 +118,7 @@ impl UnifiedRuntime {
                 let native = self.native.read().await;
                 native.list_containers(all).await
             }
-            RuntimeMode::Delegate(runtime) => {
-                super::list_containers_delegate(runtime, all).await
-            }
+            RuntimeMode::Delegate(runtime) => super::list_containers_delegate(runtime, all).await,
         }
     }
 
@@ -132,14 +129,17 @@ impl UnifiedRuntime {
                 let mut native = self.native.write().await;
                 native.pull_image_native(image).await
             }
-            RuntimeMode::Delegate(runtime) => {
-                super::pull_image_delegate(runtime, image).await
-            }
+            RuntimeMode::Delegate(runtime) => super::pull_image_delegate(runtime, image).await,
         }
     }
 
     /// Build an image
-    pub async fn build_image(&self, context: &str, tag: Option<&str>, dockerfile: &str) -> Result<()> {
+    pub async fn build_image(
+        &self,
+        context: &str,
+        tag: Option<&str>,
+        dockerfile: &str,
+    ) -> Result<()> {
         match &self.mode {
             RuntimeMode::Native => {
                 let mut native = self.native.write().await;

@@ -223,6 +223,12 @@ pub struct NetworkManager {
     pub gaming_optimizations: bool,
 }
 
+impl Default for NetworkManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NetworkManager {
     pub fn new() -> Self {
         Self {

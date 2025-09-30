@@ -39,6 +39,16 @@ pub use types::{ContainerInfo, NetworkInfo, ServiceInfo, SurgeStatus};
 pub use anyhow;
 
 /// Re-exports for easier API usage
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::SystemTime;
+
+use chrono::{DateTime, Utc};
+use tokio::sync::OnceCell;
+
+use crate::runtime::native::ContainerStatus as NativeContainerStatus;
+use crate::runtime::unified::RuntimeMode;
+
 pub mod api {
     pub use crate::config::{BoltConfig, BoltFile, GamingConfig, Service, create_example_boltfile};
     pub use crate::docker_compat::{DockerCompatLayer, DockerEnvironmentAnalysis};
@@ -101,9 +111,18 @@ impl BoltFileBuilder {
 }
 
 /// Core Bolt API for container management
-#[derive(Clone)]
 pub struct BoltRuntime {
     config: BoltConfig,
+    unified_runtime: Arc<OnceCell<Arc<runtime::unified::UnifiedRuntime>>>,
+}
+
+impl Clone for BoltRuntime {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            unified_runtime: self.unified_runtime.clone(),
+        }
+    }
 }
 
 impl BoltRuntime {
@@ -111,12 +130,28 @@ impl BoltRuntime {
     pub fn new() -> Result<Self> {
         Ok(Self {
             config: BoltConfig::load()?,
+            unified_runtime: Arc::new(OnceCell::new()),
         })
     }
 
     /// Create a new Bolt runtime instance with custom config
     pub fn with_config(config: BoltConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            unified_runtime: Arc::new(OnceCell::new()),
+        }
+    }
+
+    async fn unified_runtime(&self) -> Result<Arc<runtime::unified::UnifiedRuntime>> {
+        let runtime_ref = self
+            .unified_runtime
+            .get_or_try_init(|| async {
+                let runtime = runtime::unified::UnifiedRuntime::new().await?;
+                Ok::<Arc<runtime::unified::UnifiedRuntime>, BoltError>(Arc::new(runtime))
+            })
+            .await?;
+
+        Ok(runtime_ref.clone())
     }
 
     /// Run a container
@@ -129,17 +164,23 @@ impl BoltRuntime {
         volumes: &[String],
         detach: bool,
     ) -> Result<()> {
-        runtime::run_container(image, name, ports, env, volumes, detach).await
+        let runtime = self.unified_runtime().await?;
+        runtime
+            .run_container(image, name, ports, env, volumes, detach)
+            .await
+            .map(|_| ())
     }
 
     /// Build an image
     pub async fn build_image(&self, path: &str, tag: Option<&str>, dockerfile: &str) -> Result<()> {
-        runtime::build_image(path, tag, dockerfile).await
+        let runtime = self.unified_runtime().await?;
+        runtime.build_image(path, tag, dockerfile).await
     }
 
     /// Pull an image
     pub async fn pull_image(&self, image: &str) -> Result<()> {
-        runtime::pull_image(image).await
+        let runtime = self.unified_runtime().await?;
+        runtime.pull_image(image).await
     }
 
     /// Push an image
@@ -149,17 +190,67 @@ impl BoltRuntime {
 
     /// List containers
     pub async fn list_containers(&self, all: bool) -> Result<Vec<ContainerInfo>> {
-        runtime::list_containers_info(all).await
+        let runtime = self.unified_runtime().await?;
+        let mode = runtime.get_mode().clone();
+        let containers = runtime.list_containers(all).await?;
+
+        let mut results = Vec::with_capacity(containers.len());
+
+        for container in containers {
+            let name = container
+                .name
+                .clone()
+                .unwrap_or_else(|| container.id.clone());
+
+            let created: DateTime<Utc> = DateTime::<Utc>::from(container.created);
+            let uptime = SystemTime::now()
+                .duration_since(container.created)
+                .ok()
+                .map(|duration| format!("{}s", duration.as_secs()));
+
+            let status = match container.status {
+                NativeContainerStatus::Created => "created".to_string(),
+                NativeContainerStatus::Running => "running".to_string(),
+                NativeContainerStatus::Stopped => "stopped".to_string(),
+                NativeContainerStatus::Paused => "paused".to_string(),
+                NativeContainerStatus::Exited(code) => format!("exited ({})", code),
+                NativeContainerStatus::Error(message) => format!("error: {}", message),
+            };
+
+            let runtime_label = match &mode {
+                RuntimeMode::Native => Some("bolt-native".to_string()),
+                RuntimeMode::Delegate(delegate) => Some(delegate.clone()),
+            };
+
+            results.push(ContainerInfo {
+                id: container.id.clone(),
+                name: name.clone(),
+                names: vec![name],
+                image: container.image.clone(),
+                image_id: String::new(),
+                command: String::new(),
+                created: created.to_rfc3339(),
+                status,
+                ports: container.ports.clone(),
+                labels: HashMap::new(),
+                uptime,
+                runtime: runtime_label,
+            });
+        }
+
+        Ok(results)
     }
 
     /// Stop a container
     pub async fn stop_container(&self, container: &str) -> Result<()> {
-        runtime::stop_container(container).await
+        let runtime = self.unified_runtime().await?;
+        runtime.stop_container(container).await
     }
 
     /// Remove a container
     pub async fn remove_container(&self, container: &str, force: bool) -> Result<()> {
-        runtime::remove_container(container, force).await
+        let runtime = self.unified_runtime().await?;
+        runtime.remove_container(container, force).await
     }
 
     /// Restart a container
@@ -174,8 +265,9 @@ impl BoltRuntime {
         detach: bool,
         force_recreate: bool,
     ) -> Result<()> {
+        let runtime = self.unified_runtime().await?;
         // Use the new native runtime integration
-        surge::up_with_native_runtime(&self.config, services, detach, force_recreate).await
+        surge::up_with_native_runtime(&self.config, runtime, services, detach, force_recreate).await
     }
 
     /// Stop Surge services
@@ -223,6 +315,50 @@ impl BoltRuntime {
         network::remove_network(name).await
     }
 
+    /// Create a volume
+    pub async fn create_volume(
+        &self,
+        name: &str,
+        driver: &str,
+        size: Option<&str>,
+        options: &[String],
+    ) -> Result<volume::VolumeInfo> {
+        let mut volume_manager =
+            volume::VolumeManager::new_async(self.config.data_dir.clone()).await?;
+
+        let labels = std::collections::HashMap::new();
+        let mut volume_options = std::collections::HashMap::new();
+
+        for opt in options {
+            if let Some((key, value)) = opt.split_once('=') {
+                volume_options.insert(key.to_string(), value.to_string());
+            }
+        }
+
+        let request = volume::VolumeCreateRequest {
+            name: name.to_string(),
+            driver: driver.to_string(),
+            labels: Some(labels),
+            options: Some(volume_options),
+            size: size.map(|s| s.to_string()),
+        };
+
+        volume_manager.create_volume_async(request).await
+    }
+
+    /// List volumes
+    pub async fn list_volumes(&self) -> Result<Vec<volume::VolumeInfo>> {
+        let volume_manager = volume::VolumeManager::new_async(self.config.data_dir.clone()).await?;
+        volume_manager.list_volumes_async().await
+    }
+
+    /// Remove a volume
+    pub async fn remove_volume(&self, name: &str, force: bool) -> Result<()> {
+        let mut volume_manager =
+            volume::VolumeManager::new_async(self.config.data_dir.clone()).await?;
+        volume_manager.remove_volume_async(name, force).await
+    }
+
     /// Get the runtime configuration
     pub fn config(&self) -> &BoltConfig {
         &self.config
@@ -233,6 +369,7 @@ impl Default for BoltRuntime {
     fn default() -> Self {
         Self::new().unwrap_or_else(|_| Self {
             config: BoltConfig::default(),
+            unified_runtime: Arc::new(OnceCell::new()),
         })
     }
 }

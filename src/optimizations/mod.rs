@@ -10,7 +10,7 @@ pub mod memory;
 pub mod network;
 pub mod storage;
 
-use crate::plugins::{OptimizationContext, OptimizationPlugin, PluginManager};
+use crate::plugins::{OptimizationContext, PluginManager};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizationProfile {
@@ -229,7 +229,7 @@ impl OptimizationManager {
                 packet_batching: Some(false),
             },
             storage_optimizations: storage::StorageOptimizations {
-                io_scheduler: Some(storage::IoScheduler::Mq_deadline),
+                io_scheduler: Some(storage::IoScheduler::MqDeadline),
                 read_ahead: Some(256),
             },
             conditions: vec![OptimizationCondition::GpuVendor(

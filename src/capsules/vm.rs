@@ -1,10 +1,13 @@
-// VM-like isolation for Bolt Capsules with GPU passthrough
+//! VM-like isolation for Bolt Capsules with GPU passthrough (future feature)
+//! This module provides VM-style containerization with hardware passthrough support.
+//! Currently a placeholder for future KVM/QEMU integration.
+
+#![allow(dead_code)]
+
 use anyhow::{Context, Result};
-use nix::unistd::{Gid, Uid};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use tokio::process::Command;
 use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,7 +199,7 @@ impl VMManager {
 
     async fn setup_nvidia_basic_passthrough(
         &self,
-        vm_id: &str,
+        _vm_id: &str,
         nvidia: &NvidiaPassthrough,
     ) -> Result<()> {
         // Check for NVIDIA devices
@@ -231,7 +234,7 @@ impl VMManager {
         Ok(())
     }
 
-    async fn setup_amd_passthrough(&self, vm_id: &str, amd: &AmdPassthrough) -> Result<()> {
+    async fn setup_amd_passthrough(&self, _vm_id: &str, amd: &AmdPassthrough) -> Result<()> {
         info!("🔴 Setting up AMD GPU passthrough");
 
         // Check for AMD GPU devices
@@ -350,7 +353,7 @@ impl VMManager {
     pub async fn start_vm(&self, vm_id: &str) -> Result<()> {
         info!("▶️  Starting VM: {}", vm_id);
 
-        let config = self.vms.get(vm_id).context("VM not found")?;
+        let _config = self.vms.get(vm_id).context("VM not found")?;
 
         // Would launch the actual VM process here
         info!("✅ VM {} started successfully", vm_id);

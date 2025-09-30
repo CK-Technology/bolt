@@ -1,3 +1,7 @@
+//! NVIDIA GPU detection and management
+
+#![allow(dead_code)]
+
 use super::{GPUInfo, GPUVendor};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -166,7 +170,7 @@ impl NvidiaManager {
 
         // Use nvidia-settings for clock offsets
         let output = Command::new("nvidia-settings")
-            .args(&[
+            .args([
                 "-a",
                 &format!(
                     "[gpu:{}]/GPUMemoryTransferRateOffset[3]={}",
@@ -199,7 +203,7 @@ impl NvidiaManager {
         );
 
         let output = Command::new("nvidia-settings")
-            .args(&[
+            .args([
                 "-a",
                 &format!(
                     "[gpu:{}]/GPUGraphicsClockOffset[3]={}",
@@ -243,7 +247,7 @@ impl NvidiaManager {
 
         // Set CPU governor to performance
         let _ = Command::new("cpupower")
-            .args(&["frequency-set", "-g", "performance"])
+            .args(["frequency-set", "-g", "performance"])
             .output();
 
         // Disable CPU C-states for ultra-low latency
@@ -263,7 +267,7 @@ impl NvidiaManager {
     #[cfg(not(feature = "nvidia-support"))]
     async fn set_power_limit_fallback(&self, device_id: u32, watts: u32) -> Result<()> {
         let output = Command::new("nvidia-smi")
-            .args(&["-i", &device_id.to_string(), "-pl", &watts.to_string()])
+            .args(["-i", &device_id.to_string(), "-pl", &watts.to_string()])
             .output()
             .context("Failed to execute nvidia-smi")?;
 
@@ -478,12 +482,9 @@ impl NvidiaManager {
                 if let Some(name) = entry.file_name().to_str() {
                     if name.starts_with("nvidia") && name.len() > 6 {
                         if let Ok(index) = name[6..].parse::<u32>() {
-                            if !device_info.contains_key(&index) {
-                                device_info.insert(
-                                    index,
-                                    (name.to_string(), format!("NVIDIA GPU {}", index)),
-                                );
-                            }
+                            device_info.entry(index).or_insert_with(|| {
+                                (name.to_string(), format!("NVIDIA GPU {}", index))
+                            });
                         }
                     }
                 }

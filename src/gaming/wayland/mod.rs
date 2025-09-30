@@ -1,9 +1,9 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info};
 
 pub mod compositor;
 pub mod display;
@@ -207,6 +207,12 @@ pub struct GamingPerformanceMetrics {
 
 pub struct WaylandGamingManager {
     sessions: HashMap<String, WaylandGamingSession>,
+}
+
+impl Default for WaylandGamingManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl WaylandGamingManager {
