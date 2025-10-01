@@ -492,7 +492,7 @@ impl NvidiaManager {
         }
 
         // Create GPU entries from discovered devices
-        for (&index, (device_name, gpu_name)) in &device_info {
+        for (&index, (_device_name, gpu_name)) in &device_info {
             let gpu = NvidiaGPU {
                 index,
                 uuid: format!("sysfs-detected-{}", index),
@@ -935,6 +935,7 @@ impl NvidiaManager {
         nvidia_config: &crate::config::NvidiaConfig,
     ) -> Result<()> {
         info!("🐳 Configuring nvidia-container-runtime for container {}", container_id);
+        debug!("NVIDIA config: {:?}", nvidia_config);
 
         // This would integrate with the actual nvidia-container-runtime
         // to properly configure GPU access in the container

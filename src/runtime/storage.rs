@@ -1104,6 +1104,11 @@ impl StorageManager {
             }
         }
 
+        // Use base image metadata if available for parent reference
+        if let Some(ref base_metadata) = current_image_metadata {
+            debug!("Building on base image: {} ({})", base_metadata.name, base_metadata.digest);
+        }
+
         let metadata = ImageMetadata {
             name: context.tag.clone(),
             tag: "latest".to_string(),

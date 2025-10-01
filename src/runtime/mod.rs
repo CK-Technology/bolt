@@ -358,6 +358,7 @@ pub async fn build_image_delegate(
     tag: Option<&str>,
     dockerfile: &str,
 ) -> Result<()> {
+    debug!("Building image using {} runtime", runtime);
     info!("🔨 Building image from path: {}", path);
     debug!("Dockerfile: {}", dockerfile);
     if let Some(tag) = tag {

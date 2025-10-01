@@ -58,7 +58,7 @@ impl OllamaManager {
         let gpu_memory = self.get_available_gpu_memory().await?;
         let _system_memory = self.get_available_system_memory()?;
 
-        let optimizer = AiOptimizer::new();
+        let mut optimizer = AiOptimizer::new();
         let mut config = optimizer
             .optimize_for_ollama(model_name, gpu_memory)
             .await?;

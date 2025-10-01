@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::info;
+use tracing::{debug, info};
 
 pub mod auto_scaling;
 pub mod cluster_management;
@@ -515,7 +515,7 @@ impl OrchestrationManager {
         nodes: &[String],
     ) -> Result<()> {
         info!("🔵🟢 Executing Blue-Green deployment");
-        debug!("  Deployment: {} across {} nodes", deployment.service_name, nodes.len());
+        debug!("  Deployment: {} across {} nodes", deployment.name, nodes.len());
 
         // 1. Deploy new version (Green) alongside current (Blue)
         // 2. Run health checks on Green
@@ -544,7 +544,7 @@ impl OrchestrationManager {
         nodes: &[String],
     ) -> Result<()> {
         info!("🔄 Executing Rolling Update deployment");
-        debug!("  Deployment: {} across {} nodes", deployment.service_name, nodes.len());
+        debug!("  Deployment: {} across {} nodes", deployment.name, nodes.len());
 
         let replicas_per_batch = (deployment.replicas as f64 * 0.25).ceil() as u32; // 25% at a time
 
@@ -568,7 +568,7 @@ impl OrchestrationManager {
         nodes: &[String],
     ) -> Result<()> {
         info!("🐤 Executing Canary deployment");
-        debug!("  Deployment: {} across {} nodes", deployment.service_name, nodes.len());
+        debug!("  Deployment: {} across {} nodes", deployment.name, nodes.len());
 
         // 1. Deploy 5% of traffic to new version
         info!("   📊 Deploying canary (5% traffic)");

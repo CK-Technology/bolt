@@ -8,14 +8,17 @@ use tracing::{debug, info, warn};
 
 pub mod bridge;
 pub mod ebpf;
+pub mod ebpf_xdp;
 pub mod firewall_advanced;
 pub mod quic;
 pub mod quic_proxy;
 pub mod quic_real;
 
 // Re-export main networking types
+pub use ebpf_xdp::{XDPFastPath, XDPMode, XDPStats};
 pub use firewall_advanced::AdvancedFirewallManager;
 pub use quic_proxy::{ProxyRule, QUICProxyConfig, QUICSocketProxy};
+pub use quic_real::RealQUICServer;
 
 /// Networking configuration for containers
 #[derive(Debug, Clone, Serialize, Deserialize)]

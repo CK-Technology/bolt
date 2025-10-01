@@ -803,9 +803,9 @@ impl BoltNetworkManager {
     }
 
     /// Calculate gateway IP from subnet
-    fn calculate_gateway(&self, subnet: &str) -> Result<IpAddr> {
+    fn calculate_gateway(&self, _subnet: &str) -> Result<IpAddr> {
         // Simple implementation - use first IP in subnet as gateway
-        // In real implementation: proper CIDR parsing
+        // In real implementation: proper CIDR parsing from subnet param
         Ok(IpAddr::V4(Ipv4Addr::new(172, 18, 0, 1)))
     }
 

@@ -16,7 +16,7 @@ use tracing::{debug, error, info, warn};
 
 use super::{NetworkConfig, NetworkInterface};
 
-/// Real QUIC server implementation using Quinn
+/// Real QUIC server implementation using Quinn with connection pooling
 pub struct RealQUICServer {
     endpoint: Option<Endpoint>,
     connections: Arc<RwLock<HashMap<String, QUICConnectionInfo>>>,
@@ -24,6 +24,7 @@ pub struct RealQUICServer {
     config: QUICServerConfig,
     stats: Arc<RwLock<QUICServerStats>>,
     shutdown_tx: Option<mpsc::Sender<()>>,
+    connection_pool: Arc<RwLock<QUICConnectionPool>>,
 }
 
 #[derive(Debug, Clone)]
@@ -68,6 +69,95 @@ pub struct QUICServerStats {
     pub active_streams: u32,
 }
 
+/// QUIC Connection Pool for reusing connections
+#[derive(Debug, Clone)]
+pub struct QUICConnectionPool {
+    /// Pooled connections indexed by (remote_addr, container_id)
+    pool: HashMap<(String, String), PooledConnection>,
+    /// Maximum connections in pool
+    max_pool_size: usize,
+    /// Connection idle timeout before removal from pool
+    idle_timeout: Duration,
+}
+
+#[derive(Debug, Clone)]
+struct PooledConnection {
+    connection: Arc<Connection>,
+    last_used: std::time::Instant,
+    use_count: u64,
+}
+
+impl QUICConnectionPool {
+    fn new(max_pool_size: usize, idle_timeout: Duration) -> Self {
+        Self {
+            pool: HashMap::new(),
+            max_pool_size,
+            idle_timeout,
+        }
+    }
+
+    /// Get a connection from the pool or return None if not available
+    fn get(&mut self, remote_addr: &str, container_id: &str) -> Option<Arc<Connection>> {
+        let key = (remote_addr.to_string(), container_id.to_string());
+
+        if let Some(pooled) = self.pool.get_mut(&key) {
+            // Check if connection is still valid and not idle for too long
+            if pooled.last_used.elapsed() < self.idle_timeout {
+                pooled.last_used = std::time::Instant::now();
+                pooled.use_count += 1;
+                debug!("♻️  Reusing pooled QUIC connection to {} (used {} times)", remote_addr, pooled.use_count);
+                return Some(pooled.connection.clone());
+            } else {
+                // Connection idle for too long, remove it
+                debug!("🗑️  Removing idle QUIC connection from pool: {}", remote_addr);
+                self.pool.remove(&key);
+            }
+        }
+
+        None
+    }
+
+    /// Add a connection to the pool
+    fn add(&mut self, remote_addr: String, container_id: String, connection: Arc<Connection>) {
+        // Enforce max pool size by removing oldest connection
+        if self.pool.len() >= self.max_pool_size {
+            if let Some(oldest_key) = self.pool.iter()
+                .min_by_key(|(_, v)| v.last_used)
+                .map(|(k, _)| k.clone())
+            {
+                debug!("🗑️  Pool full, removing oldest connection");
+                self.pool.remove(&oldest_key);
+            }
+        }
+
+        let key = (remote_addr.clone(), container_id);
+        self.pool.insert(key, PooledConnection {
+            connection,
+            last_used: std::time::Instant::now(),
+            use_count: 1,
+        });
+
+        info!("➕ Added QUIC connection to pool: {} (pool size: {})", remote_addr, self.pool.len());
+    }
+
+    /// Clean up expired connections from the pool
+    fn cleanup_expired(&mut self) {
+        let before_size = self.pool.len();
+        self.pool.retain(|_, pooled| {
+            pooled.last_used.elapsed() < self.idle_timeout
+        });
+        let removed = before_size - self.pool.len();
+        if removed > 0 {
+            debug!("🧹 Cleaned up {} expired QUIC connections from pool", removed);
+        }
+    }
+
+    fn pool_stats(&self) -> (usize, usize, u64) {
+        let total_uses: u64 = self.pool.values().map(|p| p.use_count).sum();
+        (self.pool.len(), self.max_pool_size, total_uses)
+    }
+}
+
 impl RealQUICServer {
     /// Create new real QUIC server for container networking
     pub async fn new(network_config: NetworkConfig) -> Result<Self> {
@@ -84,6 +174,10 @@ impl RealQUICServer {
             config,
             stats: Arc::new(RwLock::new(QUICServerStats::default())),
             shutdown_tx: Some(shutdown_tx),
+            connection_pool: Arc::new(RwLock::new(QUICConnectionPool::new(
+                100,  // max 100 pooled connections
+                Duration::from_secs(60),  // 60s idle timeout
+            ))),
         };
 
         // Initialize QUIC endpoint
@@ -263,12 +357,9 @@ impl RealQUICServer {
 
     /// Handle unidirectional stream
     async fn handle_uni_stream(mut recv: quinn::RecvStream, stats: Arc<RwLock<QUICServerStats>>) {
-        let mut buffer = Vec::new();
-
         match recv.read_to_end(1024 * 1024).await {
             // 1MB limit
-            Ok(data) => {
-                buffer = data;
+            Ok(buffer) => {
 
                 // Update stats
                 {
@@ -559,6 +650,61 @@ impl RealQUICServer {
 
         info!("✅ Container unregistered from real QUIC: {}", container_id);
         Ok(())
+    }
+
+    /// Get or create a QUIC connection from the pool
+    pub async fn get_pooled_connection(
+        &self,
+        remote_addr: &str,
+        container_id: &str,
+    ) -> Result<Arc<Connection>> {
+        // Try to get from pool first
+        {
+            let mut pool = self.connection_pool.write().await;
+            if let Some(conn) = pool.get(remote_addr, container_id) {
+                return Ok(conn);
+            }
+        }
+
+        // Connection not in pool, create new one
+        info!("🔗 Creating new QUIC connection to {} for container {}", remote_addr, container_id);
+
+        // Parse address and create connection
+        let addr: SocketAddr = remote_addr.parse()?;
+        let endpoint = self.endpoint.as_ref().ok_or_else(|| anyhow::anyhow!("QUIC endpoint not initialized"))?;
+
+        let connection = endpoint.connect(addr, "localhost")?.await?;
+        let conn_arc = Arc::new(connection);
+
+        // Add to pool
+        {
+            let mut pool = self.connection_pool.write().await;
+            pool.add(remote_addr.to_string(), container_id.to_string(), conn_arc.clone());
+        }
+
+        Ok(conn_arc)
+    }
+
+    /// Get connection pool statistics
+    pub async fn get_pool_stats(&self) -> (usize, usize, u64) {
+        let pool = self.connection_pool.read().await;
+        pool.pool_stats()
+    }
+
+    /// Start periodic connection pool cleanup task
+    pub fn start_pool_cleanup_task(&self) {
+        let pool = Arc::clone(&self.connection_pool);
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                let mut pool = pool.write().await;
+                pool.cleanup_expired();
+            }
+        });
+
+        info!("🧹 QUIC connection pool cleanup task started");
     }
 
     /// Shutdown the QUIC server

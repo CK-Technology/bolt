@@ -548,7 +548,7 @@ impl BoltFile {
 
         let mut used_host_ports = HashSet::new();
 
-        for (name, service) in &self.services {
+        for (_name, service) in &self.services {
             if let Some(ref ports) = service.ports {
                 for port_mapping in ports {
                     let host_port = self.extract_host_port(port_mapping)?;

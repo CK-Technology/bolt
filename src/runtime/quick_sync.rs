@@ -160,7 +160,7 @@ impl QuickSyncDevice {
     fn determine_generation(device_id: &str) -> IntelGeneration {
         // Intel device ID ranges (approximate)
         match device_id.chars().next() {
-            Some('5') => IntelGeneration::Arc, // Arc A-series: 56xx
+            Some('5') if device_id.starts_with("56") => IntelGeneration::Arc, // Arc A-series: 56xx
             Some('4') | Some('9') => IntelGeneration::Gen12, // Tiger Lake+: 9axx, 46xx
             Some('8') => IntelGeneration::Gen11, // Ice Lake: 8axx
             Some('5') | Some('3') | Some('1') | Some('0') if device_id.len() == 4 => {

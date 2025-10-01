@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use tracing::debug;
 
 pub mod llm;
 pub mod ollama;
@@ -120,10 +121,17 @@ impl AiOptimizer {
     }
 
     pub async fn optimize_for_ollama(
-        &self,
+        &mut self,
         model_name: &str,
         gpu_memory_gb: u32,
     ) -> Result<AiWorkloadConfig> {
+        // Check if we have a cached config for this model
+        let cache_key = format!("ollama-{}-{}gb", model_name, gpu_memory_gb);
+        if let Some(cached) = self.workload_configs.get(&cache_key) {
+            debug!("Using cached AI workload config for {}", model_name);
+            return Ok(cached.clone());
+        }
+
         let model_size = self.determine_model_size(model_name);
         let quantization = self.select_optimal_quantization(&model_size, gpu_memory_gb);
         let gpu_allocation = self.determine_gpu_allocation(&model_size, gpu_memory_gb);
@@ -164,11 +172,14 @@ impl AiOptimizer {
             },
         };
 
+        // Cache the config for future use
+        self.workload_configs.insert(cache_key, config.clone());
+
         Ok(config)
     }
 
     pub async fn optimize_for_training(
-        &self,
+        &mut self,
         model_size: &ModelSize,
         available_memory_gb: u32,
     ) -> Result<AiWorkloadConfig> {

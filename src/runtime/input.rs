@@ -328,10 +328,10 @@ impl UltraLowLatencyInputHandler {
     }
 
     async fn process_device_events(
-        device: &InputDevice,
-        sender: &mpsc::UnboundedSender<InputEvent>,
-        latency_metrics: &Arc<Mutex<InputLatencyMetrics>>,
-        target_latency_ns: u64,
+        _device: &InputDevice,
+        _sender: &mpsc::UnboundedSender<InputEvent>,
+        _latency_metrics: &Arc<Mutex<InputLatencyMetrics>>,
+        _target_latency_ns: u64,
     ) -> Result<()> {
         // This is a simplified implementation
         // In reality, this would use epoll/kqueue for efficient event polling

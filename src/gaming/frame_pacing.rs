@@ -320,13 +320,10 @@ impl FramePacingManager {
         let mut display_name = "X11 Display".to_string();
         let mut adaptive_sync_supported = false;
 
-        let mut current_display: Option<String> = None;
-
         for line in output.lines() {
             if line.contains(" connected") && !line.contains("disconnected") {
-                current_display = line.split_whitespace().next().map(|s| s.to_string());
-                if let Some(ref name) = current_display {
-                    display_name = name.clone();
+                if let Some(name) = line.split_whitespace().next() {
+                    display_name = name.to_string();
                 }
             }
 

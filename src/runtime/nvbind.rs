@@ -893,7 +893,7 @@ impl GpuPerformanceMonitor {
     async fn update_gpu_metrics(metrics: &Arc<RwLock<HashMap<String, GpuMetrics>>>) -> Result<()> {
         let mut metrics_guard = metrics.write().await;
 
-        for (gpu_id, metric) in metrics_guard.iter_mut() {
+        for (_gpu_id, metric) in metrics_guard.iter_mut() {
             // Simulate real GPU metrics (in production, this would call nvbind/nvidia-ml-py)
             metric.utilization_percent =
                 (metric.utilization_percent + rand::random::<f32>() * 10.0).min(100.0);
