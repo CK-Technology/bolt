@@ -1,0 +1,20 @@
+# Grafana datasource configuration for Bolt Prometheus metrics
+#
+# Installation:
+# 1. Copy this file to /etc/grafana/provisioning/datasources/bolt.yaml
+# 2. Restart Grafana: sudo systemctl restart grafana-server
+# 3. The datasource will be automatically configured
+
+apiVersion: 1
+
+datasources:
+  - name: Bolt Prometheus
+    type: prometheus
+    access: proxy
+    url: http://localhost:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      httpMethod: POST
+      timeInterval: 5s
+    version: 1

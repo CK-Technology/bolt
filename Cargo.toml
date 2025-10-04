@@ -29,6 +29,8 @@ serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+tokio-util = { version = "0.7", features = ["compat"] }
 # Error handling
 anyhow = "1.0"
 thiserror = "1.0"
@@ -96,7 +98,7 @@ smithay-client-toolkit = { version = "0.18", optional = true }
 
 # === SYSTEM INTERFACES ===
 # Low-level system calls
-nix = { version = "0.27", features = ["process", "mount", "sched", "user", "net", "signal", "fs"], optional = true }
+nix = { version = "0.27", features = ["process", "mount", "sched", "user", "net", "signal", "fs", "term"], optional = true }
 # Cgroups management
 # cgroups-rs = "0.3"  # Linux-specific
 # Namespace management
@@ -116,6 +118,9 @@ chrono = { version = "0.4", features = ["serde"] }
 # Async utilities
 futures = "0.3"
 futures-util = "0.3"
+# Unix socket support for Docker compatibility
+hyperlocal = "0.8"
+hyper = { version = "1.0", features = ["full"] }
 # HTTP client for registries
 reqwest = { version = "0.11", features = ["json", "stream", "multipart"] }
 # JSON handling

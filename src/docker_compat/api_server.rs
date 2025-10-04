@@ -578,30 +578,98 @@ impl DockerAPIServer {
         self
     }
 
-    pub async fn start(&self) -> Result<()> {
-        tracing::info!(
-            "🐳 Starting Docker API server on {}:{}",
-            self.bind_address,
-            self.port
-        );
+    /// Start Docker API server on Unix socket (Docker compatibility)
+    pub async fn start_unix_socket(&self, socket_path: &str) -> Result<()> {
+        use std::path::Path;
+        use hyperlocal::UnixServerExt;
 
-        let runtime = self.runtime.clone();
+        tracing::info!("🐳 Starting Docker API server on Unix socket: {}", socket_path);
+
+        // Remove existing socket if present
+        if Path::new(socket_path).exists() {
+            std::fs::remove_file(socket_path)?;
+        }
+
+        // Create parent directory if needed
+        if let Some(parent) = Path::new(socket_path).parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let routes = Self::build_routes_static(self.runtime.clone());
+        let socket_path_owned = socket_path.to_string();
+
+        // Start server on Unix socket in background using hyperlocal
+        #[cfg(unix)]
+        tokio::spawn(async move {
+            use hyperlocal::UnixServerExt;
+
+            // Create Unix listener
+            match tokio::net::UnixListener::bind(&socket_path_owned) {
+                Ok(listener) => {
+                    tracing::info!("✅ Docker API listening on Unix socket: {}", socket_path_owned);
+
+                    let service = warp::service(routes);
+                    loop {
+                        match listener.accept().await {
+                            Ok((stream, _)) => {
+                                let service = service.clone();
+                                tokio::spawn(async move {
+                                    // Serve the connection
+                                    // Note: This is a simplified implementation
+                                    // Full implementation would use hyper to serve the warp service
+                                    tracing::debug!("Accepted Unix socket connection");
+                                });
+                            }
+                            Err(e) => {
+                                tracing::error!("Unix socket accept error: {}", e);
+                                break;
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Failed to bind Unix socket: {}", e);
+                }
+            }
+        });
+
+        // Set permissions for Docker compatibility
+        #[cfg(unix)]
+        {
+            use std::fs;
+            use std::os::unix::fs::PermissionsExt;
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            if Path::new(socket_path).exists() {
+                let mut perms = fs::metadata(socket_path)?.permissions();
+                perms.set_mode(0o666); // rw-rw-rw-
+                fs::set_permissions(socket_path, perms)?;
+                tracing::info!("✅ Unix socket permissions set to 0666");
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Build warp routes (shared between TCP and Unix socket)
+    fn build_routes_static(runtime_param: Arc<BoltRuntime>) -> impl warp::Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+        let runtime = runtime_param.clone();
 
         // Version endpoint
+        let runtime_clone = runtime.clone();
         let version = warp::path("version").and(warp::get()).and_then(move || {
-            let rt = runtime.clone();
+            let rt = runtime_clone.clone();
             async move { Self::version_handler(rt).await }
         });
 
         // Info endpoint
-        let runtime_clone = self.runtime.clone();
+        let runtime_clone = runtime.clone();
         let info = warp::path("info").and(warp::get()).and_then(move || {
             let rt = runtime_clone.clone();
             async move { Self::info_handler(rt).await.map_err(warp::reject::custom) }
         });
 
         // Container endpoints
-        let runtime_clone = self.runtime.clone();
+        let runtime_clone = runtime.clone();
         let containers_list = warp::path!("containers" / "json")
             .and(warp::get())
             .and(warp::query::<HashMap<String, String>>())
@@ -610,7 +678,7 @@ impl DockerAPIServer {
                 async move { Self::containers_list_handler(rt, params).await }
             });
 
-        let runtime_clone = self.runtime.clone();
+        let runtime_clone = runtime.clone();
         let containers_create = warp::path!("containers" / "create")
             .and(warp::post())
             .and(warp::query::<HashMap<String, String>>())
@@ -622,7 +690,7 @@ impl DockerAPIServer {
                 },
             );
 
-        let runtime_clone = self.runtime.clone();
+        let runtime_clone = runtime.clone();
         let containers_start = warp::path!("containers" / String / "start")
             .and(warp::post())
             .and(warp::query::<HashMap<String, String>>())
@@ -634,7 +702,7 @@ impl DockerAPIServer {
                 },
             );
 
-        let runtime_clone = self.runtime.clone();
+        let runtime_clone = runtime.clone();
         let containers_stop = warp::path!("containers" / String / "stop")
             .and(warp::post())
             .and(warp::query::<HashMap<String, String>>())
@@ -643,7 +711,7 @@ impl DockerAPIServer {
                 async move { Self::containers_stop_handler(rt, id, params).await }
             });
 
-        let runtime_clone = self.runtime.clone();
+        let runtime_clone = runtime.clone();
         let containers_remove = warp::path!("containers" / String)
             .and(warp::delete())
             .and(warp::query::<HashMap<String, String>>())
@@ -652,7 +720,7 @@ impl DockerAPIServer {
                 async move { Self::containers_remove_handler(rt, id, params).await }
             });
 
-        let runtime_clone = self.runtime.clone();
+        let runtime_clone = runtime.clone();
         let containers_inspect = warp::path!("containers" / String / "json")
             .and(warp::get())
             .and_then(move |id: String| {
@@ -661,7 +729,7 @@ impl DockerAPIServer {
             });
 
         // Image endpoints
-        let runtime_clone = self.runtime.clone();
+        let runtime_clone = runtime.clone();
         let images_list = warp::path!("images" / "json")
             .and(warp::get())
             .and(warp::query::<HashMap<String, String>>())
@@ -670,7 +738,7 @@ impl DockerAPIServer {
                 async move { Self::images_list_handler(rt, params).await }
             });
 
-        let runtime_clone = self.runtime.clone();
+        let runtime_clone = runtime.clone();
         let images_pull = warp::path!("images" / "create")
             .and(warp::post())
             .and(warp::query::<HashMap<String, String>>())
@@ -679,7 +747,7 @@ impl DockerAPIServer {
                 async move { Self::images_pull_handler(rt, params).await }
             });
 
-        let runtime_clone = self.runtime.clone();
+        let runtime_clone = runtime.clone();
         let images_push = warp::path!("images" / String / "push")
             .and(warp::post())
             .and(warp::query::<HashMap<String, String>>())
@@ -688,8 +756,59 @@ impl DockerAPIServer {
                 async move { Self::images_push_handler(rt, name, params).await }
             });
 
+        // Container exec endpoints
+        let runtime_clone = runtime.clone();
+        let containers_exec = warp::path!("containers" / String / "exec")
+            .and(warp::post())
+            .and(warp::body::json())
+            .and_then(move |id: String, body: serde_json::Value| {
+                let rt = runtime_clone.clone();
+                async move { Self::containers_exec_handler(rt, id, body).await }
+            });
+
+        let runtime_clone = runtime.clone();
+        let exec_start = warp::path!("exec" / String / "start")
+            .and(warp::post())
+            .and(warp::body::json())
+            .and_then(move |exec_id: String, body: serde_json::Value| {
+                let rt = runtime_clone.clone();
+                async move { Self::exec_start_handler(rt, exec_id, body).await }
+            });
+
+        // Container logs endpoint
+        let runtime_clone = runtime.clone();
+        let containers_logs = warp::path!("containers" / String / "logs")
+            .and(warp::get())
+            .and(warp::query::<HashMap<String, String>>())
+            .and_then(move |id: String, params: HashMap<String, String>| {
+                let rt = runtime_clone.clone();
+                async move { Self::containers_logs_handler(rt, id, params).await }
+            });
+
+        // Container stats endpoint
+        let runtime_clone = runtime.clone();
+        let containers_stats = warp::path!("containers" / String / "stats")
+            .and(warp::get())
+            .and(warp::query::<HashMap<String, String>>())
+            .and_then(move |id: String, params: HashMap<String, String>| {
+                let rt = runtime_clone.clone();
+                async move { Self::containers_stats_handler(rt, id, params).await }
+            });
+
+        // Container attach endpoint with WebSocket support
+        let runtime_clone = runtime.clone();
+        let containers_attach = warp::path!("containers" / String / "attach")
+            .and(warp::ws())
+            .and(warp::query::<HashMap<String, String>>())
+            .map(move |id: String, ws: warp::ws::Ws, params: HashMap<String, String>| {
+                let rt = runtime_clone.clone();
+                ws.on_upgrade(move |websocket| {
+                    Self::handle_container_attach(rt, id, params, websocket)
+                })
+            });
+
         // Network endpoints
-        let runtime_clone = self.runtime.clone();
+        let runtime_clone = runtime.clone();
         let networks_list = warp::path!("networks")
             .and(warp::get())
             .and(warp::query::<HashMap<String, String>>())
@@ -707,17 +826,32 @@ impl DockerAPIServer {
             .or(containers_stop)
             .or(containers_remove)
             .or(containers_inspect)
+            .or(containers_exec)
+            .or(exec_start)
+            .or(containers_logs)
+            .or(containers_stats)
+            .or(containers_attach)
             .or(images_list)
             .or(images_pull)
             .or(images_push)
             .or(networks_list);
 
         // Add CORS and logging
-        let routes = api_routes
+        api_routes
             .with(warp::cors().allow_any_origin())
-            .with(warp::log("docker_api"));
+            .with(warp::log("docker_api"))
+    }
 
-        // Start server
+    pub async fn start(&self) -> Result<()> {
+        tracing::info!(
+            "🐳 Starting Docker API server on {}:{}",
+            self.bind_address,
+            self.port
+        );
+
+        let routes = Self::build_routes_static(self.runtime.clone());
+
+        // Start server on TCP
         let addr = format!("{}:{}", self.bind_address, self.port);
         let socket_addr: std::net::SocketAddr = addr.parse().map_err(|e| {
             BoltError::Runtime(crate::error::RuntimeError::StartFailed {
@@ -1277,6 +1411,215 @@ impl DockerAPIServer {
                 Err(warp::reject::custom(e))
             }
         }
+    }
+
+    async fn containers_exec_handler(
+        _runtime: Arc<BoltRuntime>,
+        container_id: String,
+        body: serde_json::Value,
+    ) -> Result<impl Reply, Rejection> {
+        tracing::info!("Creating exec instance for container: {}", container_id);
+
+        // Extract exec config from body
+        let _cmd = body["Cmd"].as_array();
+        let _attach_stdin = body["AttachStdin"].as_bool().unwrap_or(false);
+        let _attach_stdout = body["AttachStdout"].as_bool().unwrap_or(true);
+        let _attach_stderr = body["AttachStderr"].as_bool().unwrap_or(true);
+        let _tty = body["Tty"].as_bool().unwrap_or(false);
+
+        // Generate exec ID
+        let exec_id = format!("exec-{}", uuid::Uuid::new_v4().to_string().replace("-", "")[..12].to_string());
+
+        let response = serde_json::json!({
+            "Id": exec_id
+        });
+
+        Ok(warp::reply::json(&response))
+    }
+
+    async fn exec_start_handler(
+        _runtime: Arc<BoltRuntime>,
+        exec_id: String,
+        _body: serde_json::Value,
+    ) -> Result<impl Reply, Rejection> {
+        tracing::info!("Starting exec instance: {}", exec_id);
+
+        // Return empty response (in real impl, would stream output)
+        Ok(warp::reply::with_status(
+            "",
+            warp::http::StatusCode::OK,
+        ))
+    }
+
+    async fn containers_logs_handler(
+        _runtime: Arc<BoltRuntime>,
+        container_id: String,
+        params: HashMap<String, String>,
+    ) -> Result<impl Reply, Rejection> {
+        let _follow = params.get("follow").map(|v| v == "true" || v == "1").unwrap_or(false);
+        let _tail = params.get("tail").and_then(|v| v.parse::<usize>().ok());
+        let _timestamps = params.get("timestamps").map(|v| v == "true" || v == "1").unwrap_or(false);
+
+        tracing::info!("Fetching logs for container: {}", container_id);
+
+        // Return mock logs (in real impl, would stream from /var/log/bolt/containers/{id}.log)
+        let logs = format!("Container {} logs\nLine 2\nLine 3\n", container_id);
+
+        Ok(warp::reply::with_header(
+            logs,
+            "content-type",
+            "text/plain",
+        ))
+    }
+
+    async fn containers_stats_handler(
+        _runtime: Arc<BoltRuntime>,
+        container_id: String,
+        params: HashMap<String, String>,
+    ) -> Result<impl Reply, Rejection> {
+        let _stream = params.get("stream").map(|v| v == "true" || v == "1").unwrap_or(true);
+
+        tracing::info!("Fetching stats for container: {}", container_id);
+
+        // Return mock stats in Docker format
+        let stats = serde_json::json!({
+            "read": chrono::Utc::now().to_rfc3339(),
+            "preread": "0001-01-01T00:00:00Z",
+            "pids_stats": {
+                "current": 10
+            },
+            "blkio_stats": {},
+            "num_procs": 0,
+            "storage_stats": {},
+            "cpu_stats": {
+                "cpu_usage": {
+                    "total_usage": 12345678,
+                    "percpu_usage": [12345678],
+                    "usage_in_kernelmode": 1234567,
+                    "usage_in_usermode": 11111111
+                },
+                "system_cpu_usage": 123456789012_i64,
+                "online_cpus": 8
+            },
+            "precpu_stats": {},
+            "memory_stats": {
+                "usage": 104857600,
+                "max_usage": 209715200,
+                "stats": {},
+                "limit": 2147483648_i64
+            },
+            "name": format!("/{}", container_id),
+            "id": container_id,
+            "networks": {}
+        });
+
+        Ok(warp::reply::json(&stats))
+    }
+
+    /// Handle WebSocket connection for container attach
+    async fn handle_container_attach(
+        runtime: Arc<BoltRuntime>,
+        container_id: String,
+        params: HashMap<String, String>,
+        websocket: warp::ws::WebSocket,
+    ) {
+        use futures_util::{SinkExt, StreamExt};
+        use warp::ws::Message;
+
+        tracing::info!("WebSocket attach to container: {}", container_id);
+
+        let stream = params.get("stream").and_then(|v| v.parse::<bool>().ok()).unwrap_or(true);
+        let stdin = params.get("stdin").and_then(|v| v.parse::<bool>().ok()).unwrap_or(false);
+        let stdout = params.get("stdout").and_then(|v| v.parse::<bool>().ok()).unwrap_or(true);
+        let stderr = params.get("stderr").and_then(|v| v.parse::<bool>().ok()).unwrap_or(true);
+
+        tracing::debug!(
+            "Attach params - stream: {}, stdin: {}, stdout: {}, stderr: {}",
+            stream, stdin, stdout, stderr
+        );
+
+        let (mut ws_tx, mut ws_rx) = websocket.split();
+
+        // Create a channel for bidirectional communication
+        let (output_tx, mut output_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+
+        // Spawn task to read container output and send to WebSocket
+        let container_id_clone = container_id.clone();
+        let runtime_clone = runtime.clone();
+        tokio::spawn(async move {
+            // Simulate container output streaming
+            // In a real implementation, this would read from the container's stdout/stderr
+            if stdout || stderr {
+                let message = format!("Connected to container {}\n", container_id_clone);
+                let _ = output_tx.send(message.into_bytes());
+
+                // Periodically send container output
+                let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
+                for i in 0..10 {
+                    interval.tick().await;
+
+                    // Check if container is still running
+                    match runtime_clone.list_containers(false).await {
+                        Ok(containers) => {
+                            if !containers.iter().any(|c| c.id == container_id_clone || c.name == container_id_clone) {
+                                tracing::info!("Container {} no longer running, closing attach", container_id_clone);
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to check container status: {}", e);
+                            break;
+                        }
+                    }
+
+                    let output = format!("Container {} output line {}\n", container_id_clone, i);
+                    let _ = output_tx.send(output.into_bytes());
+                }
+            }
+        });
+
+        // Spawn task to forward container output to WebSocket
+        tokio::spawn(async move {
+            while let Some(data) = output_rx.recv().await {
+                if ws_tx.send(Message::binary(data)).await.is_err() {
+                    tracing::debug!("WebSocket closed, stopping output stream");
+                    break;
+                }
+            }
+        });
+
+        // Handle incoming WebSocket messages (stdin from client)
+        if stdin {
+            while let Some(result) = ws_rx.next().await {
+                match result {
+                    Ok(msg) => {
+                        if msg.is_binary() || msg.is_text() {
+                            let data = msg.as_bytes();
+                            tracing::debug!(
+                                "Received {} bytes of stdin data for container {}",
+                                data.len(),
+                                container_id
+                            );
+
+                            // In a real implementation, this would write to the container's stdin
+                            // For now, we just log it
+                            if let Ok(text) = std::str::from_utf8(data) {
+                                tracing::debug!("stdin: {}", text.trim());
+                            }
+                        } else if msg.is_close() {
+                            tracing::info!("WebSocket close frame received for container {}", container_id);
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("WebSocket error on container {}: {}", container_id, e);
+                        break;
+                    }
+                }
+            }
+        }
+
+        tracing::info!("Container attach session ended: {}", container_id);
     }
 
     async fn networks_list_handler(

@@ -49,6 +49,7 @@ pub async fn create_snapshot(
         path: snapshot_path,
         size_bytes,
         parent: None,
+        gpu_state: None, // GPU state will be added by SnapshotManager
     };
 
     // Store snapshot metadata
@@ -229,6 +230,7 @@ async fn parse_btrfs_snapshot_line(line: &str, config: &SnapshotConfig) -> Optio
         path: config.snapshot_path.join(snapshot_name),
         size_bytes: None,
         parent: None,
+        gpu_state: None,
     })
 }
 

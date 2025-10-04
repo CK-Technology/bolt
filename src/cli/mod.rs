@@ -1,6 +1,9 @@
 use clap::{Parser, Subcommand};
 
 pub mod compat;
+pub mod exec;
+pub mod gpu;
+pub mod logs;
 
 #[derive(Parser)]
 #[command(
@@ -53,9 +56,65 @@ pub enum Commands {
         #[arg(long)]
         runtime: Option<String>,
 
-        /// GPU devices to use (e.g., all, 0, 1,2)
+        /// GPU devices to use (e.g., all, 0, 1,2) - Docker compatible
         #[arg(long)]
         gpu: Option<String>,
+
+        /// GPU devices to use - Docker --gpus syntax (all, device=0,1, etc)
+        #[arg(long)]
+        gpus: Option<String>,
+
+        /// Interactive mode (keep STDIN open)
+        #[arg(short, long)]
+        interactive: bool,
+
+        /// Allocate a pseudo-TTY
+        #[arg(short, long)]
+        tty: bool,
+
+        /// Automatically remove container when it exits
+        #[arg(long)]
+        rm: bool,
+
+        /// Working directory inside container
+        #[arg(short = 'w', long)]
+        workdir: Option<String>,
+
+        /// User to run as (user:group)
+        #[arg(short = 'u', long)]
+        user: Option<String>,
+
+        /// Container hostname
+        #[arg(long)]
+        hostname: Option<String>,
+
+        /// Entrypoint override
+        #[arg(long)]
+        entrypoint: Option<String>,
+
+        /// CPU limit (number of cores)
+        #[arg(long)]
+        cpus: Option<f32>,
+
+        /// Memory limit (e.g., 2g, 512m)
+        #[arg(short = 'm', long)]
+        memory: Option<String>,
+
+        /// Network mode (bridge, host, none, container:<name>)
+        #[arg(long)]
+        network: Option<String>,
+
+        /// Add capability
+        #[arg(long)]
+        cap_add: Vec<String>,
+
+        /// Drop capability
+        #[arg(long)]
+        cap_drop: Vec<String>,
+
+        /// Run container in privileged mode
+        #[arg(long)]
+        privileged: bool,
     },
 
     /// Build a container image
@@ -98,6 +157,18 @@ pub enum Commands {
         containers: Vec<String>,
     },
 
+    /// Execute command in running container
+    Exec {
+        #[command(flatten)]
+        exec: exec::ExecCommand,
+    },
+
+    /// View container logs
+    Logs {
+        #[command(flatten)]
+        logs: logs::LogsCommand,
+    },
+
     /// Remove containers
     #[command(alias = "remove")]
     Rm {
@@ -131,6 +202,12 @@ pub enum Commands {
         command: GamingCommands,
     },
 
+    /// GPU management and scheduling
+    Gpu {
+        #[command(subcommand)]
+        command: gpu::GpuSubcommand,
+    },
+
     /// Network management
     Network {
         #[command(subcommand)]
@@ -159,6 +236,13 @@ pub enum Commands {
     Compat {
         #[command(subcommand)]
         command: compat::CompatCommands,
+    },
+
+    /// Start metrics and monitoring dashboard
+    Dashboard {
+        /// Port to run dashboard on
+        #[arg(short, long, default_value = "3000")]
+        port: u16,
     },
 }
 

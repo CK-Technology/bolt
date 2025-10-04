@@ -40,4 +40,13 @@ pub struct NetworkInfo {
     pub created: Option<String>, // Docker API compatibility
 }
 
+/// Image information
+#[derive(Debug, Clone)]
+pub struct ImageInfo {
+    pub id: String,
+    pub name: String,
+    pub size: u64,
+    pub created: Option<String>,
+}
+
 use std::collections::HashMap;

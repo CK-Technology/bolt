@@ -8,6 +8,7 @@ use tracing::{debug, info, warn};
 pub mod amd_metrics;
 pub mod environment;
 pub mod gpu_integration;
+pub mod gpu_scheduler;
 pub mod hardware_detection;
 pub mod input;
 pub mod native;

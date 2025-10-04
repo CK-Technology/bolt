@@ -893,20 +893,77 @@ impl GpuPerformanceMonitor {
     async fn update_gpu_metrics(metrics: &Arc<RwLock<HashMap<String, GpuMetrics>>>) -> Result<()> {
         let mut metrics_guard = metrics.write().await;
 
-        for (_gpu_id, metric) in metrics_guard.iter_mut() {
-            // Simulate real GPU metrics (in production, this would call nvbind/nvidia-ml-py)
-            metric.utilization_percent =
-                (metric.utilization_percent + rand::random::<f32>() * 10.0).min(100.0);
-            metric.memory_used_mb =
-                (metric.memory_used_mb + rand::random::<u64>() % 100).min(24000);
-            metric.temperature_c = 60 + rand::random::<u32>() % 20;
-            metric.power_draw_w = 200 + rand::random::<u32>() % 100;
-            metric.frame_time_us = 8333 + rand::random::<u64>() % 5000; // ~120fps target
-            metric.context_switches += rand::random::<u64>() % 10;
-            metric.last_updated = Instant::now();
+        for (gpu_id, metric) in metrics_guard.iter_mut() {
+            // Try to get real GPU metrics via NVML/nvidia-ml
+            #[cfg(feature = "nvbind-support")]
+            {
+                if let Ok(real_metrics) = Self::fetch_real_gpu_metrics(gpu_id).await {
+                    metric.utilization_percent = real_metrics.utilization_percent;
+                    metric.memory_used_mb = real_metrics.memory_used_mb;
+                    metric.temperature_c = real_metrics.temperature_c;
+                    metric.power_draw_w = real_metrics.power_draw_w;
+                    metric.frame_time_us = real_metrics.frame_time_us;
+                    metric.context_switches = real_metrics.context_switches;
+                    metric.last_updated = Instant::now();
+                    continue;
+                }
+            }
+
+            // Fallback: Use basic system queries or keep metrics stable
+            #[cfg(not(feature = "nvbind-support"))]
+            {
+                debug!("nvbind-support not enabled, keeping metrics at baseline for {}", gpu_id);
+                // Keep metrics at reasonable baseline values
+                metric.utilization_percent = metric.utilization_percent.min(100.0);
+                metric.memory_used_mb = metric.memory_used_mb.min(24000);
+                metric.temperature_c = metric.temperature_c.max(40).min(85);
+                metric.power_draw_w = metric.power_draw_w.max(50).min(350);
+                metric.frame_time_us = 16667; // 60 FPS baseline
+                metric.last_updated = Instant::now();
+            }
         }
 
         Ok(())
+    }
+
+    #[cfg(feature = "nvbind-support")]
+    async fn fetch_real_gpu_metrics(gpu_id: &str) -> Result<GpuMetrics> {
+        use std::process::Command as StdCommand;
+
+        // Use nvidia-smi to get real metrics
+        let output = tokio::task::spawn_blocking(move || {
+            StdCommand::new("nvidia-smi")
+                .args([
+                    "--query-gpu=utilization.gpu,memory.used,temperature.gpu,power.draw",
+                    "--format=csv,noheader,nounits",
+                    "-i",
+                    gpu_id,
+                ])
+                .output()
+        })
+        .await??;
+
+        if !output.status.success() {
+            return Err(anyhow::anyhow!("nvidia-smi query failed for GPU {}", gpu_id));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let parts: Vec<&str> = stdout.trim().split(',').map(|s| s.trim()).collect();
+
+        if parts.len() >= 4 {
+            Ok(GpuMetrics {
+                gpu_id: gpu_id.to_string(),
+                utilization_percent: parts[0].parse().unwrap_or(0.0),
+                memory_used_mb: parts[1].parse().unwrap_or(0),
+                temperature_c: parts[2].parse().unwrap_or(0),
+                power_draw_w: parts[3].parse().unwrap_or(0),
+                frame_time_us: 16667, // Default 60 FPS, would need frame capture for real data
+                context_switches: 0,  // Not available via nvidia-smi
+                last_updated: Instant::now(),
+            })
+        } else {
+            Err(anyhow::anyhow!("Invalid nvidia-smi output format"))
+        }
     }
 
     pub async fn get_gpu_metrics(&self, gpu_id: &str) -> Option<GpuMetrics> {
@@ -993,16 +1050,7 @@ impl GpuMemoryManager {
     }
 }
 
-// Add rand crate usage (would need to be added to Cargo.toml)
-mod rand {
-    pub fn random<T>() -> T
-    where
-        T: From<u8>,
-    {
-        // Simple pseudorandom for demo - in production use proper rand crate
-        T::from(42)
-    }
-}
+// Removed mock rand module - now using real GPU metrics via nvidia-smi
 
 pub fn create_nvbind_config_for_gaming(
     gaming_config: &crate::config::GamingConfig,

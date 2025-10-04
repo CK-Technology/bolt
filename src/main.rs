@@ -38,14 +38,37 @@ async fn main() -> Result<()> {
             detach,
             runtime: gpu_runtime,
             gpu,
+            gpus,
+            interactive,
+            tty,
+            rm: _rm,
+            workdir: _workdir,
+            user: _user,
+            hostname: _hostname,
+            entrypoint: _entrypoint,
+            cpus: _cpus,
+            memory: _memory,
+            network: _network,
+            cap_add: _cap_add,
+            cap_drop: _cap_drop,
+            privileged: _privileged,
         } => {
             info!("Running container: {}", image);
+
+            // Handle GPU flags (both --gpu and --gpus for Docker compatibility)
+            let gpu_spec = gpus.or(gpu);
             if let Some(ref runtime_type) = gpu_runtime {
                 info!("  GPU runtime: {}", runtime_type);
             }
-            if let Some(ref gpu_devices) = gpu {
+            if let Some(ref gpu_devices) = gpu_spec {
                 info!("  GPU devices: {}", gpu_devices);
             }
+
+            // Handle interactive/TTY flags
+            if interactive || tty {
+                info!("  Interactive mode: {}, TTY: {}", interactive, tty);
+            }
+
             runtime
                 .run_container(&image, name.as_deref(), &ports, &env, &volumes, detach)
                 .await?;
@@ -160,6 +183,14 @@ async fn main() -> Result<()> {
                 );
                 runtime.restart_container(&container, timeout).await?;
             }
+        }
+
+        Commands::Exec { exec } => {
+            exec.execute().await?;
+        }
+
+        Commands::Logs { logs } => {
+            logs.execute().await?;
         }
 
         Commands::Surge { command } => match command {
@@ -1036,8 +1067,33 @@ keep_monthly = 3
             }
         }
 
+        Commands::Gpu { command: _command } => {
+            println!("GPU management commands coming soon!");
+            println!("For now, use: bolt run --gpus all <image>");
+        }
+
         Commands::Compat { command } => {
             compat::handle_compat_command(compat::CompatArgs { command }, runtime).await?;
+        }
+
+        Commands::Dashboard { port } => {
+            use std::sync::Arc;
+            use bolt::monitoring::{MetricsCollector, dashboard::MetricsDashboard};
+
+            info!("🎛️  Starting metrics dashboard on port {}", port);
+
+            let metrics = Arc::new(MetricsCollector::new().await?);
+            let dashboard = MetricsDashboard::new(Arc::new(runtime.clone()), metrics);
+
+            println!("🚀 Metrics Dashboard starting...");
+            println!("   📊 Dashboard: http://localhost:{}", port);
+            println!("   📈 API Endpoints:");
+            println!("      • http://localhost:{}/api/metrics", port);
+            println!("      • http://localhost:{}/api/gpu", port);
+            println!("      • http://localhost:{}/api/containers", port);
+            println!("\n   Press Ctrl+C to stop\n");
+
+            dashboard.start(port).await?;
         }
     }
 

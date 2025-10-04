@@ -15,6 +15,7 @@ use tracing::{debug, info, warn};
 pub mod health;
 pub mod prometheus;
 pub mod tracing_setup;
+pub mod dashboard;
 
 /// Comprehensive monitoring system for Bolt
 pub struct MonitoringSystem {

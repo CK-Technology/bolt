@@ -14,6 +14,7 @@ use tracing::{debug, info, warn};
 pub mod btrfs;
 pub mod zfs;
 pub mod retention;
+pub mod gpu_state;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotConfig {
@@ -61,6 +62,9 @@ pub struct Snapshot {
     pub path: PathBuf,
     pub size_bytes: Option<u64>,
     pub parent: Option<String>,
+    /// GPU state captured with this snapshot (if GPU was active)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpu_state: Option<gpu_state::GpuSnapshotState>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +83,7 @@ pub enum SnapshotType {
 pub struct SnapshotManager {
     config: SnapshotConfig,
     filesystem_type: FilesystemType,
+    gpu_snapshot_manager: Option<gpu_state::GpuSnapshotManager>,
 }
 
 impl Default for SnapshotConfig {
@@ -120,9 +125,21 @@ impl Default for AutoSnapshotConfig {
 
 impl SnapshotManager {
     pub fn new(config: SnapshotConfig) -> Result<Self> {
-        let filesystem_type = match config.filesystem_type {
+        let filesystem_type = match &config.filesystem_type {
             FilesystemType::Auto => Self::detect_filesystem(&config.root_path)?,
-            fs_type => fs_type,
+            _ => config.filesystem_type.clone(),
+        };
+
+        // Initialize GPU snapshot manager
+        let gpu_snapshot_manager = match gpu_state::GpuSnapshotManager::new(&config.snapshot_path) {
+            Ok(manager) => {
+                info!("  • GPU snapshot support: enabled");
+                Some(manager)
+            }
+            Err(e) => {
+                warn!("  • GPU snapshot support: disabled ({})", e);
+                None
+            }
         };
 
         info!("🗂️  Snapshot manager initialized");
@@ -133,6 +150,7 @@ impl SnapshotManager {
         Ok(Self {
             config,
             filesystem_type,
+            gpu_snapshot_manager,
         })
     }
 
@@ -189,7 +207,7 @@ impl SnapshotManager {
             info!("  • Description: {}", desc);
         }
 
-        let snapshot = match self.filesystem_type {
+        let mut snapshot = match self.filesystem_type {
             FilesystemType::BTRFS => {
                 btrfs::create_snapshot(&self.config, &snapshot_id, name.as_deref(), description.as_deref()).await?
             }
@@ -198,6 +216,24 @@ impl SnapshotManager {
             }
             FilesystemType::Auto => unreachable!("Auto should be resolved during initialization"),
         };
+
+        // Capture GPU state if GPU snapshot manager is available
+        if let Some(ref gpu_manager) = self.gpu_snapshot_manager {
+            match gpu_manager.capture_gpu_state(&snapshot_id).await {
+                Ok(gpu_state) => {
+                    // Save GPU state to disk
+                    if let Err(e) = gpu_manager.save_gpu_state(&snapshot_id, &gpu_state).await {
+                        warn!("⚠️  Failed to save GPU state: {}", e);
+                    } else {
+                        info!("  • GPU state captured");
+                        snapshot.gpu_state = Some(gpu_state);
+                    }
+                }
+                Err(e) => {
+                    warn!("⚠️  Failed to capture GPU state: {}", e);
+                }
+            }
+        }
 
         info!("✅ Snapshot created: {}", snapshot_id);
         Ok(snapshot)
@@ -221,10 +257,31 @@ impl SnapshotManager {
     pub async fn rollback_to_snapshot(&self, snapshot_id: &str) -> Result<()> {
         info!("🔄 Rolling back to snapshot: {}", snapshot_id);
 
+        // First, restore filesystem state
         match self.filesystem_type {
             FilesystemType::BTRFS => btrfs::rollback_snapshot(&self.config, snapshot_id).await?,
             FilesystemType::ZFS => zfs::rollback_snapshot(&self.config, snapshot_id).await?,
             FilesystemType::Auto => unreachable!(),
+        }
+
+        // Then, restore GPU state if available
+        if let Some(ref gpu_manager) = self.gpu_snapshot_manager {
+            match gpu_manager.load_gpu_state(snapshot_id).await {
+                Ok(Some(gpu_state)) => {
+                    info!("  • Restoring GPU state...");
+                    if let Err(e) = gpu_manager.restore_gpu_state(snapshot_id, &gpu_state).await {
+                        warn!("⚠️  Failed to restore GPU state: {}", e);
+                    } else {
+                        info!("  • GPU state restored");
+                    }
+                }
+                Ok(None) => {
+                    debug!("No GPU state to restore for snapshot: {}", snapshot_id);
+                }
+                Err(e) => {
+                    warn!("⚠️  Failed to load GPU state: {}", e);
+                }
+            }
         }
 
         info!("✅ Rollback completed");
@@ -252,9 +309,9 @@ impl SnapshotManager {
         let snapshots = self.list_snapshots().await?;
         let to_delete = retention::calculate_snapshots_to_delete(&snapshots, &self.config.retention);
 
-        for snapshot in to_delete {
-            info!("  • Cleaning up old snapshot: {}", snapshot.id);
-            self.delete_snapshot(&snapshot.id).await?;
+        for snapshot_id in to_delete {
+            info!("  • Cleaning up old snapshot: {}", snapshot_id);
+            self.delete_snapshot(&snapshot_id).await?;
         }
 
         info!("✅ Retention policy applied");

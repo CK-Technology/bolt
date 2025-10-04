@@ -33,6 +33,12 @@ pub enum CompatCommands {
         /// Bind address
         #[arg(short, long, default_value = "127.0.0.1")]
         bind: String,
+        /// Also listen on Unix socket (e.g., /var/run/bolt/docker.sock)
+        #[arg(short, long)]
+        socket: Option<String>,
+        /// Create symlink from /var/run/docker.sock to bolt socket (requires sudo)
+        #[arg(long)]
+        docker_compat: bool,
     },
     /// Show migration guide from Docker/Compose to Bolt
     Migrate {
@@ -40,6 +46,23 @@ pub enum CompatCommands {
         #[arg(short, long)]
         compose_file: Option<PathBuf>,
     },
+    /// Setup Grafana integration for Bolt metrics
+    Grafana {
+        #[command(subcommand)]
+        command: GrafanaCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum GrafanaCommands {
+    /// Install Grafana datasource and dashboard configurations
+    Setup {
+        /// Grafana provisioning directory (default: /etc/grafana/provisioning)
+        #[arg(short, long)]
+        grafana_dir: Option<PathBuf>,
+    },
+    /// Show Grafana setup instructions
+    Instructions,
 }
 
 #[derive(Subcommand)]
@@ -74,8 +97,11 @@ pub async fn handle_compat_command(args: CompatArgs, runtime: BoltRuntime) -> Re
     match args.command {
         CompatCommands::Docker { args } => handle_docker_command(args, runtime).await,
         CompatCommands::Compose { command } => handle_compose_command(command).await,
-        CompatCommands::ApiServer { port, bind } => handle_api_server(port, bind, runtime).await,
+        CompatCommands::ApiServer { port, bind, socket, docker_compat } => {
+            handle_api_server(port, bind, socket, docker_compat, runtime).await
+        }
         CompatCommands::Migrate { compose_file } => handle_migration_guide(compose_file).await,
+        CompatCommands::Grafana { command } => handle_grafana_command(command).await,
     }
 }
 
@@ -170,87 +196,71 @@ async fn handle_compose_command(command: ComposeCommands) -> Result<()> {
     Ok(())
 }
 
-async fn handle_api_server(port: u16, bind: String, runtime: BoltRuntime) -> Result<()> {
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-    use tokio::net::TcpListener;
+async fn handle_api_server(port: u16, bind: String, socket: Option<String>, docker_compat: bool, runtime: BoltRuntime) -> Result<()> {
+    use bolt::docker_compat::api_server::DockerAPIServer;
+    use std::sync::Arc;
 
     println!("🚀 Starting Docker API Compatibility Server");
     println!("   Address: http://{}:{}", bind, port);
     println!("   Docker API Version: 1.43");
     println!("   Backend: Bolt Runtime");
-    println!();
 
-    let api_compat = DockerApiCompat::new(runtime);
-    let listener = TcpListener::bind(format!("{}:{}", bind, port)).await?;
+    let runtime_arc = Arc::new(runtime);
+    let api_server = DockerAPIServer::new(runtime_arc.clone()).with_address(bind.clone(), port);
 
-    println!("✅ Server listening on {}:{}", bind, port);
-    println!("💡 Test with: export DOCKER_HOST=tcp://{}:{}", bind, port);
-    println!();
+    // Determine socket path
+    let socket_path = if docker_compat {
+        "/var/run/bolt/bolt.sock".to_string()
+    } else {
+        socket.unwrap_or_else(|| "/var/run/bolt/bolt.sock".to_string())
+    };
 
-    loop {
-        let (mut socket, addr) = listener.accept().await?;
-        let api_compat = api_compat.clone();
+    // Start Unix socket server
+    println!("   Unix Socket: {}", socket_path);
+    api_server.start_unix_socket(&socket_path).await?;
 
-        tokio::spawn(async move {
-            let mut reader = BufReader::new(&mut socket);
-            let mut request_line = String::new();
-
-            if let Err(e) = reader.read_line(&mut request_line).await {
-                eprintln!("Failed to read request: {}", e);
-                return;
-            }
-
-            let parts: Vec<&str> = request_line.split_whitespace().collect();
-            if parts.len() < 2 {
-                return;
-            }
-
-            let method = parts[0];
-            let path = parts[1];
-
-            // Read headers (simplified)
-            let mut headers = Vec::new();
-            loop {
-                let mut header = String::new();
-                if reader.read_line(&mut header).await.is_err() {
-                    break;
-                }
-                if header.trim().is_empty() {
-                    break;
-                }
-                headers.push(header);
-            }
-
-            // Read body if present (simplified)
-            let body = String::new(); // Would need proper content-length handling
-
-            println!("📡 {} {} from {}", method, path, addr);
-
-            match api_compat.handle_request(path, method, &body).await {
-                Ok(response) => {
-                    let http_response = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-                        response.len(),
-                        response
-                    );
-
-                    if let Err(e) = socket.write_all(http_response.as_bytes()).await {
-                        eprintln!("Failed to write response: {}", e);
-                    }
-                }
-                Err(e) => {
-                    let error_response = format!(
-                        "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{{\"error\": \"{}\"}}\r\n",
-                        e
-                    );
-
-                    if let Err(e) = socket.write_all(error_response.as_bytes()).await {
-                        eprintln!("Failed to write error response: {}", e);
-                    }
-                }
-            }
-        });
+    // Create Docker-compatible symlink if requested
+    if docker_compat {
+        create_docker_symlink(&socket_path)?;
     }
+
+    if docker_compat {
+        println!("💡 Docker CLI works directly: docker ps");
+        println!("💡 Or set: export DOCKER_HOST=unix:///var/run/docker.sock");
+    } else {
+        println!("💡 Test with: export DOCKER_HOST=unix://{}", socket_path);
+    }
+    println!("💡 Or use TCP: export DOCKER_HOST=tcp://{}:{}", bind, port);
+    println!();
+
+    // Start the main TCP API server (this will block)
+    api_server.start().await?;
+
+    Ok(())
+}
+
+fn create_docker_symlink(bolt_socket: &str) -> Result<()> {
+    use std::os::unix::fs::symlink;
+    use std::path::Path;
+
+    let docker_sock = Path::new("/var/run/docker.sock");
+
+    // Remove existing socket/symlink if present
+    if docker_sock.exists() || docker_sock.symlink_metadata().is_ok() {
+        println!("⚠️  Removing existing /var/run/docker.sock");
+        std::fs::remove_file(docker_sock).ok();
+    }
+
+    // Create parent directory
+    std::fs::create_dir_all("/var/run")?;
+
+    // Create symlink
+    symlink(bolt_socket, docker_sock)?;
+
+    println!("✅ Created symlink: /var/run/docker.sock -> {}", bolt_socket);
+    println!("   Docker CLI commands now work natively!");
+
+    Ok(())
 }
 
 async fn handle_migration_guide(compose_file: Option<PathBuf>) -> Result<()> {
@@ -343,4 +353,159 @@ fn print_general_migration_guide() {
     println!("5. **Production**: Full migration with monitoring");
     println!();
     println!("Run 'bolt compat compose --help' for conversion tools.");
+}
+
+async fn handle_grafana_command(command: GrafanaCommands) -> Result<()> {
+    match command {
+        GrafanaCommands::Setup { grafana_dir } => {
+            println!("📊 Setting up Grafana integration for Bolt metrics");
+            println!();
+
+            // Determine grafana provisioning directory
+            let grafana_base = grafana_dir.unwrap_or_else(|| PathBuf::from("/etc/grafana/provisioning"));
+            let datasources_dir = grafana_base.join("datasources");
+            let dashboards_dir = grafana_base.join("dashboards");
+
+            // Check if running as root/sudo for system installation
+            let is_root = std::env::var("USER").unwrap_or_default() == "root"
+                || std::env::var("SUDO_USER").is_ok();
+
+            if !is_root && grafana_base == PathBuf::from("/etc/grafana/provisioning") {
+                println!("⚠️  System Grafana installation detected but not running as root.");
+                println!("   Run with sudo to install to system Grafana:");
+                println!("   sudo bolt compat grafana setup");
+                println!();
+                println!("   Or install to custom directory:");
+                println!("   bolt compat grafana setup --grafana-dir ./grafana");
+                return Ok(());
+            }
+
+            // Create directories
+            println!("📁 Creating provisioning directories...");
+            std::fs::create_dir_all(&datasources_dir)?;
+            std::fs::create_dir_all(&dashboards_dir)?;
+
+            // Copy datasource config
+            println!("📝 Installing Prometheus datasource config...");
+            let datasource_content = include_str!("../../grafana/datasource.yaml");
+            let datasource_path = datasources_dir.join("bolt.yaml");
+            std::fs::write(&datasource_path, datasource_content)?;
+            println!("   ✅ {}", datasource_path.display());
+
+            // Copy dashboard JSON
+            println!("📝 Installing Bolt metrics dashboard...");
+            let dashboard_content = include_str!("../../grafana/bolt-dashboard.json");
+            let dashboard_path = dashboards_dir.join("bolt-dashboard.json");
+            std::fs::write(&dashboard_path, dashboard_content)?;
+            println!("   ✅ {}", dashboard_path.display());
+
+            // Create dashboard provider config
+            let provider_config = r#"apiVersion: 1
+
+providers:
+  - name: 'Bolt Dashboards'
+    orgId: 1
+    folder: 'Bolt'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+"#;
+            let provider_path = dashboards_dir.join("bolt-provider.yaml");
+            std::fs::write(&provider_path, provider_config)?;
+            println!("   ✅ {}", provider_path.display());
+
+            println!();
+            println!("✅ Grafana integration installed successfully!");
+            println!();
+            println!("📋 Next steps:");
+            println!("   1. Ensure Prometheus is running on localhost:9090");
+            println!("      bolt monitoring prometheus --port 9090");
+            println!();
+            println!("   2. Restart Grafana to load the new configuration:");
+            println!("      sudo systemctl restart grafana-server");
+            println!();
+            println!("   3. Access the dashboard:");
+            println!("      • Open http://localhost:3000 (default Grafana)");
+            println!("      • Navigate to: Dashboards → Bolt → Bolt Container Runtime");
+            println!();
+            println!("   4. View real-time metrics:");
+            println!("      • Container CPU/Memory usage");
+            println!("      • GPU utilization and VRAM");
+            println!("      • Network throughput (RX/TX)");
+            println!("      • QUIC networking latency");
+            println!();
+        }
+        GrafanaCommands::Instructions => {
+            println!("📊 Grafana Integration Instructions for Bolt");
+            println!("=============================================");
+            println!();
+            println!("## Prerequisites");
+            println!("1. Install Grafana (if not already installed):");
+            println!("   # Ubuntu/Debian");
+            println!("   sudo apt-get install -y grafana");
+            println!();
+            println!("   # Fedora/RHEL");
+            println!("   sudo dnf install grafana");
+            println!();
+            println!("   # Using Docker");
+            println!("   docker run -d -p 3000:3000 grafana/grafana");
+            println!();
+            println!("2. Install Prometheus:");
+            println!("   # Ubuntu/Debian");
+            println!("   sudo apt-get install -y prometheus");
+            println!();
+            println!("   # Or use Bolt's built-in Prometheus exporter");
+            println!("   bolt monitoring prometheus");
+            println!();
+            println!("## Quick Setup");
+            println!("Run the automated setup command:");
+            println!("   sudo bolt compat grafana setup");
+            println!();
+            println!("## Manual Setup");
+            println!("1. Copy datasource config:");
+            println!("   sudo cp grafana/datasource.yaml /etc/grafana/provisioning/datasources/bolt.yaml");
+            println!();
+            println!("2. Copy dashboard config:");
+            println!("   sudo cp grafana/bolt-dashboard.json /etc/grafana/provisioning/dashboards/");
+            println!();
+            println!("3. Restart Grafana:");
+            println!("   sudo systemctl restart grafana-server");
+            println!();
+            println!("## Available Metrics");
+            println!("• bolt_container_cpu_usage_seconds_total - Container CPU time");
+            println!("• bolt_container_memory_usage_bytes - Container memory usage");
+            println!("• bolt_containers_running_total - Total running containers");
+            println!("• bolt_gpu_utilization_percent - GPU usage percentage");
+            println!("• bolt_gpu_memory_used_bytes - GPU VRAM usage");
+            println!("• bolt_gpu_memory_total_bytes - Total GPU VRAM");
+            println!("• bolt_network_rx_bytes_total - Network bytes received");
+            println!("• bolt_network_tx_bytes_total - Network bytes transmitted");
+            println!("• bolt_quic_latency_microseconds - QUIC connection latency");
+            println!("• bolt_container_started_total - Container start events");
+            println!();
+            println!("## Dashboard Features");
+            println!("✓ Real-time container CPU and memory charts");
+            println!("✓ GPU utilization and VRAM monitoring");
+            println!("✓ Network throughput visualization");
+            println!("✓ QUIC networking latency tracking");
+            println!("✓ Container lifecycle annotations");
+            println!("✓ Auto-refresh every 5 seconds");
+            println!();
+            println!("## Troubleshooting");
+            println!("• If datasource shows as disconnected:");
+            println!("  - Ensure Prometheus is running: systemctl status prometheus");
+            println!("  - Check Prometheus URL: http://localhost:9090");
+            println!();
+            println!("• If no data appears:");
+            println!("  - Verify Bolt containers are running: bolt ps");
+            println!("  - Check metrics endpoint: curl http://localhost:9090/metrics");
+            println!();
+            println!("For more help, visit: https://github.com/CK-Technology/bolt/docs");
+        }
+    }
+
+    Ok(())
 }
