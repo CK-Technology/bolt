@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "mcp"]
+
 [package]
 name = "bolt"
 version = "0.1.0"
@@ -160,6 +163,21 @@ tracing-appender = "0.2"
 # opentelemetry = { version = "0.20", features = ["rt-tokio"] }
 # opentelemetry-jaeger = { version = "0.19", features = ["rt-tokio"] }
 
+# MCP (Model Context Protocol) integration via Glyph
+glyph = { git = "https://github.com/ghostkellz/glyph", features = ["server", "websocket", "metrics"], optional = true }
+
+# OMEN AI Router (Phase 3)
+omen = { git = "https://github.com/ghostkellz/omen", optional = true }
+
+# gRPC framework (for gRPC-over-QUIC)
+tonic = { version = "0.11", optional = true }
+prost = { version = "0.12", optional = true }
+tower = { version = "0.4", optional = true }
+# hyper already defined above with "full" features (includes server, http2)
+hyper-util = { version = "0.1", features = ["tokio"], optional = true }
+http = { version = "1.0", optional = true }
+http-body-util = { version = "0.1", optional = true }
+
 
 [dev-dependencies]
 tempfile = "3.8"
@@ -173,10 +191,18 @@ bytes = "1.5"
 serde_yaml = "0.9"
 num_cpus = "1.16"
 
+[build-dependencies]
+tonic-build = "0.11"
+
 [[bench]]
 name = "quic_benchmarks"
 harness = false
 required-features = ["quic-networking"]
+
+[[bench]]
+name = "grpc_quic_latency"
+harness = false
+required-features = ["grpc"]
 
 [features]
 default = ["gaming", "quic-networking", "oci-runtime"]
@@ -190,6 +216,14 @@ oci-runtime = ["oci-spec", "nix"]
 nvidia-support = ["nvml-wrapper"]  # Enable NVIDIA ML management
 amd-support = []     # Enable with ROCm support
 nvbind-support = ["nvbind"]  # Enable nvbind runtime for sub-microsecond GPU passthrough
+
+# MCP integration
+mcp = ["glyph"]  # Enable Model Context Protocol support
+omen = ["dep:omen", "mcp"]  # Enable OMEN AI router integration (requires MCP)
+websocket = []  # Enable WebSocket support for real-time metrics streaming
+
+# gRPC integration (hyper is always included via hyperlocal dependency)
+grpc = ["tonic", "prost", "tower", "hyper-util", "http", "http-body-util"]  # Enable gRPC-over-QUIC support
 
 # Development features
 examples = []

@@ -917,6 +917,7 @@ rootless = true
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct PodmanRunArgs {
     image: String,

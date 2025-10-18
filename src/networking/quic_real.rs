@@ -67,6 +67,16 @@ pub struct QUICServerStats {
     pub packet_loss_rate: f64,
     pub bandwidth_utilization: f64,
     pub active_streams: u32,
+    pub connection_infos: Vec<ConnectionInfo>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConnectionInfo {
+    pub remote_addr: std::net::SocketAddr,
+    pub container_id: String,
+    pub use_count: u64,
+    pub idle_time: Duration,
+    pub rtt_ms: f64,
 }
 
 /// QUIC Connection Pool for reusing connections
@@ -155,6 +165,19 @@ impl QUICConnectionPool {
     fn pool_stats(&self) -> (usize, usize, u64) {
         let total_uses: u64 = self.pool.values().map(|p| p.use_count).sum();
         (self.pool.len(), self.max_pool_size, total_uses)
+    }
+
+    /// Get connection details for all pooled connections
+    fn get_connection_infos(&self) -> Vec<ConnectionInfo> {
+        self.pool.iter().map(|((remote_addr, container_id), pooled)| {
+            ConnectionInfo {
+                remote_addr: remote_addr.parse().unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap()),
+                container_id: container_id.clone(),
+                use_count: pooled.use_count,
+                idle_time: pooled.last_used.elapsed(),
+                rtt_ms: 1.0, // Placeholder - would need to query connection stats
+            }
+        }).collect()
     }
 }
 
@@ -592,7 +615,55 @@ impl RealQUICServer {
     /// Get real QUIC performance statistics
     pub async fn get_stats(&self) -> QUICServerStats {
         let stats = self.stats.read().await;
-        stats.clone()
+        let mut stats_clone = stats.clone();
+
+        // Add connection pool details
+        let pool = self.connection_pool.read().await;
+        stats_clone.connection_infos = pool.get_connection_infos();
+
+        stats_clone
+    }
+
+    /// Get the QUIC endpoint for accepting connections (used by gRPC-over-QUIC)
+    pub fn get_endpoint(&self) -> Option<Endpoint> {
+        self.endpoint.clone()
+    }
+
+    /// Remove port forward
+    pub async fn remove_port_forward(&self, host_port: u16) -> Result<()> {
+        info!("🗑️ Removing port forward: {}", host_port);
+        let mut port_forwards = self.port_forwards.write().await;
+
+        if port_forwards.remove(&host_port).is_some() {
+            info!("✅ Port forward removed: {}", host_port);
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("Port forward not found: {}", host_port))
+        }
+    }
+
+    /// Connect container to network
+    pub async fn connect_container(&self, container_id: &str, network_id: &str) -> Result<String> {
+        info!("🔗 Connecting container {} to network {}", container_id, network_id);
+
+        // Assign an IP address from the network subnet
+        // For now, return a placeholder IP
+        let assigned_ip = format!("172.18.0.{}", (container_id.len() % 254) + 2);
+
+        info!("✅ Container {} connected to network {} with IP {}",
+              container_id, network_id, assigned_ip);
+        Ok(assigned_ip)
+    }
+
+    /// Disconnect container from network
+    pub async fn disconnect_container(&self, container_id: &str, network_id: &str) -> Result<()> {
+        info!("🔌 Disconnecting container {} from network {}", container_id, network_id);
+
+        // Remove any connection state
+        // For now, this is a placeholder
+
+        info!("✅ Container {} disconnected from network {}", container_id, network_id);
+        Ok(())
     }
 
     /// Enable QUIC optimizations for container

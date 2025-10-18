@@ -178,7 +178,7 @@ impl GpuSnapshotManager {
         })
     }
 
-    async fn capture_fallback(&self, snapshot_id: &str) -> Result<GpuSnapshotState> {
+    async fn capture_fallback(&self, _snapshot_id: &str) -> Result<GpuSnapshotState> {
         debug!("Using fallback GPU state capture (nvidia-smi)");
 
         use tokio::process::Command;

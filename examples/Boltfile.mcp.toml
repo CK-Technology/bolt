@@ -1,0 +1,126 @@
+# Bolt MCP Configuration Example
+# This Boltfile demonstrates MCP (Model Context Protocol) integration
+# for AI-native container orchestration
+
+project = "ai-development"
+
+# AI Development Service with Full MCP Configuration
+[services.ai-dev]
+image = "bolt://rust:latest"
+ports = ["8080:8080"]
+volumes = [
+    "./workspace:/workspace",
+    "./src:/src:ro",           # Read-only source code
+]
+environment = { RUST_LOG = "info" }
+restart = "unless-stopped"
+cpu_limit = "2"
+memory_limit = "4Gi"
+
+# MCP Configuration for AI Tools
+[services.ai-dev.mcp]
+enabled = true
+tools = [
+    "filesystem:read",
+    "filesystem:write",
+    "shell:exec",
+    "gpu:stats",
+    "process:list",
+    "network:stats",
+]
+
+# Tool-specific permissions
+[services.ai-dev.mcp.permissions]
+filesystem_paths = ["/workspace", "/src", "/tmp"]
+shell_commands = ["cargo", "rustc", "git", "npm", "ls", "cat", "grep"]
+gpu_access = "read_only"
+network_access = "read_only"
+process_access = "read_only"
+
+# Omen AI Router configuration (requires --features omen)
+[services.ai-dev.mcp.omen]
+enabled = true
+strategy = "balanced"  # or "cost_optimized", "latency_optimized", "quality_optimized"
+max_cost_per_hour = 5.00
+providers = ["ollama", "anthropic"]
+
+# Provider-specific configuration
+[services.ai-dev.mcp.omen.provider_config]
+ollama_endpoint = "http://localhost:11434"
+# anthropic_api_key = "sk-ant-..."  # Set via environment variable instead
+
+# Python AI/ML Development Service
+[services.ai-ml]
+image = "bolt://python:3.11"
+ports = ["8888:8888"]  # Jupyter
+volumes = [
+    "./notebooks:/notebooks",
+    "./data:/data:ro",
+]
+environment = { JUPYTER_ENABLE_LAB = "yes" }
+
+# MCP with GPU access for AI/ML
+[services.ai-ml.mcp]
+enabled = true
+tools = [
+    "filesystem:read",
+    "filesystem:write",
+    "gpu:allocate",  # AI/ML needs GPU allocation
+    "gpu:stats",
+    "shell:exec",
+]
+
+[services.ai-ml.mcp.permissions]
+filesystem_paths = ["/notebooks", "/data", "/tmp"]
+shell_commands = ["python", "pip", "jupyter", "nvcc", "nvidia-smi"]
+gpu_access = "read_write"  # Full GPU access for training
+network_access = "full"    # For downloading models
+process_access = "read_write"
+
+[services.ai-ml.mcp.omen]
+enabled = true
+strategy = "latency_optimized"  # Fast inference for notebooks
+max_cost_per_hour = 10.00
+providers = ["ollama", "anthropic", "openai"]
+
+# Minimal MCP Service (Cost-Optimized)
+[services.code-review]
+image = "bolt://node:20"
+volumes = ["./project:/project:ro"]
+
+[services.code-review.mcp]
+enabled = true
+tools = ["filesystem:read", "shell:exec"]  # Read-only code analysis
+
+[services.code-review.mcp.permissions]
+filesystem_paths = ["/project"]
+shell_commands = ["eslint", "prettier", "git"]
+gpu_access = "none"
+network_access = "read_only"
+
+[services.code-review.mcp.omen]
+enabled = true
+strategy = "cost_optimized"  # Use free local Ollama
+max_cost_per_hour = 0.50     # Very low budget
+providers = ["ollama"]       # Local only
+
+# Database Service (No MCP needed)
+[services.postgres]
+image = "bolt://postgres:15"
+environment = { POSTGRES_PASSWORD = "secret" }
+
+[services.postgres.storage]
+size = "10Gi"
+driver = "local"
+
+# Custom Networks
+[networks.ai-network]
+driver = "bolt"  # High-performance QUIC networking
+subnet = "172.20.0.0/16"
+
+# Shared Volumes
+[volumes.models]
+driver = "local"
+
+[volumes.datasets]
+driver = "local"

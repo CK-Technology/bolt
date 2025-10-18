@@ -1,0 +1,340 @@
+// Bolt Container Service Protocol Definitions
+// gRPC services for high-performance container management over QUIC
+
+syntax = "proto3";
+package bolt.container;
+
+// Container lifecycle management service
+service ContainerService {
+  // Run a new container
+  rpc Run(RunRequest) returns (RunResponse);
+
+  // Stop a running container
+  rpc Stop(StopRequest) returns (StopResponse);
+
+  // List containers
+  rpc List(ListRequest) returns (ListResponse);
+
+  // Stream container logs (server streaming)
+  rpc Logs(LogsRequest) returns (stream LogEntry);
+
+  // Execute command in container (bidirectional streaming for stdin/stdout)
+  rpc Exec(stream ExecRequest) returns (stream ExecOutput);
+
+  // Get container stats (server streaming for real-time metrics)
+  rpc Stats(StatsRequest) returns (stream ContainerStats);
+
+  // Attach to container (bidirectional streaming)
+  rpc Attach(stream AttachRequest) returns (stream AttachOutput);
+
+  // Remove container
+  rpc Remove(RemoveRequest) returns (RemoveResponse);
+
+  // Restart container
+  rpc Restart(RestartRequest) returns (RestartResponse);
+
+  // Pause container
+  rpc Pause(PauseRequest) returns (PauseResponse);
+
+  // Unpause container
+  rpc Unpause(UnpauseRequest) returns (UnpauseResponse);
+}
+
+// Run container request
+message RunRequest {
+  string image = 1;
+  string name = 2;
+  repeated string command = 3;
+  repeated string entrypoint = 4;
+  map<string, string> env = 5;
+  repeated string volumes = 6;
+  repeated string ports = 7;
+  string network = 8;
+  string working_dir = 9;
+  string user = 10;
+  bool detach = 11;
+  bool interactive = 12;
+  bool tty = 13;
+  bool remove = 14;
+  ResourceLimits resources = 15;
+  GpuConfig gpu = 16;
+  SecurityConfig security = 17;
+}
+
+message ResourceLimits {
+  double cpus = 1;               // Number of CPUs (e.g., 2.5)
+  uint64 memory_bytes = 2;       // Memory limit in bytes
+  uint64 memory_swap_bytes = 3;  // Memory + swap limit
+  uint32 pids_limit = 4;         // Max number of PIDs
+}
+
+message GpuConfig {
+  string runtime = 1;            // "nvbind", "docker", "nvidia", "amd"
+  string devices = 2;            // "all", "0", "1,2", etc.
+  string isolation_level = 3;    // "exclusive", "shared", "none"
+}
+
+message SecurityConfig {
+  bool privileged = 1;
+  repeated string cap_add = 2;
+  repeated string cap_drop = 3;
+  bool no_new_privileges = 4;
+  bool readonly_rootfs = 5;
+}
+
+message RunResponse {
+  string container_id = 1;
+  string name = 2;
+  string status = 3;
+  string error = 4;
+}
+
+// Stop container request
+message StopRequest {
+  string container_id = 1;
+  uint32 timeout_seconds = 2;
+}
+
+message StopResponse {
+  string container_id = 1;
+  string status = 2;
+  string error = 3;
+}
+
+// List containers request
+message ListRequest {
+  bool all = 1;               // Include stopped containers
+  repeated string filters = 2; // Filter by name, status, etc.
+  uint32 limit = 3;
+}
+
+message ListResponse {
+  repeated ContainerInfo containers = 1;
+}
+
+message ContainerInfo {
+  string id = 1;
+  string name = 2;
+  string image = 3;
+  string status = 4;
+  int64 created_at = 5;
+  repeated string ports = 6;
+  map<string, string> labels = 7;
+  string network = 8;
+}
+
+// Logs request (server streaming)
+message LogsRequest {
+  string container_id = 1;
+  bool follow = 2;           // Stream logs continuously
+  bool stdout = 3;
+  bool stderr = 4;
+  uint32 tail = 5;           // Number of lines from end
+  int64 since = 6;           // Unix timestamp
+  int64 until = 7;           // Unix timestamp
+  bool timestamps = 8;
+}
+
+message LogEntry {
+  int64 timestamp = 1;
+  string stream = 2;         // "stdout" or "stderr"
+  string message = 3;
+}
+
+// Exec command (bidirectional streaming)
+message ExecRequest {
+  oneof request {
+    ExecStart start = 1;
+    ExecInput input = 2;
+    ExecResize resize = 3;
+  }
+}
+
+message ExecStart {
+  string container_id = 1;
+  repeated string command = 2;
+  map<string, string> env = 3;
+  bool interactive = 4;
+  bool tty = 5;
+  string user = 6;
+  string working_dir = 7;
+}
+
+message ExecInput {
+  bytes data = 1;            // stdin data
+}
+
+message ExecResize {
+  uint32 width = 1;          // Terminal width
+  uint32 height = 2;         // Terminal height
+}
+
+message ExecOutput {
+  oneof output {
+    ExecStarted started = 1;
+    ExecData data = 2;
+    ExecExit exit = 3;
+    ExecError error = 4;
+  }
+}
+
+message ExecStarted {
+  string exec_id = 1;
+}
+
+message ExecData {
+  string stream = 1;         // "stdout" or "stderr"
+  bytes data = 2;
+}
+
+message ExecExit {
+  int32 exit_code = 1;
+}
+
+message ExecError {
+  string message = 1;
+}
+
+// Stats request (server streaming)
+message StatsRequest {
+  string container_id = 1;
+  bool stream = 2;           // Continuous streaming
+  uint32 interval_ms = 3;    // Sampling interval (default: 1000ms)
+}
+
+message ContainerStats {
+  int64 timestamp = 1;
+  CpuStats cpu = 2;
+  MemoryStats memory = 3;
+  NetworkStats network = 4;
+  GpuStats gpu = 5;
+  DiskStats disk = 6;
+}
+
+message CpuStats {
+  double usage_percent = 1;
+  uint64 total_usage_ns = 2;
+  uint64 system_usage_ns = 3;
+  uint32 online_cpus = 4;
+}
+
+message MemoryStats {
+  uint64 usage_bytes = 1;
+  uint64 max_usage_bytes = 2;
+  uint64 limit_bytes = 3;
+  double usage_percent = 4;
+  uint64 cache_bytes = 5;
+  uint64 rss_bytes = 6;
+}
+
+message NetworkStats {
+  uint64 rx_bytes = 1;
+  uint64 rx_packets = 2;
+  uint64 rx_errors = 3;
+  uint64 rx_dropped = 4;
+  uint64 tx_bytes = 5;
+  uint64 tx_packets = 6;
+  uint64 tx_errors = 7;
+  uint64 tx_dropped = 8;
+}
+
+message GpuStats {
+  uint32 device_id = 1;
+  string name = 2;
+  double utilization_percent = 3;
+  uint64 memory_used_bytes = 4;
+  uint64 memory_total_bytes = 5;
+  uint32 temperature_celsius = 6;
+  double power_draw_watts = 7;
+  uint32 clock_speed_mhz = 8;
+}
+
+message DiskStats {
+  uint64 read_bytes = 1;
+  uint64 write_bytes = 2;
+  uint64 read_ops = 3;
+  uint64 write_ops = 4;
+}
+
+// Attach request (bidirectional streaming)
+message AttachRequest {
+  oneof request {
+    AttachStart start = 1;
+    AttachInput input = 2;
+  }
+}
+
+message AttachStart {
+  string container_id = 1;
+  bool stdin = 2;
+  bool stdout = 3;
+  bool stderr = 4;
+  bool stream = 5;
+}
+
+message AttachInput {
+  bytes data = 1;
+}
+
+message AttachOutput {
+  oneof output {
+    AttachData data = 1;
+    AttachExit exit = 2;
+  }
+}
+
+message AttachData {
+  string stream = 1;         // "stdout" or "stderr"
+  bytes data = 2;
+}
+
+message AttachExit {
+  int32 exit_code = 1;
+}
+
+// Remove container request
+message RemoveRequest {
+  string container_id = 1;
+  bool force = 2;
+  bool volumes = 3;
+}
+
+message RemoveResponse {
+  string container_id = 1;
+  string status = 2;
+  string error = 3;
+}
+
+// Restart container request
+message RestartRequest {
+  string container_id = 1;
+  uint32 timeout_seconds = 2;
+}
+
+message RestartResponse {
+  string container_id = 1;
+  string status = 2;
+  string error = 3;
+}
+
+// Pause container request
+message PauseRequest {
+  string container_id = 1;
+}
+
+message PauseResponse {
+  string container_id = 1;
+  string status = 2;
+  string error = 3;
+}
+
+// Unpause container request
+message UnpauseRequest {
+  string container_id = 1;
+}
+
+message UnpauseResponse {
+  string container_id = 1;
+  string status = 2;
+  string error = 3;
+}

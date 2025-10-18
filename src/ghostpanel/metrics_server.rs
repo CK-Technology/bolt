@@ -184,7 +184,7 @@ impl GhostPanelMetricsServer {
 
     /// Update metrics for a container (stub - would query real GPU)
     async fn update_container_metrics(
-        container_id: &str,
+        _container_id: &str,
         current: &MetricsMessage,
     ) -> MetricsMessage {
         // In production, this would:

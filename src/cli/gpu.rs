@@ -53,6 +53,7 @@ pub enum GpuSubcommand {
     },
 }
 
+#[allow(dead_code)]
 impl GpuCommand {
     pub async fn execute(&self) -> Result<()> {
         match &self.command {
@@ -186,6 +187,7 @@ impl GpuCommand {
     }
 }
 
+#[allow(dead_code)]
 fn print_gpu_metrics(id: &str, gpu: &GpuState) {
     println!("┌─ {} ({}) ─────────────────────────", id, gpu.name);
     println!("│");
@@ -231,6 +233,7 @@ fn print_gpu_metrics(id: &str, gpu: &GpuState) {
     println!("└────────────────────────────────────────────────────────────────\n");
 }
 
+#[allow(dead_code)]
 fn create_bar(percent: u32, width: usize) -> String {
     let filled = (percent as usize * width / 100).min(width);
     let empty = width.saturating_sub(filled);
@@ -244,6 +247,7 @@ fn create_bar(percent: u32, width: usize) -> String {
     format!("[{}]", bar)
 }
 
+#[allow(dead_code)]
 fn truncate(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         format!("{:width$}", s, width = max_len)

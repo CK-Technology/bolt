@@ -244,6 +244,125 @@ pub enum Commands {
         #[arg(short, long, default_value = "3000")]
         port: u16,
     },
+
+    /// MCP (Model Context Protocol) server commands
+    #[cfg(feature = "mcp")]
+    Mcp {
+        #[command(subcommand)]
+        command: McpCommands,
+    },
+}
+
+#[cfg(feature = "mcp")]
+#[derive(Subcommand)]
+pub enum McpCommands {
+    /// Start MCP server
+    Serve {
+        /// Transport type (stdio, websocket, http)
+        #[arg(long, default_value = "websocket")]
+        transport: String,
+
+        /// Address to bind to (for websocket/http)
+        #[arg(long, default_value = "0.0.0.0")]
+        address: String,
+
+        /// Port to bind to (for websocket/http)
+        #[arg(long, default_value = "7331")]
+        port: u16,
+
+        /// Container name to expose tools for (optional)
+        #[arg(long)]
+        container: Option<String>,
+    },
+
+    /// Run MCP gateway (centralized management)
+    Gateway {
+        /// Transport type (stdio, websocket, http)
+        #[arg(long, default_value = "websocket")]
+        transport: String,
+
+        /// Address to bind to
+        #[arg(long, default_value = "0.0.0.0")]
+        address: String,
+
+        /// Port to bind to
+        #[arg(long, default_value = "7331")]
+        port: u16,
+
+        /// Path to catalog file
+        #[arg(long)]
+        catalog: Option<std::path::PathBuf>,
+
+        /// Enabled servers (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        servers: Vec<String>,
+
+        /// Enabled tools (format: server:tool)
+        #[arg(long, value_delimiter = ',')]
+        tools: Vec<String>,
+
+        /// Watch for config changes
+        #[arg(long)]
+        watch: bool,
+    },
+
+    /// OMEN AI router commands (Phase 3)
+    #[cfg(feature = "omen")]
+    Omen {
+        #[command(subcommand)]
+        command: OmenCommands,
+    },
+}
+
+#[cfg(feature = "omen")]
+#[derive(Subcommand)]
+pub enum OmenCommands {
+    /// Start OMEN AI router server
+    Serve {
+        /// Address to bind to
+        #[arg(long, default_value = "0.0.0.0")]
+        address: String,
+
+        /// Port to bind to
+        #[arg(long, default_value = "8080")]
+        port: u16,
+
+        /// OMEN configuration file
+        #[arg(long)]
+        config: Option<std::path::PathBuf>,
+
+        /// Enable specific providers (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        providers: Vec<String>,
+    },
+
+    /// List available AI providers
+    Providers {
+        /// Show detailed provider information
+        #[arg(short, long)]
+        verbose: bool,
+
+        /// Output format (text, json)
+        #[arg(short, long, default_value = "text")]
+        format: String,
+    },
+
+    /// Test AI provider connectivity
+    Test {
+        /// Provider to test (or 'all')
+        provider: String,
+
+        /// Test prompt
+        #[arg(long, default_value = "Hello, this is a test message")]
+        prompt: String,
+    },
+
+    /// Show provider health and scores
+    Health {
+        /// Output format (text, json)
+        #[arg(short, long, default_value = "text")]
+        format: String,
+    },
 }
 
 #[derive(Subcommand)]

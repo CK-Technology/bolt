@@ -3,9 +3,8 @@
 use super::{Snapshot, SnapshotConfig, SnapshotType, FilesystemType};
 use anyhow::{Context, Result};
 use std::path::PathBuf;
-use std::process::Command;
 use tokio::process::Command as AsyncCommand;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 /// Create a BTRFS snapshot
 pub async fn create_snapshot(
@@ -218,7 +217,7 @@ async fn parse_btrfs_snapshot_line(line: &str, config: &SnapshotConfig) -> Optio
     let timestamp_str = snapshot_name.strip_prefix("bolt-")?;
     let timestamp = chrono::NaiveDateTime::parse_from_str(timestamp_str, "%Y%m%d-%H%M%S")
         .ok()
-        .map(|dt| chrono::DateTime::from_utc(dt, chrono::Utc))?;
+        .map(|dt| chrono::DateTime::from_naive_utc_and_offset(dt, chrono::Utc))?;
 
     Some(Snapshot {
         id: snapshot_name.to_string(),

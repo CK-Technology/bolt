@@ -1,0 +1,221 @@
+// Bolt Orchestration Service Protocol Definitions
+// Multi-container orchestration (like docker-compose)
+
+syntax = "proto3";
+package bolt.orchestration;
+
+import "container.proto";
+import "network.proto";
+
+// Orchestration service (Surge - Bolt's compose alternative)
+service OrchestrationService {
+  // Deploy services from Boltfile
+  rpc Deploy(DeployRequest) returns (stream DeployProgress);
+
+  // Stop deployed services
+  rpc Stop(StopServicesRequest) returns (StopServicesResponse);
+
+  // Get service status
+  rpc GetStatus(StatusRequest) returns (StatusResponse);
+
+  // Scale services
+  rpc Scale(ScaleRequest) returns (ScaleResponse);
+
+  // Stream service logs (server streaming)
+  rpc StreamLogs(ServiceLogsRequest) returns (stream bolt.container.LogEntry);
+
+  // Update services (rolling update)
+  rpc Update(UpdateRequest) returns (stream UpdateProgress);
+
+  // Restart services
+  rpc Restart(RestartServicesRequest) returns (RestartServicesResponse);
+}
+
+// Deploy request
+message DeployRequest {
+  string boltfile_path = 1;
+  repeated string services = 2;  // Empty = all services
+  bool force_recreate = 3;
+  bool detach = 4;
+  map<string, string> env_overrides = 5;
+}
+
+message DeployProgress {
+  oneof event {
+    DeployStarted started = 1;
+    ServiceProgress service = 2;
+    NetworkCreated network = 3;
+    VolumeCreated volume = 4;
+    DeployComplete complete = 5;
+    DeployError error = 6;
+  }
+}
+
+message DeployStarted {
+  string project_name = 1;
+  repeated string services = 2;
+  int32 total_services = 3;
+}
+
+message ServiceProgress {
+  string service_name = 1;
+  string status = 2;            // "pulling", "creating", "starting", "running"
+  int32 current_step = 3;
+  int32 total_steps = 4;
+  string container_id = 5;
+}
+
+message NetworkCreated {
+  string network_name = 1;
+  string network_id = 2;
+}
+
+message VolumeCreated {
+  string volume_name = 1;
+  string volume_id = 2;
+}
+
+message DeployComplete {
+  string project_name = 1;
+  repeated ServiceInfo services = 2;
+  int32 total_containers = 3;
+  uint64 deploy_time_ms = 4;
+}
+
+message DeployError {
+  string service_name = 1;
+  string error = 2;
+}
+
+// Stop services request
+message StopServicesRequest {
+  string project_name = 1;
+  repeated string services = 2;  // Empty = all services
+  bool remove_volumes = 3;
+  uint32 timeout_seconds = 4;
+}
+
+message StopServicesResponse {
+  string project_name = 1;
+  repeated string stopped_services = 2;
+  bool success = 3;
+  string error = 4;
+}
+
+// Status request
+message StatusRequest {
+  string project_name = 1;
+  repeated string services = 2;  // Empty = all services
+}
+
+message StatusResponse {
+  string project_name = 1;
+  repeated ServiceInfo services = 2;
+}
+
+message ServiceInfo {
+  string name = 1;
+  string status = 2;             // "running", "stopped", "starting", "error"
+  int32 replicas = 3;
+  int32 desired_replicas = 4;
+  repeated bolt.container.ContainerInfo containers = 5;
+  string image = 6;
+  repeated string ports = 7;
+  string network = 8;
+  int64 created_at = 9;
+}
+
+// Scale request
+message ScaleRequest {
+  string project_name = 1;
+  map<string, int32> services = 2; // service_name -> replica_count
+}
+
+message ScaleResponse {
+  string project_name = 1;
+  repeated ScaledService services = 2;
+  bool success = 3;
+  string error = 4;
+}
+
+message ScaledService {
+  string service_name = 1;
+  int32 previous_replicas = 2;
+  int32 current_replicas = 3;
+  repeated string container_ids = 4;
+}
+
+// Service logs streaming
+message ServiceLogsRequest {
+  string project_name = 1;
+  string service_name = 2;
+  bool follow = 3;
+  bool stdout = 4;
+  bool stderr = 5;
+  uint32 tail = 6;
+  int64 since = 7;
+  bool timestamps = 8;
+}
+
+// Update request (rolling update)
+message UpdateRequest {
+  string project_name = 1;
+  repeated string services = 2;
+  string new_image = 3;          // New image version
+  UpdateStrategy strategy = 4;
+}
+
+message UpdateStrategy {
+  string type = 1;               // "rolling", "recreate"
+  uint32 parallelism = 2;        // Max containers to update at once
+  uint32 delay_seconds = 3;      // Delay between updates
+  double failure_threshold = 4;  // Stop if > X% fail
+}
+
+message UpdateProgress {
+  oneof event {
+    UpdateStarted started = 1;
+    ContainerUpdate container = 2;
+    UpdateComplete complete = 3;
+    UpdateError error = 4;
+  }
+}
+
+message UpdateStarted {
+  string service_name = 1;
+  int32 total_containers = 2;
+  UpdateStrategy strategy = 3;
+}
+
+message ContainerUpdate {
+  string container_id = 1;
+  string status = 2;             // "stopping", "stopped", "pulling", "starting", "running"
+  int32 current = 3;
+  int32 total = 4;
+}
+
+message UpdateComplete {
+  string service_name = 1;
+  int32 updated_containers = 2;
+  int32 failed_containers = 3;
+  uint64 update_time_ms = 4;
+}
+
+message UpdateError {
+  string container_id = 1;
+  string error = 2;
+}
+
+// Restart services request
+message RestartServicesRequest {
+  string project_name = 1;
+  repeated string services = 2;
+  uint32 timeout_seconds = 3;
+}
+
+message RestartServicesResponse {
+  string project_name = 1;
+  repeated string restarted_services = 2;
+  bool success = 3;
+  string error = 4;
+}

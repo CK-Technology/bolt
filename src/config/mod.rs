@@ -62,6 +62,7 @@ pub struct Service {
     pub healthcheck: Option<HealthcheckConfig>,
     pub cpu_limit: Option<String>,
     pub memory_limit: Option<String>,
+    pub mcp: Option<ServiceMcpConfig>,
 }
 
 pub type NetworkConfig = Network;
@@ -216,6 +217,74 @@ pub struct GpuAiMlConfig {
     pub mixed_precision: Option<bool>,
     pub cuda_cache_size: Option<u32>,     // CUDA cache size in MB
     pub memory_pool_size: Option<String>, // e.g., "16GB"
+}
+
+// MCP (Model Context Protocol) Configuration
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ServiceMcpConfig {
+    /// Enable MCP for this service
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Enabled tools (e.g., ["filesystem:read", "shell:exec", "gpu:stats"])
+    #[serde(default)]
+    pub tools: Vec<String>,
+
+    /// Tool-specific permissions
+    #[serde(default)]
+    pub permissions: Option<McpPermissions>,
+
+    /// Omen AI Router configuration (optional)
+    #[cfg(feature = "omen")]
+    #[serde(default)]
+    pub omen: Option<McpOmenConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct McpPermissions {
+    /// Allowed filesystem paths for filesystem tools
+    #[serde(default)]
+    pub filesystem_paths: Vec<String>,
+
+    /// Allowed shell commands for shell execution
+    #[serde(default)]
+    pub shell_commands: Vec<String>,
+
+    /// GPU access level: "read_only", "read_write", "full"
+    #[serde(default)]
+    pub gpu_access: Option<String>,
+
+    /// Network access level: "none", "read_only", "full"
+    #[serde(default)]
+    pub network_access: Option<String>,
+
+    /// Process access level: "read_only", "read_write", "full"
+    #[serde(default)]
+    pub process_access: Option<String>,
+}
+
+#[cfg(feature = "omen")]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct McpOmenConfig {
+    /// Enable Omen AI routing for this service
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Routing strategy: "cost_optimized", "latency_optimized", "balanced", "quality_optimized"
+    #[serde(default)]
+    pub strategy: String,
+
+    /// Maximum cost per hour in USD
+    #[serde(default)]
+    pub max_cost_per_hour: Option<f64>,
+
+    /// Preferred providers (e.g., ["ollama", "anthropic"])
+    #[serde(default)]
+    pub providers: Vec<String>,
+
+    /// Provider-specific configuration
+    #[serde(default)]
+    pub provider_config: HashMap<String, String>,
 }
 
 // Snapshot Configuration
@@ -959,6 +1028,29 @@ cpu_governor = "performance"     # CPU governor (optional)
 nice_level = -10                 # Process nice level -20 to 19 (optional)
 rt_priority = 50                 # Real-time priority 0 to 99 (optional)
 
+[services.<name>.mcp]            # Optional MCP (Model Context Protocol) configuration
+enabled = true                   # Enable MCP for this service
+tools = [                        # Enabled MCP tools (optional)
+  "filesystem:read",
+  "filesystem:write",
+  "shell:exec",
+  "gpu:stats",
+  "process:list",
+]
+
+[services.<name>.mcp.permissions] # Tool-specific permissions (optional)
+filesystem_paths = ["/workspace", "/src"]  # Allowed filesystem paths
+shell_commands = ["npm", "cargo", "zig"]    # Allowed shell commands
+gpu_access = "read_only"         # GPU access level: read_only, read_write, full
+network_access = "read_only"     # Network access level: none, read_only, full
+process_access = "read_only"     # Process access level: read_only, read_write, full
+
+[services.<name>.mcp.omen]       # Omen AI Router configuration (optional, requires omen feature)
+enabled = true                   # Enable Omen routing
+strategy = "balanced"            # Routing strategy: cost_optimized, latency_optimized, balanced, quality_optimized
+max_cost_per_hour = 5.00        # Maximum cost per hour in USD
+providers = ["ollama", "anthropic"]  # Preferred providers
+
 [networks.<name>]                # Optional custom networks
 driver = "bolt"                  # Network driver: bolt, bridge, host (optional)
 subnet = "10.0.0.0/16"          # Network subnet in CIDR notation (optional)
@@ -972,12 +1064,27 @@ external = false                 # Use external volume (optional)
 }
 
 /// Bolt configuration for runtime operations
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct BoltConfig {
     pub config_dir: PathBuf,
     pub data_dir: PathBuf,
     pub boltfile_path: PathBuf,
     pub verbose: bool,
+    #[cfg(feature = "mcp")]
+    pub mcp: Option<crate::mcp::McpConfig>,
+}
+
+impl Default for BoltConfig {
+    fn default() -> Self {
+        Self {
+            config_dir: PathBuf::new(),
+            data_dir: PathBuf::new(),
+            boltfile_path: PathBuf::new(),
+            verbose: false,
+            #[cfg(feature = "mcp")]
+            mcp: None,
+        }
+    }
 }
 
 impl BoltConfig {
@@ -1063,6 +1170,110 @@ pub fn create_example_boltfile() -> BoltFile {
                 password: "secret".to_string(),
             }),
             ..Default::default()
+        },
+    );
+
+    // AI development service example with MCP
+    services.insert(
+        "ai-dev".to_string(),
+        Service {
+            image: Some("bolt://rust:latest".to_string()),
+            build: None,
+            capsule: None,
+            command: None,
+            entrypoint: None,
+            ports: Some(vec!["8080:8080".to_string()]),
+            volumes: Some(vec![
+                "./workspace:/workspace".to_string(),
+                "./src:/src".to_string(),
+            ]),
+            environment: Some({
+                let mut env = HashMap::new();
+                env.insert("RUST_LOG".to_string(), "info".to_string());
+                env
+            }),
+            env: None,
+            depends_on: None,
+            restart: Some("unless-stopped".to_string()),
+            networks: None,
+            storage: Some(Storage {
+                size: "20Gi".to_string(),
+                driver: None,
+            }),
+            auth: None,
+            gaming: None,
+            working_dir: Some("/workspace".to_string()),
+            user: None,
+            hostname: Some("ai-dev".to_string()),
+            container_name: Some("bolt-ai-dev".to_string()),
+            privileged: None,
+            read_only: None,
+            stdin_open: Some(true),
+            tty: Some(true),
+            network_mode: None,
+            pid: None,
+            ipc: None,
+            platform: None,
+            labels: None,
+            devices: None,
+            cap_add: None,
+            cap_drop: None,
+            security_opt: None,
+            sysctls: None,
+            tmpfs: None,
+            dns: None,
+            dns_search: None,
+            extra_hosts: None,
+            group_add: None,
+            volumes_from: None,
+            links: None,
+            logging: None,
+            healthcheck: None,
+            cpu_limit: Some("2".to_string()),
+            memory_limit: Some("4Gi".to_string()),
+            mcp: Some(ServiceMcpConfig {
+                enabled: true,
+                tools: vec![
+                    "filesystem:read".to_string(),
+                    "filesystem:write".to_string(),
+                    "shell:exec".to_string(),
+                    "gpu:stats".to_string(),
+                    "process:list".to_string(),
+                ],
+                permissions: Some(McpPermissions {
+                    filesystem_paths: vec![
+                        "/workspace".to_string(),
+                        "/src".to_string(),
+                        "/tmp".to_string(),
+                    ],
+                    shell_commands: vec![
+                        "cargo".to_string(),
+                        "rustc".to_string(),
+                        "git".to_string(),
+                        "npm".to_string(),
+                        "ls".to_string(),
+                        "cat".to_string(),
+                    ],
+                    gpu_access: Some("read_only".to_string()),
+                    network_access: Some("read_only".to_string()),
+                    process_access: Some("read_only".to_string()),
+                }),
+                #[cfg(feature = "omen")]
+                omen: Some(McpOmenConfig {
+                    enabled: true,
+                    strategy: "balanced".to_string(),
+                    max_cost_per_hour: Some(5.0),
+                    providers: vec![
+                        "ollama".to_string(),
+                        "anthropic".to_string(),
+                    ],
+                    provider_config: {
+                        let mut config = HashMap::new();
+                        config.insert("ollama_endpoint".to_string(), "http://localhost:11434".to_string());
+                        config
+                    },
+                }),
+            }),
         },
     );
 

@@ -31,6 +31,14 @@ pub mod surge;
 pub mod types;
 pub mod volume;
 
+// MCP (Model Context Protocol) integration
+#[cfg(feature = "mcp")]
+pub mod mcp;
+
+// gRPC services for container management over QUIC
+#[cfg(feature = "grpc")]
+pub mod grpc;
+
 pub use config::*;
 pub use error::{BoltError, Result};
 

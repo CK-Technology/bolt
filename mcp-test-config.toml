@@ -1,0 +1,41 @@
+# Bolt MCP Test Configuration
+# For testing the MCP server with all tools enabled
+
+[mcp]
+enabled = true
+transport = "stdio"  # Change to "websocket" for network testing
+address = "0.0.0.0"
+port = 7331
+
+[mcp.policy]
+mode = "consent-required"
+require_consent = ["shell.execute", "fs.write"]
+audit_all = true
+audit_log = "/tmp/bolt-mcp-audit.log"
+redact_secrets = true
+
+# Tool Configuration
+[mcp.tools]
+
+[mcp.tools.gpu_stats]
+enabled = true
+
+[mcp.tools.filesystem]
+enabled = true
+root = "/tmp"  # Safe directory for testing
+
+[mcp.tools.shell]
+enabled = true
+allowed_commands = ["ls", "ps", "nvidia-smi", "cat", "grep", "echo", "pwd"]
+
+[mcp.tools.process]
+enabled = true
+
+[mcp.tools.network]
+enabled = true
+
+# Observability
+[mcp.observability]
+enable_metrics = true
+metrics_port = 9090
+enable_tracing = false

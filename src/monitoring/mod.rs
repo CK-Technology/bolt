@@ -715,15 +715,15 @@ pub struct SystemStatus {
 }
 
 #[derive(Debug)]
-struct ContainerCount {
-    total: u32,
-    running: u32,
+pub struct ContainerCount {
+    pub total: u32,
+    pub running: u32,
 }
 
 #[derive(Debug)]
-struct GPUCount {
-    total: u32,
-    average_utilization: f64,
+pub struct GPUCount {
+    pub total: u32,
+    pub average_utilization: f64,
 }
 
 #[derive(Debug)]

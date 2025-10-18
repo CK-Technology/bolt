@@ -12,6 +12,7 @@ use crate::runtime::gpu::nvidia::NvidiaManager;
 
 /// Advanced gaming optimization system that goes beyond basic Steam integration
 /// Provides comprehensive performance tuning, latency optimization, and gaming-specific features
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct AdvancedGamingOptimizer {
     config: AdvancedGamingConfig,

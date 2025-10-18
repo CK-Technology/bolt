@@ -365,6 +365,22 @@ bolt = { git = "https://github.com/CK-Technology/bolt", features = ["gaming", "q
 
 ---
 
+## 📚 Documentation
+
+Comprehensive documentation is available in the [`docs/`](docs/) directory:
+
+- **[Planning & Roadmap](docs/planning/)** - Development priorities and wishlist
+- **[Architecture](docs/architecture/)** - System design and integration patterns
+- **[Features](docs/features/)** - GPU support, gaming, and networking
+- **[Integrations](docs/integrations/)** - MCP, GhostForge, and ecosystem tools
+- **[nvbind](docs/nvbind/)** - GPU passthrough integration details
+- **[API Reference](docs/api/)** - Complete API documentation
+- **[MCP Integration](docs/mcp/)** - Model Context Protocol guides
+
+See [docs/README.md](docs/README.md) for the complete documentation index.
+
+---
+
 ## Ecosystem Integration
 
 Bolt integrates with modern Rust ecosystem libraries for enhanced functionality:

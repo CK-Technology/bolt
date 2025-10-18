@@ -5,10 +5,8 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tokio::fs;
 use tracing::{debug, info, warn};
 
 pub mod btrfs;
@@ -189,7 +187,7 @@ impl SnapshotManager {
         &self,
         name: Option<String>,
         description: Option<String>,
-        snapshot_type: SnapshotType,
+        _snapshot_type: SnapshotType,
     ) -> Result<Snapshot> {
         if !self.config.enabled {
             warn!("Snapshots disabled, skipping");

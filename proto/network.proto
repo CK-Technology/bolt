@@ -1,0 +1,237 @@
+// Bolt Network Service Protocol Definitions
+// Ultra-fast QUIC networking for containers
+
+syntax = "proto3";
+package bolt.network;
+
+// Network management service
+service NetworkService {
+  // Create a new network
+  rpc CreateNetwork(CreateNetworkRequest) returns (CreateNetworkResponse);
+
+  // Delete a network
+  rpc DeleteNetwork(DeleteNetworkRequest) returns (DeleteNetworkResponse);
+
+  // List networks
+  rpc ListNetworks(ListNetworksRequest) returns (ListNetworksResponse);
+
+  // Stream network statistics (server streaming)
+  rpc StreamStats(StatsRequest) returns (stream NetworkStatsUpdate);
+
+  // Get QUIC connection pool stats
+  rpc GetQuicPoolStats(QuicPoolStatsRequest) returns (QuicPoolStatsResponse);
+
+  // Setup port forwarding
+  rpc SetupPortForward(PortForwardRequest) returns (PortForwardResponse);
+
+  // Remove port forwarding
+  rpc RemovePortForward(RemovePortForwardRequest) returns (RemovePortForwardResponse);
+
+  // Connect container to network
+  rpc ConnectContainer(ConnectContainerRequest) returns (ConnectContainerResponse);
+
+  // Disconnect container from network
+  rpc DisconnectContainer(DisconnectContainerRequest) returns (DisconnectContainerResponse);
+
+  // Enable network optimizations
+  rpc EnableOptimizations(OptimizationsRequest) returns (OptimizationsResponse);
+}
+
+// Create network request
+message CreateNetworkRequest {
+  string name = 1;
+  string driver = 2;           // "bolt", "gquic", "bridge", "host"
+  string subnet = 3;            // CIDR notation (e.g., "172.18.0.0/16")
+  string gateway = 4;
+  map<string, string> options = 5;
+  bool enable_ipv6 = 6;
+  string ipv6_subnet = 7;
+  map<string, string> labels = 8;
+}
+
+message CreateNetworkResponse {
+  string network_id = 1;
+  string name = 2;
+  string driver = 3;
+  string subnet = 4;
+  string gateway = 5;
+  string error = 6;
+}
+
+// Delete network request
+message DeleteNetworkRequest {
+  string network_id = 1;
+}
+
+message DeleteNetworkResponse {
+  string network_id = 1;
+  bool success = 2;
+  string error = 3;
+}
+
+// List networks request
+message ListNetworksRequest {
+  repeated string filters = 1;
+}
+
+message ListNetworksResponse {
+  repeated NetworkInfo networks = 1;
+}
+
+message NetworkInfo {
+  string id = 1;
+  string name = 2;
+  string driver = 3;
+  string subnet = 4;
+  string gateway = 5;
+  repeated string containers = 6;
+  map<string, string> labels = 7;
+  int64 created_at = 8;
+}
+
+// Network stats streaming
+message StatsRequest {
+  string network_id = 1;
+  bool stream = 2;             // Continuous streaming
+  uint32 interval_ms = 3;      // Sampling interval (default: 1000ms)
+  repeated string interfaces = 4; // Specific interfaces to monitor
+}
+
+message NetworkStatsUpdate {
+  int64 timestamp = 1;
+  string network_id = 2;
+  repeated InterfaceStats interfaces = 3;
+  QuicStats quic = 4;
+}
+
+message InterfaceStats {
+  string interface = 1;
+  uint64 rx_bytes = 2;
+  uint64 rx_packets = 3;
+  uint64 rx_errors = 4;
+  uint64 rx_dropped = 5;
+  uint64 tx_bytes = 6;
+  uint64 tx_packets = 7;
+  uint64 tx_errors = 8;
+  uint64 tx_dropped = 9;
+  double bandwidth_mbps = 10;
+}
+
+message QuicStats {
+  uint64 connections_established = 1;
+  uint64 connections_dropped = 2;
+  uint64 bytes_sent = 3;
+  uint64 bytes_received = 4;
+  double average_rtt_ms = 5;
+  double packet_loss_rate = 6;
+  double bandwidth_utilization = 7;
+  uint32 active_streams = 8;
+  PoolStats pool = 9;
+}
+
+message PoolStats {
+  uint32 pool_size = 1;
+  uint32 max_pool_size = 2;
+  uint64 total_reuses = 3;
+  double reuse_rate = 4;
+}
+
+// QUIC connection pool stats
+message QuicPoolStatsRequest {
+  // Empty for now
+}
+
+message QuicPoolStatsResponse {
+  uint32 pool_size = 1;
+  uint32 max_pool_size = 2;
+  uint64 total_reuses = 3;
+  double reuse_rate = 4;
+  repeated PooledConnectionInfo connections = 5;
+}
+
+message PooledConnectionInfo {
+  string remote_addr = 1;
+  string container_id = 2;
+  uint64 use_count = 3;
+  uint64 idle_time_ms = 4;
+  double rtt_ms = 5;
+}
+
+// Port forwarding
+message PortForwardRequest {
+  string container_id = 1;
+  uint32 host_port = 2;
+  uint32 container_port = 3;
+  string protocol = 4;         // "tcp", "udp", "quic"
+}
+
+message PortForwardResponse {
+  string forward_id = 1;
+  uint32 host_port = 2;
+  uint32 container_port = 3;
+  string protocol = 4;
+  bool success = 5;
+  string error = 6;
+}
+
+message RemovePortForwardRequest {
+  string forward_id = 1;
+}
+
+message RemovePortForwardResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+// Connect container to network
+message ConnectContainerRequest {
+  string container_id = 1;
+  string network_id = 2;
+  string ip_address = 3;       // Optional: specific IP
+  repeated string aliases = 4;
+  map<string, string> options = 5;
+}
+
+message ConnectContainerResponse {
+  string container_id = 1;
+  string network_id = 2;
+  string assigned_ip = 3;
+  bool success = 4;
+  string error = 5;
+}
+
+// Disconnect container from network
+message DisconnectContainerRequest {
+  string container_id = 1;
+  string network_id = 2;
+  bool force = 3;
+}
+
+message DisconnectContainerResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+// Network optimizations
+message OptimizationsRequest {
+  string container_id = 1;
+  string network_id = 2;
+  OptimizationConfig config = 3;
+}
+
+message OptimizationConfig {
+  bool enable_quic_0rtt = 1;
+  bool enable_connection_migration = 2;
+  bool enable_bbr_congestion_control = 3;
+  uint32 max_concurrent_streams = 4;
+  uint32 send_buffer_size = 5;
+  uint32 recv_buffer_size = 6;
+  bool enable_gso = 7;         // Generic Segmentation Offload
+  bool enable_gro = 8;         // Generic Receive Offload
+}
+
+message OptimizationsResponse {
+  bool success = 1;
+  repeated string enabled_features = 2;
+  string error = 3;
+}

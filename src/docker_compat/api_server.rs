@@ -581,7 +581,6 @@ impl DockerAPIServer {
     /// Start Docker API server on Unix socket (Docker compatibility)
     pub async fn start_unix_socket(&self, socket_path: &str) -> Result<()> {
         use std::path::Path;
-        use hyperlocal::UnixServerExt;
 
         tracing::info!("🐳 Starting Docker API server on Unix socket: {}", socket_path);
 
@@ -601,8 +600,6 @@ impl DockerAPIServer {
         // Start server on Unix socket in background using hyperlocal
         #[cfg(unix)]
         tokio::spawn(async move {
-            use hyperlocal::UnixServerExt;
-
             // Create Unix listener
             match tokio::net::UnixListener::bind(&socket_path_owned) {
                 Ok(listener) => {
@@ -611,8 +608,8 @@ impl DockerAPIServer {
                     let service = warp::service(routes);
                     loop {
                         match listener.accept().await {
-                            Ok((stream, _)) => {
-                                let service = service.clone();
+                            Ok((_stream, _)) => {
+                                let _service = service.clone();
                                 tokio::spawn(async move {
                                     // Serve the connection
                                     // Note: This is a simplified implementation

@@ -1,4 +1,3 @@
-use bolt::compat::DockerApiCompat;
 use bolt::compat::compose::ComposeCompat;
 use bolt::compat::docker::DockerCompat;
 use bolt::{BoltRuntime, Result};

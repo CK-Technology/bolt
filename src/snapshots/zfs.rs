@@ -2,8 +2,7 @@
 
 use anyhow::Result;
 use super::{Snapshot, SnapshotConfig, SnapshotType, FilesystemType};
-use std::path::PathBuf;
-use tracing::{info, warn};
+use tracing::warn;
 
 pub async fn create_snapshot(
     config: &SnapshotConfig,
