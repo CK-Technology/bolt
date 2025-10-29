@@ -647,13 +647,13 @@ impl AdvancedGamingOptimizer {
 
         #[cfg(feature = "nvidia-support")]
         let gpu_manager = {
-            match NvidiaManager::new().await {
+            match NvidiaManager::detect() {
                 Ok(manager) => {
                     info!("✅ NVIDIA GPU manager initialized");
                     Some(Arc::new(manager))
                 }
                 Err(e) => {
-                    warn!("⚠️ Failed to initialize NVIDIA GPU manager: {}", e);
+                    tracing::warn!("⚠️ Failed to initialize NVIDIA GPU manager: {}", e);
                     None
                 }
             }

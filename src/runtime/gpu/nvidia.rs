@@ -137,7 +137,7 @@ impl NvidiaManager {
         #[cfg(feature = "nvidia-support")]
         {
             let nvml = Nvml::init().context("Failed to initialize NVML")?;
-            let device = nvml
+            let mut device = nvml
                 .device_by_index(device_id)
                 .context("Failed to get GPU device")?;
 
@@ -305,8 +305,10 @@ impl NvidiaManager {
             let memory_info = device.memory_info().unwrap_or_else(|_| {
                 nvml_wrapper::struct_wrappers::device::MemoryInfo {
                     free: 0,
+                    reserved: 0,
                     total: 0,
                     used: 0,
+                    version: 2,  // NVML API v2
                 }
             });
             let memory_mb = (memory_info.total / 1024 / 1024) as u32;

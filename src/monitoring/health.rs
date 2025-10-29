@@ -642,13 +642,14 @@ impl HealthChecker {
                         }
                     }
 
-                    // Check memory errors
+                    // Check memory errors (uncorrected ECC errors)
                     if let Ok(memory_error_count) = device.total_ecc_errors(
-                        nvml_wrapper::enum_wrappers::device::EccCounter::VolatileSramUncorrectable,
+                        nvml_wrapper::enum_wrappers::device::MemoryError::Uncorrected,
+                        nvml_wrapper::enum_wrappers::device::EccCounter::Volatile,
                     ) {
                         if memory_error_count > 0 {
                             return Err(anyhow::anyhow!(
-                                "GPU {} has memory errors: {}",
+                                "GPU {} has uncorrected memory errors: {}",
                                 i,
                                 memory_error_count
                             ));

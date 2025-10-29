@@ -91,7 +91,7 @@ flate2 = "1.0"
 
 # === GAMING INFRASTRUCTURE ===
 # GPU management
-nvml-wrapper = { version = "0.9", optional = true }  # NVIDIA-specific, optional
+nvml-wrapper = { version = "0.11", optional = true }  # NVIDIA Management Library for direct GPU monitoring
 # Wayland support
 wayland-client = { version = "0.31", optional = true }
 smithay-client-toolkit = { version = "0.18", optional = true }

@@ -8,6 +8,7 @@ use tracing::{debug, info, warn};
 pub mod amd;
 pub mod nvbind;
 pub mod nvidia;
+pub mod nvml_helper;
 pub mod velocity;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
