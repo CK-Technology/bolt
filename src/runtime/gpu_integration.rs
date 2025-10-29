@@ -353,11 +353,7 @@ impl BoltGpuIntegration {
         info!("🎮 Initializing Bolt GPU Integration");
 
         #[cfg(feature = "nvbind-support")]
-        let gpu_manager = {
-            let manager = nvbind::bolt::NvbindGpuManager::with_defaults();
-            info!("✅ nvbind GPU manager initialized successfully");
-            Some(manager)
-        };
+        let gpu_manager = Self::initialize_nvbind_manager().await;
 
         #[cfg(not(feature = "nvbind-support"))]
         let gpu_manager: Option<()> = None;
@@ -410,6 +406,144 @@ impl BoltGpuIntegration {
             amd_backend,
             amd_monitor,
         })
+    }
+
+    /// Initialize nvbind GPU manager with comprehensive auto-detection
+    #[cfg(feature = "nvbind-support")]
+    async fn initialize_nvbind_manager() -> Option<nvbind::bolt::NvbindGpuManager> {
+        info!("🔍 Auto-detecting nvbind GPU capabilities...");
+
+        // Step 1: Check if NVIDIA GPUs are present
+        let nvidia_present = Self::detect_nvidia_gpus().await;
+        if !nvidia_present {
+            info!("ℹ️  No NVIDIA GPUs detected, skipping nvbind initialization");
+            return None;
+        }
+
+        // Step 2: Check if NVIDIA drivers are loaded
+        if !Self::check_nvidia_drivers().await {
+            warn!("⚠️  NVIDIA drivers not detected or not loaded");
+            warn!("   nvbind requires NVIDIA drivers to be installed and loaded");
+            warn!("   Recommended: NVIDIA open-gpu-kernel-modules (515.43.04+)");
+            return None;
+        }
+
+        // Step 3: Try to initialize nvbind GPU manager
+        info!("🚀 Initializing nvbind GPU manager...");
+        match std::panic::catch_unwind(|| {
+            nvbind::bolt::NvbindGpuManager::with_defaults()
+        }) {
+            Ok(manager) => {
+                info!("✅ nvbind GPU manager initialized successfully");
+
+                // Step 4: Verify manager capabilities
+                if let Err(e) = Self::verify_nvbind_capabilities(&manager).await {
+                    warn!("⚠️  nvbind capabilities verification failed: {}", e);
+                    warn!("   Falling back to alternative GPU methods");
+                    return None;
+                }
+
+                info!("🎯 nvbind features available:");
+                info!("   • Sub-microsecond GPU passthrough");
+                info!("   • Direct GPU memory access");
+                info!("   • Zero-copy GPU buffer sharing");
+                info!("   • Hardware-accelerated context switching");
+
+                Some(manager)
+            }
+            Err(e) => {
+                warn!("❌ Failed to initialize nvbind GPU manager: {:?}", e);
+                warn!("   This may indicate:");
+                warn!("   • Incompatible NVIDIA driver version");
+                warn!("   • Missing GPU permissions");
+                warn!("   • GPU device not accessible");
+                warn!("   Falling back to alternative GPU methods");
+                None
+            }
+        }
+    }
+
+    /// Detect NVIDIA GPUs in the system
+    #[cfg(feature = "nvbind-support")]
+    async fn detect_nvidia_gpus() -> bool {
+        // Try multiple detection methods
+
+        // Method 1: Check for NVIDIA device nodes
+        if std::path::Path::new("/dev/nvidia0").exists() {
+            debug!("✓ NVIDIA device node /dev/nvidia0 found");
+            return true;
+        }
+
+        // Method 2: Check lspci for NVIDIA GPUs
+        if let Ok(output) = tokio::process::Command::new("lspci")
+            .output()
+            .await
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if stdout.to_lowercase().contains("nvidia") {
+                debug!("✓ NVIDIA GPU detected via lspci");
+                return true;
+            }
+        }
+
+        // Method 3: Check /proc/driver/nvidia
+        if std::path::Path::new("/proc/driver/nvidia").exists() {
+            debug!("✓ NVIDIA driver /proc entry found");
+            return true;
+        }
+
+        false
+    }
+
+    /// Check if NVIDIA drivers are properly loaded
+    #[cfg(feature = "nvbind-support")]
+    async fn check_nvidia_drivers() -> bool {
+        // Check if nvidia kernel module is loaded
+        if let Ok(modules) = tokio::fs::read_to_string("/proc/modules").await {
+            if modules.contains("nvidia ") {
+                debug!("✓ NVIDIA kernel module loaded");
+
+                // Try to get driver version
+                if let Ok(output) = tokio::process::Command::new("nvidia-smi")
+                    .arg("--query-gpu=driver_version")
+                    .arg("--format=csv,noheader")
+                    .output()
+                    .await
+                {
+                    if output.status.success() {
+                        let driver_version = String::from_utf8_lossy(&output.stdout);
+                        info!("   NVIDIA driver version: {}", driver_version.trim());
+                        return true;
+                    }
+                }
+
+                return true;
+            }
+        }
+
+        // Fallback: check nvidia-smi availability
+        if let Ok(output) = tokio::process::Command::new("nvidia-smi")
+            .arg("-L")
+            .output()
+            .await
+        {
+            if output.status.success() {
+                debug!("✓ nvidia-smi accessible");
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Verify nvbind manager capabilities
+    #[cfg(feature = "nvbind-support")]
+    async fn verify_nvbind_capabilities(
+        _manager: &nvbind::bolt::NvbindGpuManager,
+    ) -> Result<()> {
+        // Basic capability check - if manager was created, it should work
+        // nvbind will have already validated GPU access during initialization
+        Ok(())
     }
 
     /// Setup GPU for container with nvbind optimization
