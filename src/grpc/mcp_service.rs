@@ -192,7 +192,7 @@ impl mcp_tool_service_server::McpToolService for McpToolServiceImpl {
         request: Request<CallToolRequest>,
     ) -> Result<Response<Self::CallToolStreamStream>, Status> {
         let req = request.into_inner();
-        info!("📡 MCP CallToolStream: tool={}", req.tool_name);
+        info!("📡 MCP CallToolStream: tool={}, container={}", req.tool_name, req.container_id);
 
         let (tx, rx) = tokio::sync::mpsc::channel(100);
 
@@ -201,56 +201,91 @@ impl mcp_tool_service_server::McpToolService for McpToolServiceImpl {
 
         // Spawn task to execute tool and stream results
         tokio::spawn(async move {
-            // Send started event
-            let _ = tx.send(Ok(CallToolStreamResponse {
-                event: Some(call_tool_stream_response::Event::Started(ToolStarted {
-                    tool_name: tool_name.clone(),
-                    timestamp: chrono::Utc::now().timestamp(),
-                })),
-            })).await;
-
             // Find tool
-            let tool = tools.iter().find(|t| t.name() == tool_name.as_str());
+            let tool = match tools.iter().find(|t| t.name() == tool_name.as_str()) {
+                Some(t) => t,
+                None => {
+                    let _ = tx.send(Ok(CallToolStreamResponse {
+                        event: Some(call_tool_stream_response::Event::Error(ToolError {
+                            error: format!("Tool not found: {}", tool_name),
+                            error_code: "TOOL_NOT_FOUND".to_string(),
+                        })),
+                    })).await;
+                    return;
+                }
+            };
 
-            if let Some(tool) = tool {
-                // Parse and execute
-                if let Ok(arguments) = serde_json::from_str::<serde_json::Value>(&req.arguments_json) {
-                    match tool.execute(arguments).await {
-                        Ok(result) => {
-                            // Send progress
-                            let _ = tx.send(Ok(CallToolStreamResponse {
-                                event: Some(call_tool_stream_response::Event::Progress(ToolProgress {
-                                    message: "Processing...".to_string(),
-                                    percent_complete: 50,
-                                })),
-                            })).await;
+            // Parse arguments
+            let arguments = match serde_json::from_str::<serde_json::Value>(&req.arguments_json) {
+                Ok(args) => args,
+                Err(e) => {
+                    let _ = tx.send(Ok(CallToolStreamResponse {
+                        event: Some(call_tool_stream_response::Event::Error(ToolError {
+                            error: format!("Invalid JSON arguments: {}", e),
+                            error_code: "INVALID_ARGUMENTS".to_string(),
+                        })),
+                    })).await;
+                    return;
+                }
+            };
 
-                            // Send completion
-                            let _ = tx.send(Ok(CallToolStreamResponse {
-                                event: Some(call_tool_stream_response::Event::Complete(ToolComplete {
+            // Execute tool with streaming
+            match tool.execute_stream(arguments).await {
+                Ok(mut event_rx) => {
+                    // Forward all events from tool to gRPC stream
+                    while let Some(event) = event_rx.recv().await {
+                        use crate::mcp::tools::ToolStreamEvent;
+
+                        let grpc_event = match event {
+                            ToolStreamEvent::Started { tool_name, timestamp } => {
+                                call_tool_stream_response::Event::Started(ToolStarted {
+                                    tool_name,
+                                    timestamp,
+                                })
+                            }
+                            ToolStreamEvent::Progress { message, percent } => {
+                                call_tool_stream_response::Event::Progress(ToolProgress {
+                                    message,
+                                    percent_complete: percent,
+                                })
+                            }
+                            ToolStreamEvent::Output { stream, data } => {
+                                call_tool_stream_response::Event::Output(ToolOutput {
+                                    stream,
+                                    data,
+                                })
+                            }
+                            ToolStreamEvent::Complete { result, execution_time_ms } => {
+                                call_tool_stream_response::Event::Complete(ToolComplete {
                                     success: true,
                                     result_json: serde_json::to_string(&result).unwrap_or_default(),
-                                    execution_time_ms: 0,
-                                })),
-                            })).await;
-                        }
-                        Err(e) => {
-                            let _ = tx.send(Ok(CallToolStreamResponse {
-                                event: Some(call_tool_stream_response::Event::Error(ToolError {
-                                    error: e.to_string(),
-                                    error_code: "EXECUTION_FAILED".to_string(),
-                                })),
-                            })).await;
+                                    execution_time_ms,
+                                })
+                            }
+                            ToolStreamEvent::Error { error, error_code } => {
+                                call_tool_stream_response::Event::Error(ToolError {
+                                    error,
+                                    error_code,
+                                })
+                            }
+                        };
+
+                        if tx.send(Ok(CallToolStreamResponse {
+                            event: Some(grpc_event),
+                        })).await.is_err() {
+                            // Client disconnected
+                            break;
                         }
                     }
                 }
-            } else {
-                let _ = tx.send(Ok(CallToolStreamResponse {
-                    event: Some(call_tool_stream_response::Event::Error(ToolError {
-                        error: format!("Tool not found: {}", tool_name),
-                        error_code: "TOOL_NOT_FOUND".to_string(),
-                    })),
-                })).await;
+                Err(e) => {
+                    let _ = tx.send(Ok(CallToolStreamResponse {
+                        event: Some(call_tool_stream_response::Event::Error(ToolError {
+                            error: e.to_string(),
+                            error_code: "EXECUTION_FAILED".to_string(),
+                        })),
+                    })).await;
+                }
             }
         });
 

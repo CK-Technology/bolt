@@ -54,6 +54,7 @@ pub enum RayTracingQuality {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct RTXFeatureManager {
     config: RTXFeatureConfig,
     supported_features: Arc<RwLock<RTXCapabilities>>,

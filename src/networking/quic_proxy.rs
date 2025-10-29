@@ -12,6 +12,7 @@ use tracing::{debug, error, info, instrument, warn};
 /// High-performance QUIC-based socket proxy for container networking
 /// Provides TCP/UDP proxying over QUIC with gaming optimizations
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct QUICSocketProxy {
     config: QUICProxyConfig,
     server_endpoints: Arc<RwLock<HashMap<String, QUICServerEndpoint>>>,

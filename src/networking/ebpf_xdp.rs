@@ -23,6 +23,7 @@ pub struct XDPFastPath {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct XDPInterface {
     name: String,
     ifindex: u32,

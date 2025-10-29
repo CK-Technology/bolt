@@ -55,6 +55,7 @@ pub enum DriverMode {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct NvbindRuntime {
     config: NvbindConfig,
     available_gpus: Vec<GpuInfo>,
@@ -102,6 +103,7 @@ pub struct GpuMetrics {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct GpuMemoryManager {
     memory_pools: RwLock<HashMap<String, GpuMemoryPool>>,
     total_vram_mb: HashMap<String, u64>,

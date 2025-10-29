@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use super::{Plugin, PluginManifest};
 
+#[allow(dead_code)]
 pub struct PluginLoader {
     libraries: Vec<Arc<Library>>,
 }

@@ -51,6 +51,7 @@ pub enum GpuVendor {
     Any,
 }
 
+#[allow(dead_code)]
 pub struct PluginManager {
     plugins: Arc<RwLock<HashMap<String, Box<dyn Plugin>>>>,
     gpu_plugins: Arc<RwLock<HashMap<String, Box<dyn GpuPlugin>>>>,

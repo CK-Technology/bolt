@@ -22,6 +22,7 @@ pub struct BoltNovaRuntime {
     inner: Arc<RwLock<BoltRuntimeInner>>,
 }
 
+#[allow(dead_code)]
 struct BoltRuntimeInner {
     capsule_manager: CapsuleManager,
     active_capsules: HashMap<String, CapsuleHandle>,

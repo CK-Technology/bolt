@@ -1563,6 +1563,7 @@ impl StorageManager {
         })
     }
 
+    #[allow(dead_code)]
     async fn create_mock_image(&self, image: &str) -> Result<ImageMetadata> {
         let reference = normalize_reference(image);
         let image_path = self.get_image_path(&reference);
@@ -1618,6 +1619,7 @@ impl StorageManager {
         Ok(metadata)
     }
 
+    #[allow(dead_code)]
     fn create_mock_layer(layer_dir: &Path, layer: &LayerMetadata) -> Result<u64> {
         let temp_root = tempdir().context("Failed to allocate mock layer temp directory")?;
         let temp_path = temp_root.path();

@@ -26,6 +26,7 @@ use super::security::{BoltSecurityManager, SecurityMetrics};
 use super::storage::StorageManager;
 use std::{env, fs};
 
+#[allow(dead_code)]
 const DEFAULT_ROOTFS_DIRS: &[&str] = &[
     "bin", "etc", "lib", "tmp", "var", "usr", "dev", "proc", "sys",
 ];

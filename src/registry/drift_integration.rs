@@ -1287,6 +1287,7 @@ impl DriftRegistryClient {
     }
 
     /// Calculate SHA256 digest of a file
+    #[allow(dead_code)]
     async fn calculate_file_digest(&self, path: &Path) -> Result<String> {
         use sha2::{Digest, Sha256};
         use tokio::io::AsyncReadExt;

@@ -76,6 +76,7 @@ pub struct DisplayDevice {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct VRRController {
     enabled: Arc<RwLock<bool>>,
     current_range: Arc<RwLock<Option<(u32, u32)>>>,
@@ -83,6 +84,7 @@ pub struct VRRController {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct HDRController {
     enabled: Arc<RwLock<bool>>,
     current_colorspace: Arc<RwLock<HDRColorSpace>>,

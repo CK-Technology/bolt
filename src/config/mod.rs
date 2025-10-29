@@ -240,6 +240,54 @@ pub struct ServiceMcpConfig {
     pub omen: Option<McpOmenConfig>,
 }
 
+impl ServiceMcpConfig {
+    /// Valid MCP tool names
+    const VALID_TOOLS: &'static [&'static str] = &[
+        "filesystem:read",
+        "filesystem:write",
+        "filesystem:list",
+        "filesystem:watch",
+        "shell:exec",
+        "gpu:stats",
+        "gpu:info",
+        "process:list",
+        "process:kill",
+        "network:stats",
+        "network:connections",
+    ];
+
+    /// Validate the MCP configuration
+    pub fn validate(&self) -> Result<()> {
+        if !self.enabled {
+            return Ok(()); // No validation needed if MCP is disabled
+        }
+
+        // Validate tool names
+        for tool in &self.tools {
+            if !Self::VALID_TOOLS.contains(&tool.as_str()) {
+                return Err(anyhow::anyhow!(
+                    "Invalid MCP tool '{}'. Valid tools: {:?}",
+                    tool,
+                    Self::VALID_TOOLS
+                ));
+            }
+        }
+
+        // Validate permissions if specified
+        if let Some(ref perms) = self.permissions {
+            perms.validate()?;
+        }
+
+        // Validate Omen config if specified
+        #[cfg(feature = "omen")]
+        if let Some(ref omen) = self.omen {
+            omen.validate()?;
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct McpPermissions {
     /// Allowed filesystem paths for filesystem tools
@@ -261,6 +309,74 @@ pub struct McpPermissions {
     /// Process access level: "read_only", "read_write", "full"
     #[serde(default)]
     pub process_access: Option<String>,
+}
+
+impl McpPermissions {
+    /// Valid access levels
+    const VALID_ACCESS_LEVELS: &'static [&'static str] = &["none", "read_only", "read_write", "full"];
+
+    /// Validate permissions configuration
+    pub fn validate(&self) -> Result<()> {
+        // Validate filesystem paths
+        for path in &self.filesystem_paths {
+            if path.is_empty() {
+                return Err(anyhow::anyhow!("Filesystem path cannot be empty"));
+            }
+            // Ensure paths are absolute or relative
+            if !path.starts_with('/') && !path.starts_with("./") && !path.starts_with("../") {
+                return Err(anyhow::anyhow!(
+                    "Filesystem path '{}' must be absolute or relative (start with /, ./, or ../)",
+                    path
+                ));
+            }
+        }
+
+        // Validate shell commands
+        for cmd in &self.shell_commands {
+            if cmd.is_empty() {
+                return Err(anyhow::anyhow!("Shell command cannot be empty"));
+            }
+            if cmd.contains("..") || cmd.contains("&&") || cmd.contains(";") {
+                return Err(anyhow::anyhow!(
+                    "Shell command '{}' contains potentially unsafe characters",
+                    cmd
+                ));
+            }
+        }
+
+        // Validate access levels
+        if let Some(ref level) = self.gpu_access {
+            if !Self::VALID_ACCESS_LEVELS.contains(&level.as_str()) {
+                return Err(anyhow::anyhow!(
+                    "Invalid GPU access level '{}'. Valid levels: {:?}",
+                    level,
+                    Self::VALID_ACCESS_LEVELS
+                ));
+            }
+        }
+
+        if let Some(ref level) = self.network_access {
+            if !Self::VALID_ACCESS_LEVELS.contains(&level.as_str()) {
+                return Err(anyhow::anyhow!(
+                    "Invalid network access level '{}'. Valid levels: {:?}",
+                    level,
+                    Self::VALID_ACCESS_LEVELS
+                ));
+            }
+        }
+
+        if let Some(ref level) = self.process_access {
+            if !Self::VALID_ACCESS_LEVELS.contains(&level.as_str()) {
+                return Err(anyhow::anyhow!(
+                    "Invalid process access level '{}'. Valid levels: {:?}",
+                    level,
+                    Self::VALID_ACCESS_LEVELS
+                ));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(feature = "omen")]
@@ -285,6 +401,74 @@ pub struct McpOmenConfig {
     /// Provider-specific configuration
     #[serde(default)]
     pub provider_config: HashMap<String, String>,
+}
+
+#[cfg(feature = "omen")]
+impl McpOmenConfig {
+    /// Valid routing strategies
+    const VALID_STRATEGIES: &'static [&'static str] = &[
+        "cost_optimized",
+        "latency_optimized",
+        "balanced",
+        "quality_optimized",
+    ];
+
+    /// Valid AI providers
+    const VALID_PROVIDERS: &'static [&'static str] = &[
+        "ollama",
+        "anthropic",
+        "openai",
+        "google",
+        "xai",
+        "azure",
+        "bedrock",
+        "vertexai",
+    ];
+
+    /// Validate Omen configuration
+    pub fn validate(&self) -> Result<()> {
+        if !self.enabled {
+            return Ok(()); // No validation needed if Omen is disabled
+        }
+
+        // Validate routing strategy
+        if !self.strategy.is_empty() && !Self::VALID_STRATEGIES.contains(&self.strategy.as_str()) {
+            return Err(anyhow::anyhow!(
+                "Invalid Omen routing strategy '{}'. Valid strategies: {:?}",
+                self.strategy,
+                Self::VALID_STRATEGIES
+            ));
+        }
+
+        // Validate max_cost_per_hour
+        if let Some(cost) = self.max_cost_per_hour {
+            if cost < 0.0 {
+                return Err(anyhow::anyhow!(
+                    "max_cost_per_hour must be >= 0, got: {}",
+                    cost
+                ));
+            }
+            if cost > 1000.0 {
+                return Err(anyhow::anyhow!(
+                    "max_cost_per_hour seems unreasonably high: {}. Please check your configuration.",
+                    cost
+                ));
+            }
+        }
+
+        // Validate providers
+        for provider in &self.providers {
+            if !Self::VALID_PROVIDERS.contains(&provider.as_str()) {
+                return Err(anyhow::anyhow!(
+                    "Invalid Omen provider '{}'. Valid providers: {:?}",
+                    provider,
+                    Self::VALID_PROVIDERS
+                ));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 // Snapshot Configuration
@@ -543,6 +727,13 @@ impl BoltFile {
             // Validate storage configuration
             if let Some(ref storage) = service.storage {
                 self.validate_storage_config(name, storage)?;
+            }
+
+            // Validate MCP configuration
+            if let Some(ref mcp) = service.mcp {
+                debug!("Validating MCP configuration for service: {}", name);
+                mcp.validate()
+                    .with_context(|| format!("Invalid MCP configuration for service '{}'", name))?;
             }
 
             // Validate ports
@@ -1107,6 +1298,8 @@ impl BoltConfig {
             data_dir,
             boltfile_path,
             verbose: false,
+            #[cfg(feature = "mcp")]
+            mcp: None,
         })
     }
 
@@ -1460,3 +1653,147 @@ pub fn create_example_boltfile() -> BoltFile {
         }),
     }
 }
+
+
+#[cfg(test)]
+mod mcp_validation_tests {
+    use super::*;
+
+    #[test]
+    fn test_valid_mcp_config() {
+        let mcp = ServiceMcpConfig {
+            enabled: true,
+            tools: vec![
+                "filesystem:read".to_string(),
+                "shell:exec".to_string(),
+                "gpu:stats".to_string(),
+            ],
+            permissions: Some(McpPermissions {
+                filesystem_paths: vec!["/workspace".to_string()],
+                shell_commands: vec!["cargo".to_string()],
+                gpu_access: Some("read_only".to_string()),
+                network_access: Some("none".to_string()),
+                process_access: Some("read_only".to_string()),
+            }),
+            #[cfg(feature = "omen")]
+            omen: None,
+        };
+
+        assert!(mcp.validate().is_ok());
+    }
+
+    #[test]
+    fn test_invalid_tool_name() {
+        let mcp = ServiceMcpConfig {
+            enabled: true,
+            tools: vec!["invalid:tool".to_string()],
+            permissions: None,
+            #[cfg(feature = "omen")]
+            omen: None,
+        };
+
+        assert!(mcp.validate().is_err());
+    }
+
+    #[test]
+    fn test_invalid_access_level() {
+        let mcp = ServiceMcpConfig {
+            enabled: true,
+            tools: vec!["gpu:stats".to_string()],
+            permissions: Some(McpPermissions {
+                filesystem_paths: vec![],
+                shell_commands: vec![],
+                gpu_access: Some("invalid_level".to_string()),
+                network_access: None,
+                process_access: None,
+            }),
+            #[cfg(feature = "omen")]
+            omen: None,
+        };
+
+        assert!(mcp.validate().is_err());
+    }
+
+    #[test]
+    fn test_invalid_filesystem_path() {
+        let perms = McpPermissions {
+            filesystem_paths: vec!["not-absolute".to_string()],
+            shell_commands: vec![],
+            gpu_access: None,
+            network_access: None,
+            process_access: None,
+        };
+
+        assert!(perms.validate().is_err());
+    }
+
+    #[test]
+    fn test_unsafe_shell_command() {
+        let perms = McpPermissions {
+            filesystem_paths: vec![],
+            shell_commands: vec!["rm && rm -rf /".to_string()],
+            gpu_access: None,
+            network_access: None,
+            process_access: None,
+        };
+
+        assert!(perms.validate().is_err());
+    }
+
+    #[cfg(feature = "omen")]
+    #[test]
+    fn test_valid_omen_config() {
+        let omen = McpOmenConfig {
+            enabled: true,
+            strategy: "balanced".to_string(),
+            max_cost_per_hour: Some(5.0),
+            providers: vec!["ollama".to_string(), "anthropic".to_string()],
+            provider_config: HashMap::new(),
+        };
+
+        assert!(omen.validate().is_ok());
+    }
+
+    #[cfg(feature = "omen")]
+    #[test]
+    fn test_invalid_omen_strategy() {
+        let omen = McpOmenConfig {
+            enabled: true,
+            strategy: "invalid_strategy".to_string(),
+            max_cost_per_hour: None,
+            providers: vec![],
+            provider_config: HashMap::new(),
+        };
+
+        assert!(omen.validate().is_err());
+    }
+
+    #[cfg(feature = "omen")]
+    #[test]
+    fn test_invalid_omen_provider() {
+        let omen = McpOmenConfig {
+            enabled: true,
+            strategy: "balanced".to_string(),
+            max_cost_per_hour: None,
+            providers: vec!["invalid_provider".to_string()],
+            provider_config: HashMap::new(),
+        };
+
+        assert!(omen.validate().is_err());
+    }
+
+    #[cfg(feature = "omen")]
+    #[test]
+    fn test_negative_max_cost() {
+        let omen = McpOmenConfig {
+            enabled: true,
+            strategy: "cost_optimized".to_string(),
+            max_cost_per_hour: Some(-5.0),
+            providers: vec!["ollama".to_string()],
+            provider_config: HashMap::new(),
+        };
+
+        assert!(omen.validate().is_err());
+    }
+}
+

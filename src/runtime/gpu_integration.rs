@@ -161,6 +161,7 @@ pub struct CdiHook {
 }
 
 impl CdiHook {
+    #[allow(dead_code)]
     fn new(
         hook_name: impl Into<String>,
         path: impl Into<String>,
@@ -1666,8 +1667,10 @@ pub struct GpuMetrics {
 mod nvbind {
     use super::*;
 
+    #[allow(dead_code)]
     pub struct GpuManager;
 
+    #[allow(dead_code)]
     impl GpuManager {
         pub async fn new() -> Result<Self> {
             Err(anyhow!("nvbind feature not enabled").into())

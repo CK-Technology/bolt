@@ -18,6 +18,7 @@ pub struct BoltCompositor {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Surface {
     id: u32,
     width: u32,

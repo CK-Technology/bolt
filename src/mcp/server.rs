@@ -209,7 +209,8 @@ impl BoltMcpServer {
                 "Registering shell tool (allowed commands: {:?})",
                 self.config.tools.shell.allowed_commands
             );
-            let shell_tool = ShellTool::new(
+            let shell_tool = ShellTool::with_allowlist(
+                "bolt-host".to_string(),  // MCP server runs on host, not in a container
                 self.config.tools.shell.allowed_commands.clone()
             );
             let adapter = BoltToolAdapter::new(shell_tool);

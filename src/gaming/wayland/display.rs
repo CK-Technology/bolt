@@ -17,6 +17,7 @@ pub struct DisplayManager {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct WaylandClient {
     id: u32,
     pid: Option<u32>,

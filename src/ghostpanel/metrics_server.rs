@@ -79,6 +79,7 @@ pub enum PerformanceMode {
 }
 
 /// Metrics server state
+#[allow(dead_code)]
 struct ServerState {
     /// Active container metrics
     container_metrics: Arc<RwLock<HashMap<String, MetricsMessage>>>,
@@ -87,6 +88,7 @@ struct ServerState {
 }
 
 /// GhostPanel Metrics Server
+#[allow(dead_code)]
 pub struct GhostPanelMetricsServer {
     state: Arc<ServerState>,
     update_interval: Duration,
@@ -155,6 +157,7 @@ impl GhostPanelMetricsServer {
     }
 
     /// Start background metrics collector
+    #[allow(dead_code)]
     async fn start_metrics_collector(&self) {
         let container_metrics = self.state.container_metrics.clone();
         let metrics_tx = self.state.metrics_tx.clone();
@@ -183,6 +186,7 @@ impl GhostPanelMetricsServer {
     }
 
     /// Update metrics for a container (stub - would query real GPU)
+    #[allow(dead_code)]
     async fn update_container_metrics(
         _container_id: &str,
         current: &MetricsMessage,

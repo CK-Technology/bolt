@@ -328,7 +328,7 @@ impl OmenRouter {
         })
     }
 
-    /// Execute completion with selected provider
+    /// Execute completion with selected provider via Omen gateway
     async fn execute_completion(
         &self,
         decision: &RoutingDecision,
@@ -339,19 +339,98 @@ impl OmenRouter {
             decision.provider, decision.model, request.max_tokens
         );
 
-        // TODO: Integrate with actual Omen client
-        // For now, return a placeholder response
         let start = std::time::Instant::now();
 
-        // Simulate provider call (will be replaced with real Omen integration)
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        // Build Omen API request (OpenAI-compatible format)
+        let omen_url = format!("{}/v1/chat/completions",
+            self.config.provider_config.get("omen_base_url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("http://localhost:8080")
+        );
+
+        let client = reqwest::Client::new();
+
+        #[derive(serde::Serialize)]
+        struct OmenRequest {
+            model: String,
+            messages: Vec<OmenMessage>,
+            max_tokens: usize,
+        }
+
+        #[derive(serde::Serialize)]
+        struct OmenMessage {
+            role: String,
+            content: String,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct OmenResponse {
+            choices: Vec<OmenChoice>,
+            usage: Option<OmenUsage>,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct OmenChoice {
+            message: OmenResponseMessage,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct OmenResponseMessage {
+            content: String,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct OmenUsage {
+            total_tokens: usize,
+        }
+
+        let omen_req = OmenRequest {
+            model: decision.model.clone(),
+            messages: vec![OmenMessage {
+                role: "user".to_string(),
+                content: request.prompt.clone(),
+            }],
+            max_tokens: request.max_tokens,
+        };
+
+        // Call Omen gateway
+        let response = client
+            .post(&omen_url)
+            .header("Content-Type", "application/json")
+            .json(&omen_req)
+            .send()
+            .await
+            .context("Failed to send request to Omen gateway")?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(anyhow!(
+                "Omen gateway returned error {}: {}",
+                status,
+                error_text
+            ));
+        }
+
+        let omen_response: OmenResponse = response
+            .json()
+            .await
+            .context("Failed to parse Omen response")?;
 
         let latency_ms = start.elapsed().as_millis() as u64;
-        let tokens_used = request.max_tokens;
+        let tokens_used = omen_response.usage
+            .map(|u| u.total_tokens)
+            .unwrap_or(request.max_tokens);
+
         let cost_usd = self.calculate_cost(&decision.provider, &decision.model, tokens_used);
 
+        let text = omen_response.choices
+            .first()
+            .map(|c| c.message.content.clone())
+            .unwrap_or_else(|| "No response from AI".to_string());
+
         Ok(CompletionResponse {
-            text: format!("Response from {} ({})", decision.provider, decision.model),
+            text,
             provider_used: decision.provider.clone(),
             model_used: decision.model.clone(),
             cost_usd,
