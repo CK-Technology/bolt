@@ -28,7 +28,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Cache cargo registry
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -73,7 +73,7 @@ jobs:
             libxcb1-dev
 
       - name: Cache cargo registry
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -103,7 +103,7 @@ jobs:
   # Integration tests on self-hosted runner
   integration-tests:
     name: Integration Tests
-    runs-on: [self-hosted, linux, x64, nv-prometheus]
+    runs-on: self-hosted
     needs: [lint-and-format, unit-tests]
     steps:
       - uses: actions/checkout@v4
@@ -139,10 +139,10 @@ jobs:
           rm -rf /tmp/bolt-test
           docker system prune -f || true
 
-  # GPU tests on self-hosted runner with RTX 3070
+  # GPU tests on self-hosted runner with RTX 2060
   gpu-tests:
     name: GPU and Gaming Tests
-    runs-on: [self-hosted, linux, x64, nv-prometheus, gpu]
+    runs-on: self-hosted
     needs: [lint-and-format, unit-tests]
     if: github.event_name == 'push' || github.event_name == 'schedule'
     steps:
@@ -178,7 +178,7 @@ jobs:
   # Performance benchmarks on self-hosted runner
   benchmarks:
     name: Performance Benchmarks
-    runs-on: [self-hosted, linux, x64, nv-prometheus]
+    runs-on: self-hosted
     needs: [integration-tests]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
@@ -236,7 +236,7 @@ jobs:
     name: Build Release Artifacts
     needs: [integration-tests, gpu-tests, security-audit]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, linux, x64, nv-prometheus]
+    runs-on: self-hosted
     strategy:
       matrix:
         target:
@@ -285,7 +285,7 @@ jobs:
     name: Build Container Image
     needs: [build-release]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, linux, x64, nv-prometheus]
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 

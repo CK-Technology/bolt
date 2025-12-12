@@ -23,7 +23,7 @@ jobs:
   # Extensive testing with nightly Rust
   nightly-test:
     name: Nightly Rust Tests
-    runs-on: [self-hosted, linux, x64, nv-prometheus]
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
@@ -54,7 +54,7 @@ jobs:
   # Gaming and GPU stress tests
   gaming-stress-test:
     name: Gaming Stress Tests
-    runs-on: [self-hosted, linux, x64, nv-prometheus, gpu]
+    runs-on: self-hosted
     if: github.event.inputs.test_gaming != 'false'
     steps:
       - uses: actions/checkout@v4
@@ -97,7 +97,7 @@ jobs:
   # QUIC networking performance tests
   quic-performance:
     name: QUIC Performance Tests
-    runs-on: [self-hosted, linux, x64, nv-prometheus]
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
@@ -134,7 +134,7 @@ jobs:
   # Distributed orchestration tests
   distributed-tests:
     name: Distributed Orchestration Tests
-    runs-on: [self-hosted, linux, x64, nv-prometheus]
+    runs-on: self-hosted
     if: github.event.inputs.test_distributed != 'false'
     steps:
       - uses: actions/checkout@v4
@@ -178,7 +178,7 @@ jobs:
   # Memory and resource leak detection
   memory-leak-test:
     name: Memory Leak Detection
-    runs-on: [self-hosted, linux, x64, nv-prometheus]
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
@@ -215,7 +215,7 @@ jobs:
 
       - name: Upload valgrind report
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: valgrind-report
           path: valgrind-report.txt
@@ -223,7 +223,7 @@ jobs:
   # Fuzzing tests
   fuzz-testing:
     name: Fuzz Testing
-    runs-on: [self-hosted, linux, x64, nv-prometheus]
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
@@ -242,7 +242,7 @@ jobs:
 
       - name: Upload crash artifacts
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: fuzz-crashes
           path: fuzz/artifacts
@@ -250,7 +250,7 @@ jobs:
   # Long-running stability test
   stability-test:
     name: 24-Hour Stability Test
-    runs-on: [self-hosted, linux, x64, nv-prometheus]
+    runs-on: self-hosted
     if: github.event_name == 'schedule'
     steps:
       - uses: actions/checkout@v4
@@ -305,12 +305,12 @@ jobs:
     name: Generate Nightly Report
     needs: [nightly-test, gaming-stress-test, quic-performance, distributed-tests, memory-leak-test]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
       - name: Download artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
 
       - name: Generate report
         run: |
@@ -328,7 +328,7 @@ jobs:
           done
 
       - name: Upload report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: nightly-report
           path: nightly-report.md
