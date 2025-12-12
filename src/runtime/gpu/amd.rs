@@ -173,7 +173,10 @@ impl AmdManager {
     }
 
     async fn setup_dri_access(&self, container_id: &str) -> Result<()> {
-        info!("📱 Setting up DRI device access for container {}", container_id);
+        info!(
+            "📱 Setting up DRI device access for container {}",
+            container_id
+        );
 
         // Check for DRI devices
         let dri_path = Path::new("/dev/dri");
@@ -221,7 +224,10 @@ impl AmdManager {
     }
 
     async fn setup_vulkan_access(&self, container_id: &str) -> Result<()> {
-        info!("🎮 Setting up Vulkan access for AMD in container {}", container_id);
+        info!(
+            "🎮 Setting up Vulkan access for AMD in container {}",
+            container_id
+        );
 
         // Check for AMD Vulkan driver
         let vulkan_paths = [
@@ -272,7 +278,10 @@ impl AmdManager {
 
         // Set OpenCL environment for AMD using container-scoped environment
         // Instead of global env vars, we'll pass this through container runtime config
-        info!("  ✓ OpenCL environment configured for container {}", container_id);
+        info!(
+            "  ✓ OpenCL environment configured for container {}",
+            container_id
+        );
         info!("    OPENCL_VENDOR_PATH=/etc/OpenCL/vendors");
 
         // Note: Actual environment should be set via OCI spec container.process.env

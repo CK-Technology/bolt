@@ -1,6 +1,6 @@
 use crate::Result;
 use crate::config::BoltConfig;
-use crate::{ServiceInfo, SurgeStatus, NetworkInfo};
+use crate::{NetworkInfo, ServiceInfo, SurgeStatus};
 use std::process::Command;
 
 // API-only functions for library usage
@@ -51,12 +51,10 @@ fn list_bolt_networks() -> Vec<NetworkInfo> {
         .output();
 
     let network_names = match output {
-        Ok(output) if output.status.success() => {
-            String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .map(|s| s.to_string())
-                .collect()
-        }
+        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(|s| s.to_string())
+            .collect(),
         _ => vec!["br-bolt0".to_string()], // Default network
     };
 

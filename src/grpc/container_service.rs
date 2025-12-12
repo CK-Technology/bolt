@@ -56,14 +56,7 @@ impl container_service_server::ContainerService for ContainerServiceImpl {
 
         // Run container
         match runtime
-            .run_container(
-                &req.image,
-                name,
-                &ports,
-                &env_vars,
-                &volumes,
-                req.detach,
-            )
+            .run_container(&req.image, name, &ports, &env_vars, &volumes, req.detach)
             .await
         {
             Ok(container_id) => {
@@ -88,10 +81,7 @@ impl container_service_server::ContainerService for ContainerServiceImpl {
     }
 
     /// Stop a running container
-    async fn stop(
-        &self,
-        request: Request<StopRequest>,
-    ) -> Result<Response<StopResponse>, Status> {
+    async fn stop(&self, request: Request<StopRequest>) -> Result<Response<StopResponse>, Status> {
         let req = request.into_inner();
         info!("🛑 gRPC Stop request: container_id={}", req.container_id);
 
@@ -133,7 +123,9 @@ impl container_service_server::ContainerService for ContainerServiceImpl {
                         name: c.name.clone().unwrap_or_default(),
                         image: c.image.clone(),
                         status: format!("{:?}", c.status),
-                        created_at: c.created.duration_since(std::time::UNIX_EPOCH)
+                        created_at: c
+                            .created
+                            .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_secs() as i64,
                         ports: c.ports.clone(),
@@ -149,7 +141,10 @@ impl container_service_server::ContainerService for ContainerServiceImpl {
             }
             Err(e) => {
                 error!("❌ Failed to list containers: {}", e);
-                Err(Status::internal(format!("Failed to list containers: {}", e)))
+                Err(Status::internal(format!(
+                    "Failed to list containers: {}",
+                    e
+                )))
             }
         }
     }
@@ -162,7 +157,10 @@ impl container_service_server::ContainerService for ContainerServiceImpl {
         request: Request<LogsRequest>,
     ) -> Result<Response<Self::LogsStream>, Status> {
         let req = request.into_inner();
-        info!("📜 gRPC Logs request: container_id={}, follow={}", req.container_id, req.follow);
+        info!(
+            "📜 gRPC Logs request: container_id={}, follow={}",
+            req.container_id, req.follow
+        );
 
         // Create channel for streaming logs
         let (tx, rx) = tokio::sync::mpsc::channel(100);
@@ -207,31 +205,37 @@ impl container_service_server::ContainerService for ContainerServiceImpl {
             // Read first message to get ExecStart
             if let Some(Ok(req)) = stream.next().await {
                 if let Some(exec_request::Request::Start(start)) = req.request {
-                    debug!("🚀 Exec started: container_id={}, command={:?}",
-                           start.container_id, start.command);
+                    debug!(
+                        "🚀 Exec started: container_id={}, command={:?}",
+                        start.container_id, start.command
+                    );
 
                     // Send started response
-                    let _ = tx.send(Ok(ExecOutput {
-                        output: Some(exec_output::Output::Started(ExecStarted {
-                            exec_id: format!("exec-{}", uuid::Uuid::new_v4()),
-                        })),
-                    })).await;
+                    let _ = tx
+                        .send(Ok(ExecOutput {
+                            output: Some(exec_output::Output::Started(ExecStarted {
+                                exec_id: format!("exec-{}", uuid::Uuid::new_v4()),
+                            })),
+                        }))
+                        .await;
 
                     // Simulate command execution
                     let output = format!("Executed: {}", start.command.join(" "));
-                    let _ = tx.send(Ok(ExecOutput {
-                        output: Some(exec_output::Output::Data(ExecData {
-                            stream: "stdout".to_string(),
-                            data: output.into_bytes(),
-                        })),
-                    })).await;
+                    let _ = tx
+                        .send(Ok(ExecOutput {
+                            output: Some(exec_output::Output::Data(ExecData {
+                                stream: "stdout".to_string(),
+                                data: output.into_bytes(),
+                            })),
+                        }))
+                        .await;
 
                     // Send exit code
-                    let _ = tx.send(Ok(ExecOutput {
-                        output: Some(exec_output::Output::Exit(ExecExit {
-                            exit_code: 0,
-                        })),
-                    })).await;
+                    let _ = tx
+                        .send(Ok(ExecOutput {
+                            output: Some(exec_output::Output::Exit(ExecExit { exit_code: 0 })),
+                        }))
+                        .await;
                 }
             }
         });
@@ -248,8 +252,10 @@ impl container_service_server::ContainerService for ContainerServiceImpl {
         request: Request<StatsRequest>,
     ) -> Result<Response<Self::StatsStream>, Status> {
         let req = request.into_inner();
-        info!("📊 gRPC Stats request: container_id={}, stream={}",
-              req.container_id, req.stream);
+        info!(
+            "📊 gRPC Stats request: container_id={}, stream={}",
+            req.container_id, req.stream
+        );
 
         let (tx, rx) = tokio::sync::mpsc::channel(100);
 
@@ -275,9 +281,9 @@ impl container_service_server::ContainerService for ContainerServiceImpl {
                         online_cpus: num_cpus::get() as u32,
                     }),
                     memory: Some(MemoryStats {
-                        usage_bytes: 256 * 1024 * 1024,  // 256 MB
+                        usage_bytes: 256 * 1024 * 1024, // 256 MB
                         max_usage_bytes: 512 * 1024 * 1024,
-                        limit_bytes: 1024 * 1024 * 1024,  // 1 GB
+                        limit_bytes: 1024 * 1024 * 1024, // 1 GB
                         usage_percent: 25.0,
                         cache_bytes: 64 * 1024 * 1024,
                         rss_bytes: 192 * 1024 * 1024,
@@ -292,7 +298,7 @@ impl container_service_server::ContainerService for ContainerServiceImpl {
                         tx_errors: 0,
                         tx_dropped: 0,
                     }),
-                    gpu: None,  // Will be populated if GPU is available
+                    gpu: None, // Will be populated if GPU is available
                     disk: Some(DiskStats {
                         read_bytes: 10_000_000,
                         write_bytes: 5_000_000,
@@ -336,22 +342,24 @@ impl container_service_server::ContainerService for ContainerServiceImpl {
                     // Simulate container output
                     for i in 0..5 {
                         let output = format!("Container output line {}\n", i);
-                        let _ = tx.send(Ok(AttachOutput {
-                            output: Some(attach_output::Output::Data(AttachData {
-                                stream: "stdout".to_string(),
-                                data: output.into_bytes(),
-                            })),
-                        })).await;
+                        let _ = tx
+                            .send(Ok(AttachOutput {
+                                output: Some(attach_output::Output::Data(AttachData {
+                                    stream: "stdout".to_string(),
+                                    data: output.into_bytes(),
+                                })),
+                            }))
+                            .await;
 
                         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
                     }
 
                     // Send exit
-                    let _ = tx.send(Ok(AttachOutput {
-                        output: Some(attach_output::Output::Exit(AttachExit {
-                            exit_code: 0,
-                        })),
-                    })).await;
+                    let _ = tx
+                        .send(Ok(AttachOutput {
+                            output: Some(attach_output::Output::Exit(AttachExit { exit_code: 0 })),
+                        }))
+                        .await;
                 }
             }
         });
@@ -366,8 +374,10 @@ impl container_service_server::ContainerService for ContainerServiceImpl {
         request: Request<RemoveRequest>,
     ) -> Result<Response<RemoveResponse>, Status> {
         let req = request.into_inner();
-        info!("🗑️ gRPC Remove request: container_id={}, force={}",
-              req.container_id, req.force);
+        info!(
+            "🗑️ gRPC Remove request: container_id={}, force={}",
+            req.container_id, req.force
+        );
 
         let runtime = self.runtime.read().await;
 

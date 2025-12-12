@@ -2,9 +2,9 @@
 //!
 //! Exposes GPU metrics for gaming containers via NVIDIA Management Library (NVML)
 
-use crate::mcp::{tools::McpTool, Result};
+use crate::mcp::{Result, tools::McpTool};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// GPU statistics tool
 ///
@@ -30,7 +30,10 @@ impl GpuStatsTool {
                     Some(n)
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to initialize NVML: {}. GPU stats will be unavailable.", e);
+                    tracing::warn!(
+                        "Failed to initialize NVML: {}. GPU stats will be unavailable.",
+                        e
+                    );
                     None
                 }
             };
@@ -48,9 +51,10 @@ impl GpuStatsTool {
     async fn get_nvidia_stats(&self, device_id: u32) -> Result<GpuStats> {
         use crate::mcp::McpError;
 
-        let nvml = self.nvml.as_ref().ok_or_else(|| {
-            McpError::ToolExecution("NVML not initialized".to_string())
-        })?;
+        let nvml = self
+            .nvml
+            .as_ref()
+            .ok_or_else(|| McpError::ToolExecution("NVML not initialized".to_string()))?;
 
         let device = nvml.device_by_index(device_id).map_err(|e| {
             McpError::ToolExecution(format!("Failed to get GPU device {}: {}", device_id, e))
@@ -145,8 +149,7 @@ impl McpTool for GpuStatsTool {
     async fn execute(&self, input: Value) -> Result<Value> {
         use crate::mcp::McpError;
 
-        let args: GpuStatsInput = serde_json::from_value(input)
-            .map_err(|e| McpError::Json(e))?;
+        let args: GpuStatsInput = serde_json::from_value(input).map_err(|e| McpError::Json(e))?;
 
         tracing::info!("Querying GPU stats for device {}", args.device_id);
 
@@ -159,7 +162,7 @@ impl McpTool for GpuStatsTool {
         #[cfg(not(feature = "nvidia-support"))]
         {
             Err(McpError::ToolExecution(
-                "GPU stats unavailable: nvidia-support feature not enabled".to_string()
+                "GPU stats unavailable: nvidia-support feature not enabled".to_string(),
             ))
         }
     }

@@ -1,7 +1,7 @@
 //! ZFS Snapshot Support (stub)
 
+use super::{FilesystemType, Snapshot, SnapshotConfig, SnapshotType};
 use anyhow::Result;
-use super::{Snapshot, SnapshotConfig, SnapshotType, FilesystemType};
 use tracing::warn;
 
 pub async fn create_snapshot(
@@ -32,11 +32,17 @@ pub async fn list_snapshots(_config: &SnapshotConfig) -> Result<Vec<Snapshot>> {
 }
 
 pub async fn rollback_snapshot(_config: &SnapshotConfig, snapshot_id: &str) -> Result<()> {
-    warn!("ZFS snapshot rollback is not yet implemented: {}", snapshot_id);
+    warn!(
+        "ZFS snapshot rollback is not yet implemented: {}",
+        snapshot_id
+    );
     Ok(())
 }
 
 pub async fn delete_snapshot(_config: &SnapshotConfig, snapshot_id: &str) -> Result<()> {
-    warn!("ZFS snapshot deletion is not yet implemented: {}", snapshot_id);
+    warn!(
+        "ZFS snapshot deletion is not yet implemented: {}",
+        snapshot_id
+    );
     Ok(())
 }

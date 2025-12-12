@@ -677,8 +677,11 @@ mod uuid {
         pub fn new_v4() -> Self {
             Uuid
         }
-        pub fn to_string(&self) -> String {
-            "12345678-1234-1234-1234-123456789abc".to_string()
+    }
+
+    impl std::fmt::Display for Uuid {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "12345678-1234-1234-1234-123456789abc")
         }
     }
 }

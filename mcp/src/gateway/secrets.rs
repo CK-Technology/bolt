@@ -119,7 +119,11 @@ impl SecretStore {
             // Parse KEY=VALUE
             if let Some((key, value)) = line.split_once('=') {
                 let key = key.trim().to_string();
-                let value = value.trim().trim_matches('"').trim_matches('\'').to_string();
+                let value = value
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .to_string();
                 self.secrets.insert(key, value);
             }
         }
@@ -145,7 +149,10 @@ impl SecretStore {
 
     /// Get all secret keys
     pub fn list_secrets(&self) -> Vec<String> {
-        self.secrets.iter().map(|entry| entry.key().clone()).collect()
+        self.secrets
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect()
     }
 
     /// Get secret count
@@ -168,8 +175,8 @@ impl SecretStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::NamedTempFile;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[tokio::test]
     async fn test_load_env_file() {
@@ -183,8 +190,14 @@ mod tests {
         let store = SecretStore::new(&[]).await.unwrap();
         store.load_env_file(temp_file.path()).await.unwrap();
 
-        assert_eq!(store.get_secret("API_KEY"), Some("test-key-123".to_string()));
-        assert_eq!(store.get_secret("SECRET_TOKEN"), Some("secret-value".to_string()));
+        assert_eq!(
+            store.get_secret("API_KEY"),
+            Some("test-key-123".to_string())
+        );
+        assert_eq!(
+            store.get_secret("SECRET_TOKEN"),
+            Some("secret-value".to_string())
+        );
         assert_eq!(store.get_secret("QUOTED"), Some("quoted value".to_string()));
         assert!(store.get_secret("Comment").is_none());
     }

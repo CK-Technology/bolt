@@ -2,9 +2,9 @@
 //!
 //! Provides read/write access to container filesystem with security boundaries
 
-use crate::mcp::{tools::McpTool, McpError, Result};
+use crate::mcp::{McpError, Result, tools::McpTool};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 /// Filesystem access tool
@@ -28,9 +28,7 @@ impl FilesystemTool {
         let abs_path = self.root.join(rel_path);
 
         // Canonicalize to prevent path traversal
-        let canonical = abs_path
-            .canonicalize()
-            .map_err(|e| McpError::Io(e))?;
+        let canonical = abs_path.canonicalize().map_err(|e| McpError::Io(e))?;
 
         // Ensure the path is within the root
         if !canonical.starts_with(&self.root) {

@@ -56,12 +56,13 @@ impl GPUManager {
                         .await?;
 
                     // Also setup open-source driver support if detected
-                    if let Ok(_) = nvidia_manager
+                    if nvidia_manager
                         .setup_open_source_gpu_access(
                             container_id,
                             &[nvidia_config.device.unwrap_or(0)],
                         )
                         .await
+                        .is_ok()
                     {
                         info!("    🌍 Open-source driver support also configured");
                     }
@@ -226,24 +227,20 @@ impl GPUManager {
         // Check DRI device access
         let dri_devices = ["/dev/dri/card0", "/dev/dri/renderD128"];
         for device in &dri_devices {
-            if Path::new(device).exists() {
-                if let Ok(_) = std::fs::File::open(device) {
-                    support.dri_access = true;
-                    debug!("    ✅ Can access: {}", device);
-                    break;
-                }
+            if Path::new(device).exists() && std::fs::File::open(device).is_ok() {
+                support.dri_access = true;
+                debug!("    ✅ Can access: {}", device);
+                break;
             }
         }
 
         // Check NVIDIA device access
         let nvidia_devices = ["/dev/nvidiactl", "/dev/nvidia0"];
         for device in &nvidia_devices {
-            if Path::new(device).exists() {
-                if let Ok(_) = std::fs::File::open(device) {
-                    support.nvidia_access = true;
-                    debug!("    ✅ Can access: {}", device);
-                    break;
-                }
+            if Path::new(device).exists() && std::fs::File::open(device).is_ok() {
+                support.nvidia_access = true;
+                debug!("    ✅ Can access: {}", device);
+                break;
             }
         }
 

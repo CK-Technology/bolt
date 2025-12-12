@@ -1,8 +1,8 @@
 //! Snapshot Retention Policy Management
 
+use super::{RetentionPolicy, Snapshot};
 use anyhow::Result;
-use super::{Snapshot, RetentionPolicy};
-use tracing::{info, debug};
+use tracing::{debug, info};
 
 /// Apply retention policy to snapshots
 pub async fn apply_retention_policy(
@@ -18,7 +18,10 @@ pub async fn apply_retention_policy(
 
     let snapshots_to_delete = calculate_snapshots_to_delete(snapshots, policy);
 
-    info!("✅ Retention policy applied: {} snapshots marked for deletion", snapshots_to_delete.len());
+    info!(
+        "✅ Retention policy applied: {} snapshots marked for deletion",
+        snapshots_to_delete.len()
+    );
     Ok(snapshots_to_delete)
 }
 

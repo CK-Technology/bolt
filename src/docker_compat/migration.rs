@@ -273,7 +273,8 @@ impl MigrationHelper {
         ];
 
         // Search in current directory using all patterns
-        for pattern in &compose_patterns[..4] {  // Skip wildcard patterns for now
+        for pattern in &compose_patterns[..4] {
+            // Skip wildcard patterns for now
             if std::path::Path::new(pattern).exists() {
                 let path = pattern.to_string();
                 if !analysis.compose_files.contains(&path) {

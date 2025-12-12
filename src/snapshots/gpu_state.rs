@@ -139,30 +139,35 @@ impl GpuSnapshotManager {
             })
             .collect();
 
-        let driver_info = nvbind_snapshot.driver_state.as_ref().map(|driver| DriverInfo {
-            driver_version: driver.version.clone(),
-            cuda_version: driver.cuda_version.clone(),
-            driver_type: driver.driver_type.clone(),
-        });
-
-        let performance_settings = nvbind_snapshot
-            .performance_settings
+        let driver_info = nvbind_snapshot
+            .driver_state
             .as_ref()
-            .map(|perf| PerformanceSettings {
-                power_profile: perf.power_profile.clone(),
-                clock_offset_mhz: perf.clock_offset_mhz,
-                memory_offset_mhz: perf.memory_offset_mhz,
-                persistence_mode: perf.persistence_mode,
+            .map(|driver| DriverInfo {
+                driver_version: driver.version.clone(),
+                cuda_version: driver.cuda_version.clone(),
+                driver_type: driver.driver_type.clone(),
             });
 
-        let memory_allocations = nvbind_snapshot
-            .memory_state
-            .as_ref()
-            .map(|mem| MemoryAllocations {
-                total_vram_mb: mem.total_vram_mb,
-                allocated_vram_mb: mem.allocated_vram_mb,
-                free_vram_mb: mem.free_vram_mb,
-            });
+        let performance_settings =
+            nvbind_snapshot
+                .performance_settings
+                .as_ref()
+                .map(|perf| PerformanceSettings {
+                    power_profile: perf.power_profile.clone(),
+                    clock_offset_mhz: perf.clock_offset_mhz,
+                    memory_offset_mhz: perf.memory_offset_mhz,
+                    persistence_mode: perf.persistence_mode,
+                });
+
+        let memory_allocations =
+            nvbind_snapshot
+                .memory_state
+                .as_ref()
+                .map(|mem| MemoryAllocations {
+                    total_vram_mb: mem.total_vram_mb,
+                    allocated_vram_mb: mem.allocated_vram_mb,
+                    free_vram_mb: mem.free_vram_mb,
+                });
 
         info!(
             "✅ Captured GPU state with {} device(s)",
@@ -326,9 +331,11 @@ impl GpuSnapshotManager {
         snapshot_id: &str,
         gpu_state: &GpuSnapshotState,
     ) -> Result<()> {
-        let state_path = self.snapshot_root.join(format!("{}.gpu-state.json", snapshot_id));
-        let json = serde_json::to_string_pretty(gpu_state)
-            .context("Failed to serialize GPU state")?;
+        let state_path = self
+            .snapshot_root
+            .join(format!("{}.gpu-state.json", snapshot_id));
+        let json =
+            serde_json::to_string_pretty(gpu_state).context("Failed to serialize GPU state")?;
 
         tokio::fs::write(&state_path, json)
             .await
@@ -340,7 +347,9 @@ impl GpuSnapshotManager {
 
     /// Load GPU state from disk
     pub async fn load_gpu_state(&self, snapshot_id: &str) -> Result<Option<GpuSnapshotState>> {
-        let state_path = self.snapshot_root.join(format!("{}.gpu-state.json", snapshot_id));
+        let state_path = self
+            .snapshot_root
+            .join(format!("{}.gpu-state.json", snapshot_id));
 
         if !state_path.exists() {
             debug!("No GPU state file found for snapshot: {}", snapshot_id);

@@ -1,6 +1,6 @@
 //! BTRFS snapshot operations
 
-use super::{Snapshot, SnapshotConfig, SnapshotType, FilesystemType};
+use super::{FilesystemType, Snapshot, SnapshotConfig, SnapshotType};
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use tokio::process::Command as AsyncCommand;
@@ -16,7 +16,8 @@ pub async fn create_snapshot(
     let snapshot_path = config.snapshot_path.join(snapshot_id);
 
     // Create snapshot directory if it doesn't exist
-    tokio::fs::create_dir_all(&config.snapshot_path).await
+    tokio::fs::create_dir_all(&config.snapshot_path)
+        .await
         .context("Failed to create snapshot directory")?;
 
     // Create BTRFS snapshot
@@ -27,7 +28,9 @@ pub async fn create_snapshot(
         .arg(&config.root_path)
         .arg(&snapshot_path);
 
-    let output = cmd.output().await
+    let output = cmd
+        .output()
+        .await
         .context("Failed to execute btrfs snapshot command")?;
 
     if !output.status.success() {
@@ -65,7 +68,9 @@ pub async fn list_snapshots(config: &SnapshotConfig) -> Result<Vec<Snapshot>> {
         .arg("-s") // Show snapshots only
         .arg(&config.snapshot_path);
 
-    let output = cmd.output().await
+    let output = cmd
+        .output()
+        .await
         .context("Failed to list BTRFS snapshots")?;
 
     if !output.status.success() {
@@ -111,7 +116,8 @@ pub async fn rollback_snapshot(config: &SnapshotConfig, snapshot_id: &str) -> Re
     let backup_path = config.snapshot_path.join(&backup_id);
 
     let mut backup_cmd = AsyncCommand::new("btrfs");
-    backup_cmd.arg("subvolume")
+    backup_cmd
+        .arg("subvolume")
         .arg("snapshot")
         .arg(&config.root_path)
         .arg(&backup_path);
@@ -119,7 +125,10 @@ pub async fn rollback_snapshot(config: &SnapshotConfig, snapshot_id: &str) -> Re
     let backup_output = backup_cmd.output().await?;
     if !backup_output.status.success() {
         let stderr = String::from_utf8_lossy(&backup_output.stderr);
-        return Err(anyhow::anyhow!("Failed to create backup snapshot: {}", stderr));
+        return Err(anyhow::anyhow!(
+            "Failed to create backup snapshot: {}",
+            stderr
+        ));
     }
 
     info!("✅ Backup snapshot created: {}", backup_id);
@@ -128,7 +137,8 @@ pub async fn rollback_snapshot(config: &SnapshotConfig, snapshot_id: &str) -> Re
     // Note: This is a simplified approach. In practice, you might want to use
     // btrfs send/receive or other mechanisms depending on your setup
     let mut rollback_cmd = AsyncCommand::new("btrfs");
-    rollback_cmd.arg("subvolume")
+    rollback_cmd
+        .arg("subvolume")
         .arg("snapshot")
         .arg(&snapshot_path)
         .arg(format!("{}.new", config.root_path.display()));
@@ -152,11 +162,11 @@ pub async fn delete_snapshot(config: &SnapshotConfig, snapshot_id: &str) -> Resu
     }
 
     let mut cmd = AsyncCommand::new("btrfs");
-    cmd.arg("subvolume")
-        .arg("delete")
-        .arg(&snapshot_path);
+    cmd.arg("subvolume").arg("delete").arg(&snapshot_path);
 
-    let output = cmd.output().await
+    let output = cmd
+        .output()
+        .await
         .context("Failed to delete BTRFS snapshot")?;
 
     if !output.status.success() {
@@ -167,7 +177,8 @@ pub async fn delete_snapshot(config: &SnapshotConfig, snapshot_id: &str) -> Resu
     // Remove metadata
     let metadata_path = get_metadata_path(snapshot_id);
     if metadata_path.exists() {
-        tokio::fs::remove_file(metadata_path).await
+        tokio::fs::remove_file(metadata_path)
+            .await
             .context("Failed to remove snapshot metadata")?;
     }
 
@@ -177,10 +188,7 @@ pub async fn delete_snapshot(config: &SnapshotConfig, snapshot_id: &str) -> Resu
 /// Get snapshot size in bytes
 async fn get_snapshot_size(snapshot_path: &PathBuf) -> Result<u64> {
     let mut cmd = AsyncCommand::new("btrfs");
-    cmd.arg("filesystem")
-        .arg("du")
-        .arg("-s")
-        .arg(snapshot_path);
+    cmd.arg("filesystem").arg("du").arg("-s").arg(snapshot_path);
 
     let output = cmd.output().await?;
     if !output.status.success() {
@@ -190,7 +198,8 @@ async fn get_snapshot_size(snapshot_path: &PathBuf) -> Result<u64> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     if let Some(line) = stdout.lines().next() {
         if let Some(size_str) = line.split_whitespace().next() {
-            return size_str.parse::<u64>()
+            return size_str
+                .parse::<u64>()
                 .context("Failed to parse snapshot size");
         }
     }
@@ -206,8 +215,11 @@ async fn parse_btrfs_snapshot_line(line: &str, config: &SnapshotConfig) -> Optio
         return None;
     }
 
-    let snapshot_name = parts.last()?.strip_prefix("@snapshots/")
-        .or_else(|| parts.last()?.strip_prefix(&format!("{}/", config.snapshot_path.display())))?;
+    let snapshot_name = parts.last()?.strip_prefix("@snapshots/").or_else(|| {
+        parts
+            .last()?
+            .strip_prefix(&format!("{}/", config.snapshot_path.display()))
+    })?;
 
     if !snapshot_name.starts_with("bolt-") {
         return None;
@@ -238,13 +250,15 @@ async fn store_snapshot_metadata(snapshot: &Snapshot) -> Result<()> {
     let metadata_path = get_metadata_path(&snapshot.id);
     let metadata_dir = metadata_path.parent().unwrap();
 
-    tokio::fs::create_dir_all(metadata_dir).await
+    tokio::fs::create_dir_all(metadata_dir)
+        .await
         .context("Failed to create metadata directory")?;
 
-    let metadata_json = serde_json::to_string_pretty(snapshot)
-        .context("Failed to serialize snapshot metadata")?;
+    let metadata_json =
+        serde_json::to_string_pretty(snapshot).context("Failed to serialize snapshot metadata")?;
 
-    tokio::fs::write(metadata_path, metadata_json).await
+    tokio::fs::write(metadata_path, metadata_json)
+        .await
         .context("Failed to write snapshot metadata")?;
 
     Ok(())
@@ -253,11 +267,12 @@ async fn store_snapshot_metadata(snapshot: &Snapshot) -> Result<()> {
 /// Load snapshot metadata
 async fn load_snapshot_metadata(snapshot_id: &str) -> Result<Snapshot> {
     let metadata_path = get_metadata_path(snapshot_id);
-    let metadata_json = tokio::fs::read_to_string(metadata_path).await
+    let metadata_json = tokio::fs::read_to_string(metadata_path)
+        .await
         .context("Failed to read snapshot metadata")?;
 
-    let snapshot: Snapshot = serde_json::from_str(&metadata_json)
-        .context("Failed to parse snapshot metadata")?;
+    let snapshot: Snapshot =
+        serde_json::from_str(&metadata_json).context("Failed to parse snapshot metadata")?;
 
     Ok(snapshot)
 }

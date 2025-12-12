@@ -1,11 +1,11 @@
 //! Container log streaming
 
-use clap::Parser;
 use crate::Result;
 use anyhow::anyhow;
-use tracing::{debug, info};
-use tokio::io::{AsyncBufReadExt, BufReader};
 use chrono::Utc;
+use clap::Parser;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tracing::{debug, info};
 
 #[derive(Parser)]
 pub struct LogsCommand {
@@ -67,11 +67,11 @@ impl LogsCommand {
 
         cmd.arg(log_path);
 
-        let mut child = cmd
-            .stdout(std::process::Stdio::piped())
-            .spawn()?;
+        let mut child = cmd.stdout(std::process::Stdio::piped()).spawn()?;
 
-        let stdout = child.stdout.take()
+        let stdout = child
+            .stdout
+            .take()
             .ok_or_else(|| anyhow!("Failed to capture stdout"))?;
 
         let reader = BufReader::new(stdout);
@@ -116,7 +116,10 @@ impl LogsCommand {
         } else if self.details {
             // Parse log line for structured data
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(line) {
-                println!("{}", serde_json::to_string_pretty(&parsed).unwrap_or(line.to_string()));
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&parsed).unwrap_or(line.to_string())
+                );
             } else {
                 println!("{}", line);
             }

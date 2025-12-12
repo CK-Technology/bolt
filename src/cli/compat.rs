@@ -96,9 +96,12 @@ pub async fn handle_compat_command(args: CompatArgs, runtime: BoltRuntime) -> Re
     match args.command {
         CompatCommands::Docker { args } => handle_docker_command(args, runtime).await,
         CompatCommands::Compose { command } => handle_compose_command(command).await,
-        CompatCommands::ApiServer { port, bind, socket, docker_compat } => {
-            handle_api_server(port, bind, socket, docker_compat, runtime).await
-        }
+        CompatCommands::ApiServer {
+            port,
+            bind,
+            socket,
+            docker_compat,
+        } => handle_api_server(port, bind, socket, docker_compat, runtime).await,
         CompatCommands::Migrate { compose_file } => handle_migration_guide(compose_file).await,
         CompatCommands::Grafana { command } => handle_grafana_command(command).await,
     }
@@ -195,7 +198,13 @@ async fn handle_compose_command(command: ComposeCommands) -> Result<()> {
     Ok(())
 }
 
-async fn handle_api_server(port: u16, bind: String, socket: Option<String>, docker_compat: bool, runtime: BoltRuntime) -> Result<()> {
+async fn handle_api_server(
+    port: u16,
+    bind: String,
+    socket: Option<String>,
+    docker_compat: bool,
+    runtime: BoltRuntime,
+) -> Result<()> {
     use bolt::docker_compat::api_server::DockerAPIServer;
     use std::sync::Arc;
 
@@ -256,7 +265,10 @@ fn create_docker_symlink(bolt_socket: &str) -> Result<()> {
     // Create symlink
     symlink(bolt_socket, docker_sock)?;
 
-    println!("✅ Created symlink: /var/run/docker.sock -> {}", bolt_socket);
+    println!(
+        "✅ Created symlink: /var/run/docker.sock -> {}",
+        bolt_socket
+    );
     println!("   Docker CLI commands now work natively!");
 
     Ok(())
@@ -361,7 +373,8 @@ async fn handle_grafana_command(command: GrafanaCommands) -> Result<()> {
             println!();
 
             // Determine grafana provisioning directory
-            let grafana_base = grafana_dir.unwrap_or_else(|| PathBuf::from("/etc/grafana/provisioning"));
+            let grafana_base =
+                grafana_dir.unwrap_or_else(|| PathBuf::from("/etc/grafana/provisioning"));
             let datasources_dir = grafana_base.join("datasources");
             let dashboards_dir = grafana_base.join("dashboards");
 
@@ -465,10 +478,14 @@ providers:
             println!();
             println!("## Manual Setup");
             println!("1. Copy datasource config:");
-            println!("   sudo cp grafana/datasource.yaml /etc/grafana/provisioning/datasources/bolt.yaml");
+            println!(
+                "   sudo cp grafana/datasource.yaml /etc/grafana/provisioning/datasources/bolt.yaml"
+            );
             println!();
             println!("2. Copy dashboard config:");
-            println!("   sudo cp grafana/bolt-dashboard.json /etc/grafana/provisioning/dashboards/");
+            println!(
+                "   sudo cp grafana/bolt-dashboard.json /etc/grafana/provisioning/dashboards/"
+            );
             println!();
             println!("3. Restart Grafana:");
             println!("   sudo systemctl restart grafana-server");

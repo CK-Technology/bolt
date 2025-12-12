@@ -41,8 +41,8 @@ impl UserConfig {
     }
 
     pub fn config_path() -> Result<PathBuf> {
-        let config_dir = dirs::config_dir()
-            .ok_or_else(|| anyhow::anyhow!("Failed to get config directory"))?;
+        let config_dir =
+            dirs::config_dir().ok_or_else(|| anyhow::anyhow!("Failed to get config directory"))?;
 
         Ok(config_dir.join("bolt").join("user.toml"))
     }

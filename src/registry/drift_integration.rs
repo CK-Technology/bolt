@@ -429,7 +429,9 @@ impl DriftRegistryClient {
         let (repository, reference) = Self::parse_reference(image)?;
 
         // For Docker Hub, get bearer token first
-        let token = if self.endpoint.contains("docker.io") || self.endpoint.contains("registry-1.docker.io") {
+        let token = if self.endpoint.contains("docker.io")
+            || self.endpoint.contains("registry-1.docker.io")
+        {
             Some(self.get_docker_hub_token(&repository).await?)
         } else {
             None
@@ -543,8 +545,9 @@ impl DriftRegistryClient {
                 .await?
         } else {
             // Try to parse as regular manifest
-            serde_json::from_slice::<PackageManifest>(&bytes)
-                .context("Failed to deserialize manifest payload (not a manifest list or valid manifest)")?
+            serde_json::from_slice::<PackageManifest>(&bytes).context(
+                "Failed to deserialize manifest payload (not a manifest list or valid manifest)",
+            )?
         };
 
         {
@@ -581,7 +584,9 @@ impl DriftRegistryClient {
         }
 
         // Get Docker Hub token if needed
-        let token = if self.endpoint.contains("docker.io") || self.endpoint.contains("registry-1.docker.io") {
+        let token = if self.endpoint.contains("docker.io")
+            || self.endpoint.contains("registry-1.docker.io")
+        {
             Some(self.get_docker_hub_token(repository).await?)
         } else {
             None
@@ -904,7 +909,7 @@ impl DriftRegistryClient {
         package_ref: &str,
         repository: &str,
         manifest: &PackageManifest,
-        object_store: &(dyn ObjectStore),
+        object_store: &dyn ObjectStore,
     ) -> Result<String> {
         debug!("🪣 Using object store optimized pull");
 
@@ -1228,7 +1233,10 @@ impl DriftRegistryClient {
         let target_os = std::env::consts::OS;
         let target_arch = std::env::consts::ARCH;
 
-        debug!("Selecting manifest for platform: {}/{}", target_os, target_arch);
+        debug!(
+            "Selecting manifest for platform: {}/{}",
+            target_os, target_arch
+        );
 
         // Find matching platform
         let selected = manifest_list
@@ -1236,8 +1244,8 @@ impl DriftRegistryClient {
             .iter()
             .find(|m| {
                 m.platform.os == target_os
-                    && (m.platform.architecture == target_arch ||
-                        (target_arch == "x86_64" && m.platform.architecture == "amd64"))
+                    && (m.platform.architecture == target_arch
+                        || (target_arch == "x86_64" && m.platform.architecture == "amd64"))
             })
             .ok_or_else(|| {
                 anyhow::anyhow!(
@@ -1247,7 +1255,10 @@ impl DriftRegistryClient {
                 )
             })?;
 
-        info!("Selected manifest digest: {} for {}/{}", selected.digest, target_os, target_arch);
+        info!(
+            "Selected manifest digest: {} for {}/{}",
+            selected.digest, target_os, target_arch
+        );
 
         // Fetch the specific platform manifest by digest
         let url = format!(

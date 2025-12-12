@@ -79,7 +79,7 @@ pub async fn up_with_native_runtime(
                 }
 
                 // Pull image if it doesn't exist locally
-                if let Err(_) = runtime.pull_image(image).await {
+                if runtime.pull_image(image).await.is_err() {
                     warn!("Could not pull image {}, trying with local image", image);
                 }
 
@@ -302,7 +302,7 @@ pub async fn up(
                 }
 
                 // Pull image if it doesn't exist locally
-                if let Err(_) = runtime::pull_image(image).await {
+                if runtime::pull_image(image).await.is_err() {
                     warn!("Could not pull image {}, trying with local image", image);
                 }
 

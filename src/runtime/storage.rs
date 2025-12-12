@@ -1106,7 +1106,10 @@ impl StorageManager {
 
         // Use base image metadata if available for parent reference
         if let Some(ref base_metadata) = current_image_metadata {
-            debug!("Building on base image: {} ({})", base_metadata.name, base_metadata.digest);
+            debug!(
+                "Building on base image: {} ({})",
+                base_metadata.name, base_metadata.digest
+            );
         }
 
         let metadata = ImageMetadata {
@@ -1907,6 +1910,14 @@ impl StorageManager {
     }
 }
 
+fn normalize_reference(image: &str) -> String {
+    if image.contains(':') {
+        image.to_string()
+    } else {
+        format!("{}:latest", image)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1917,10 +1928,12 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use tempfile::tempdir;
 
+    type DataStore = Arc<Mutex<HashMap<(String, String), Vec<u8>>>>;
+
     #[derive(Clone, Default)]
     struct TestObjectStore {
-        manifests: Arc<Mutex<HashMap<(String, String), Vec<u8>>>>,
-        configs: Arc<Mutex<HashMap<(String, String), Vec<u8>>>>,
+        manifests: DataStore,
+        configs: DataStore,
     }
 
     #[async_trait]
@@ -2146,13 +2159,5 @@ mod tests {
         );
 
         Ok(())
-    }
-}
-
-fn normalize_reference(image: &str) -> String {
-    if image.contains(':') {
-        image.to_string()
-    } else {
-        format!("{}:latest", image)
     }
 }

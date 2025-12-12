@@ -517,19 +517,17 @@ impl FramePacingManager {
 
         let current_mode = vsync_controller.current_mode.write().await;
 
-        match &*current_mode {
-            VSyncMode::Adaptive => {
-                // Switch VSync on/off based on performance
-                if current_fps > vsync_controller.adaptive_threshold_fps {
-                    // High FPS, enable VSync to prevent tearing
-                    debug!("Adaptive VSync: Enabling (FPS: {:.1})", current_fps);
-                } else {
-                    // Low FPS, disable VSync to reduce stuttering
-                    debug!("Adaptive VSync: Disabling (FPS: {:.1})", current_fps);
-                }
+        if let VSyncMode::Adaptive = &*current_mode {
+            // Switch VSync on/off based on performance
+            if current_fps > vsync_controller.adaptive_threshold_fps {
+                // High FPS, enable VSync to prevent tearing
+                debug!("Adaptive VSync: Enabling (FPS: {:.1})", current_fps);
+            } else {
+                // Low FPS, disable VSync to reduce stuttering
+                debug!("Adaptive VSync: Disabling (FPS: {:.1})", current_fps);
             }
-            _ => {} // Other modes are static
         }
+        // Other modes are static
 
         Ok(())
     }

@@ -7,24 +7,24 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 use tokio::time;
 use tracing::{debug, info, warn};
 
 #[cfg(feature = "websocket")]
 use {
     axum::{
+        Json, Router,
         extract::{
-            ws::{Message, WebSocket, WebSocketUpgrade},
             Path as AxumPath, State,
+            ws::{Message, WebSocket, WebSocketUpgrade},
         },
         response::IntoResponse,
         routing::{get, post},
-        Json, Router,
     },
+    futures_util::StreamExt,
     tower_http::cors::{Any, CorsLayer},
     tracing::error,
-    futures_util::StreamExt,
 };
 
 /// Real-time container GPU metrics
@@ -116,7 +116,10 @@ impl GhostPanelMetricsServer {
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
         info!("🚀 Starting GhostPanel metrics server on {}", addr);
-        info!("   WebSocket endpoint: ws://localhost:{}/ws/metrics/{{container_id}}", port);
+        info!(
+            "   WebSocket endpoint: ws://localhost:{}/ws/metrics/{{container_id}}",
+            port
+        );
         info!("   REST API: http://localhost:{}/api/*", port);
 
         // Build router
@@ -223,7 +226,10 @@ impl GhostPanelMetricsServer {
         AxumPath(container_id): AxumPath<String>,
         State(state): State<Arc<ServerState>>,
     ) -> impl IntoResponse {
-        info!("📡 New WebSocket connection for container: {}", container_id);
+        info!(
+            "📡 New WebSocket connection for container: {}",
+            container_id
+        );
         ws.on_upgrade(move |socket| Self::handle_websocket(socket, container_id, state))
     }
 
@@ -265,7 +271,10 @@ impl GhostPanelMetricsServer {
 
         // Cleanup
         send_task.abort();
-        info!("📡 WebSocket connection closed for container: {}", container_id);
+        info!(
+            "📡 WebSocket connection closed for container: {}",
+            container_id
+        );
     }
 
     /// REST API: Get GPU status
@@ -361,25 +370,37 @@ impl GhostPanelMetricsServer {
     }
 }
 
+/// GPU status response for API endpoints
 #[derive(Debug, Serialize, Deserialize)]
-struct GpuStatusResponse {
-    gpus: Vec<GpuInfo>,
+pub struct GpuStatusResponse {
+    /// List of available GPUs
+    pub gpus: Vec<GpuInfo>,
 }
 
+/// GPU information for monitoring
 #[derive(Debug, Serialize, Deserialize)]
-struct GpuInfo {
-    id: String,
-    name: String,
-    memory_total_mb: u64,
-    driver_version: String,
-    temperature_c: u32,
-    utilization_percent: f32,
+pub struct GpuInfo {
+    /// GPU identifier
+    pub id: String,
+    /// GPU name/model
+    pub name: String,
+    /// Total memory in MB
+    pub memory_total_mb: u64,
+    /// Driver version string
+    pub driver_version: String,
+    /// Current temperature in Celsius
+    pub temperature_c: u32,
+    /// Current utilization percentage
+    pub utilization_percent: f32,
 }
 
+/// Generic API response
 #[derive(Debug, Serialize, Deserialize)]
-struct ApiResponse {
-    success: bool,
-    message: String,
+pub struct ApiResponse {
+    /// Whether the operation succeeded
+    pub success: bool,
+    /// Response message
+    pub message: String,
 }
 
 #[cfg(not(feature = "websocket"))]
@@ -422,6 +443,6 @@ mod tests {
 
         assert_eq!(deserialized.container_id, "test-container");
         assert_eq!(deserialized.fps, 144.5);
-        assert_eq!(deserialized.dlss_active, true);
+        assert!(deserialized.dlss_active);
     }
 }

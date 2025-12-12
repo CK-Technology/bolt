@@ -12,10 +12,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
+pub mod dashboard;
 pub mod health;
 pub mod prometheus;
 pub mod tracing_setup;
-pub mod dashboard;
 
 /// Comprehensive monitoring system for Bolt
 pub struct MonitoringSystem {

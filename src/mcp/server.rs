@@ -3,11 +3,11 @@
 //! This module provides the main MCP server that wraps Glyph and exposes
 //! Bolt-specific tools.
 
-use crate::mcp::{config::McpConfig, tools::*, McpError, Result};
+use crate::mcp::{McpError, Result, config::McpConfig, tools::*};
 use anyhow::Context;
+use async_trait::async_trait;
 use std::sync::Arc;
 use tracing::{info, warn};
-use async_trait::async_trait;
 
 /// Adapter to convert Bolt McpTool to Glyph Tool
 struct BoltToolAdapter<T: McpTool> {
@@ -36,16 +36,14 @@ impl<T: McpTool + 'static> glyph::server::Tool for BoltToolAdapter<T> {
 
         // Parse the JSON schema from Value
         if let Some(obj) = schema_value.as_object() {
-            let properties = obj.get("properties")
+            let properties = obj
+                .get("properties")
                 .and_then(|v| v.as_object())
-                .map(|props| {
-                    props.iter()
-                        .map(|(k, v)| (k.clone(), v.clone()))
-                        .collect()
-                })
+                .map(|props| props.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
                 .unwrap_or_default();
 
-            let required = obj.get("required")
+            let required = obj
+                .get("required")
                 .and_then(|v| v.as_array())
                 .map(|arr| {
                     arr.iter()
@@ -63,14 +61,17 @@ impl<T: McpTool + 'static> glyph::server::Tool for BoltToolAdapter<T> {
         }
     }
 
-    async fn call(&self, args: Option<serde_json::Value>) -> glyph::Result<glyph::protocol::CallToolResult> {
+    async fn call(
+        &self,
+        args: Option<serde_json::Value>,
+    ) -> glyph::Result<glyph::protocol::CallToolResult> {
         let input = args.unwrap_or(serde_json::Value::Null);
 
         match self.inner.execute(input).await {
             Ok(result) => {
                 // Convert result to Content
                 let content = vec![glyph::protocol::Content::text(
-                    serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string())
+                    serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()),
                 )];
                 Ok(glyph::protocol::CallToolResult::success(content))
             }
@@ -136,7 +137,10 @@ impl BoltMcpServer {
         info!("MCP server running on stdio");
 
         // Run the server
-        stdio_server.run().await.map_err(|e| McpError::Config(format!("Glyph server error: {}", e)))
+        stdio_server
+            .run()
+            .await
+            .map_err(|e| McpError::Config(format!("Glyph server error: {}", e)))
     }
 
     /// Run with WebSocket transport
@@ -150,7 +154,9 @@ impl BoltMcpServer {
             .with_tools();
 
         // Create WebSocket server
-        let ws_server = builder.for_websocket(&addr).await
+        let ws_server = builder
+            .for_websocket(&addr)
+            .await
             .map_err(|e| McpError::Config(format!("Failed to bind WebSocket server: {}", e)))?;
 
         // Register tools
@@ -159,7 +165,10 @@ impl BoltMcpServer {
         info!("MCP server running on ws://{}", addr);
 
         // Run the server
-        ws_server.run().await.map_err(|e| McpError::Config(format!("Glyph server error: {}", e)))
+        ws_server
+            .run()
+            .await
+            .map_err(|e| McpError::Config(format!("Glyph server error: {}", e)))
     }
 
     /// Run with HTTP transport
@@ -169,10 +178,12 @@ impl BoltMcpServer {
 
         // NOTE: HTTP transport support is planned for Glyph
         // For now, recommend using WebSocket transport which provides similar functionality
-        warn!("HTTP transport not yet implemented in Glyph - please use WebSocket transport instead");
+        warn!(
+            "HTTP transport not yet implemented in Glyph - please use WebSocket transport instead"
+        );
 
         Err(McpError::Config(
-            "HTTP transport not yet implemented - use 'websocket' or 'stdio' instead".to_string()
+            "HTTP transport not yet implemented - use 'websocket' or 'stdio' instead".to_string(),
         ))
     }
 
@@ -185,7 +196,9 @@ impl BoltMcpServer {
             info!("Registering GPU stats tool");
             let gpu_tool = GpuStatsTool::new()?;
             let adapter = BoltToolAdapter::new(gpu_tool);
-            server.register_tool(adapter).await
+            server
+                .register_tool(adapter)
+                .await
                 .map_err(|e| McpError::Config(format!("Failed to register GPU tool: {}", e)))?;
         }
 
@@ -195,12 +208,11 @@ impl BoltMcpServer {
                 "Registering filesystem tool (root: {:?})",
                 self.config.tools.filesystem.root
             );
-            let fs_tool = FilesystemTool::new(
-                self.config.tools.filesystem.root.clone()
-            );
+            let fs_tool = FilesystemTool::new(self.config.tools.filesystem.root.clone());
             let adapter = BoltToolAdapter::new(fs_tool);
-            server.register_tool(adapter).await
-                .map_err(|e| McpError::Config(format!("Failed to register filesystem tool: {}", e)))?;
+            server.register_tool(adapter).await.map_err(|e| {
+                McpError::Config(format!("Failed to register filesystem tool: {}", e))
+            })?;
         }
 
         // Shell tool
@@ -210,11 +222,13 @@ impl BoltMcpServer {
                 self.config.tools.shell.allowed_commands
             );
             let shell_tool = ShellTool::with_allowlist(
-                "bolt-host".to_string(),  // MCP server runs on host, not in a container
-                self.config.tools.shell.allowed_commands.clone()
+                "bolt-host".to_string(), // MCP server runs on host, not in a container
+                self.config.tools.shell.allowed_commands.clone(),
             );
             let adapter = BoltToolAdapter::new(shell_tool);
-            server.register_tool(adapter).await
+            server
+                .register_tool(adapter)
+                .await
                 .map_err(|e| McpError::Config(format!("Failed to register shell tool: {}", e)))?;
         }
 
@@ -223,7 +237,9 @@ impl BoltMcpServer {
             info!("Registering process management tool");
             let process_tool = ProcessTool::new();
             let adapter = BoltToolAdapter::new(process_tool);
-            server.register_tool(adapter).await
+            server
+                .register_tool(adapter)
+                .await
                 .map_err(|e| McpError::Config(format!("Failed to register process tool: {}", e)))?;
         }
 
@@ -232,7 +248,9 @@ impl BoltMcpServer {
             info!("Registering network stats tool");
             let network_tool = NetworkTool::new();
             let adapter = BoltToolAdapter::new(network_tool);
-            server.register_tool(adapter).await
+            server
+                .register_tool(adapter)
+                .await
                 .map_err(|e| McpError::Config(format!("Failed to register network tool: {}", e)))?;
         }
 

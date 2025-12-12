@@ -138,16 +138,24 @@ impl DockerCompat {
     }
 
     async fn handle_images(&self, _args: &[String]) -> Result<()> {
-        println!("{:<30} {:<15} {:<20} {:<15} {:<10}",
-                 "REPOSITORY", "TAG", "IMAGE ID", "CREATED", "SIZE");
+        println!(
+            "{:<30} {:<15} {:<20} {:<15} {:<10}",
+            "REPOSITORY", "TAG", "IMAGE ID", "CREATED", "SIZE"
+        );
 
         // Mock images for now (real implementation would query image store)
-        println!("{:<30} {:<15} {:<20} {:<15} {}MB",
-                 "alpine", "latest", "c1aabb73d233", "3 days ago", 7);
-        println!("{:<30} {:<15} {:<20} {:<15} {}MB",
-                 "nvidia/cuda", "12.3.0-base", "f7a7f7f7f7f7", "2 days ago", 1420);
-        println!("{:<30} {:<15} {:<20} {:<15} {}MB",
-                 "pytorch/pytorch", "latest", "d8e9a2b1c4f5", "1 week ago", 8900);
+        println!(
+            "{:<30} {:<15} {:<20} {:<15} {}MB",
+            "alpine", "latest", "c1aabb73d233", "3 days ago", 7
+        );
+        println!(
+            "{:<30} {:<15} {:<20} {:<15} {}MB",
+            "nvidia/cuda", "12.3.0-base", "f7a7f7f7f7f7", "2 days ago", 1420
+        );
+        println!(
+            "{:<30} {:<15} {:<20} {:<15} {}MB",
+            "pytorch/pytorch", "latest", "d8e9a2b1c4f5", "1 week ago", 8900
+        );
 
         Ok(())
     }
@@ -286,11 +294,14 @@ impl DockerCompat {
             "committed-image:latest"
         };
 
-        println!("📦 Committing container {} as image {}", container, image_name);
+        println!(
+            "📦 Committing container {} as image {}",
+            container, image_name
+        );
         println!("⚙️  Creating snapshot of container filesystem...");
 
         // Simulate commit (in production would create actual image from container)
-        let image_id = format!("sha256:{}", hex::encode(&rand::random::<[u8; 16]>()));
+        let image_id = format!("sha256:{}", hex::encode(rand::random::<[u8; 16]>()));
 
         println!("✅ Committed: {}", &image_id[..19]);
 
@@ -332,8 +343,10 @@ impl DockerCompat {
 
         let containers = self.runtime.list_containers(all).await?;
 
-        println!("{:<15} {:<10} {:<20} {:<15} {:<15} {:<15}",
-                 "CONTAINER ID", "NAME", "CPU %", "MEM USAGE/LIMIT", "MEM %", "NET I/O");
+        println!(
+            "{:<15} {:<10} {:<20} {:<15} {:<15} {:<15}",
+            "CONTAINER ID", "NAME", "CPU %", "MEM USAGE/LIMIT", "MEM %", "NET I/O"
+        );
 
         if no_stream {
             // Show stats once
@@ -345,8 +358,10 @@ impl DockerCompat {
             println!("📊 Streaming stats (Press Ctrl+C to stop)...");
             loop {
                 print!("\x1B[2J\x1B[1;1H"); // Clear screen
-                println!("{:<15} {:<10} {:<20} {:<15} {:<15} {:<15}",
-                         "CONTAINER ID", "NAME", "CPU %", "MEM USAGE/LIMIT", "MEM %", "NET I/O");
+                println!(
+                    "{:<15} {:<10} {:<20} {:<15} {:<15} {:<15}",
+                    "CONTAINER ID", "NAME", "CPU %", "MEM USAGE/LIMIT", "MEM %", "NET I/O"
+                );
 
                 let containers = self.runtime.list_containers(all).await?;
                 for container in &containers {
@@ -371,14 +386,16 @@ impl DockerCompat {
         let net_in = rng.gen_range(100..1000);
         let net_out = rng.gen_range(50..500);
 
-        println!("{:<15} {:<10} {:<20.2}% {:<15} {:<15.1}% {}KB / {}KB",
-                 &container.id[..12],
-                 container.name,
-                 cpu_pct,
-                 format!("{}MB / {}MB", mem_usage, mem_limit),
-                 mem_pct,
-                 net_in,
-                 net_out);
+        println!(
+            "{:<15} {:<10} {:<20.2}% {:<15} {:<15.1}% {}KB / {}KB",
+            &container.id[..12],
+            container.name,
+            cpu_pct,
+            format!("{}MB / {}MB", mem_usage, mem_limit),
+            mem_pct,
+            net_in,
+            net_out
+        );
     }
 
     async fn handle_network(&self, args: &[String]) -> Result<()> {

@@ -96,13 +96,19 @@ impl XDPFastPath {
             interfaces.push(xdp_interface);
         }
 
-        info!("✅ XDP program attached to {} (ifindex: {})", interface_name, ifindex);
+        info!(
+            "✅ XDP program attached to {} (ifindex: {})",
+            interface_name, ifindex
+        );
         Ok(())
     }
 
     /// Add container route to XDP fast path
     pub async fn add_container_route(&self, container_ip: Ipv4Addr, ifindex: u32) -> Result<()> {
-        info!("➕ Adding XDP fast path route: {} -> ifindex {}", container_ip, ifindex);
+        info!(
+            "➕ Adding XDP fast path route: {} -> ifindex {}",
+            container_ip, ifindex
+        );
 
         // In a real implementation, this would update the BPF map
         // that the XDP program uses for routing decisions
@@ -168,7 +174,12 @@ impl XDPFastPath {
     }
 
     /// Simulate packet processing via XDP
-    pub async fn process_packet(&self, src_ip: Ipv4Addr, dst_ip: Ipv4Addr, size: usize) -> XDPAction {
+    pub async fn process_packet(
+        &self,
+        src_ip: Ipv4Addr,
+        dst_ip: Ipv4Addr,
+        size: usize,
+    ) -> XDPAction {
         // Check if destination is in our fast path routes
         let routes = self.container_routes.read().await;
 
@@ -180,8 +191,10 @@ impl XDPFastPath {
                 stats.packets_redirected += 1;
             }
 
-            debug!("⚡ XDP fast path: {} -> {} ({} bytes) redirected to ifindex {}",
-                   src_ip, dst_ip, size, target_ifindex);
+            debug!(
+                "⚡ XDP fast path: {} -> {} ({} bytes) redirected to ifindex {}",
+                src_ip, dst_ip, size, target_ifindex
+            );
 
             XDPAction::Redirect(target_ifindex)
         } else {
@@ -273,20 +286,20 @@ mod tests {
         xdp.add_container_route(container_ip, 10).await.unwrap();
 
         // Test packet to container should be redirected
-        let action = xdp.process_packet(
-            Ipv4Addr::new(172, 18, 0, 11),
-            container_ip,
-            1500
-        ).await;
+        let action = xdp
+            .process_packet(Ipv4Addr::new(172, 18, 0, 11), container_ip, 1500)
+            .await;
 
         assert_eq!(action, XDPAction::Redirect(10));
 
         // Test packet to unknown destination should pass
-        let action = xdp.process_packet(
-            Ipv4Addr::new(172, 18, 0, 11),
-            Ipv4Addr::new(172, 18, 0, 99),
-            1500
-        ).await;
+        let action = xdp
+            .process_packet(
+                Ipv4Addr::new(172, 18, 0, 11),
+                Ipv4Addr::new(172, 18, 0, 99),
+                1500,
+            )
+            .await;
 
         assert_eq!(action, XDPAction::Pass);
     }
@@ -298,8 +311,14 @@ mod tests {
         xdp.add_container_route(container_ip, 10).await.unwrap();
 
         // Process some packets
-        xdp.process_packet(Ipv4Addr::new(172, 18, 0, 11), container_ip, 1500).await;
-        xdp.process_packet(Ipv4Addr::new(172, 18, 0, 11), Ipv4Addr::new(10, 0, 0, 1), 1500).await;
+        xdp.process_packet(Ipv4Addr::new(172, 18, 0, 11), container_ip, 1500)
+            .await;
+        xdp.process_packet(
+            Ipv4Addr::new(172, 18, 0, 11),
+            Ipv4Addr::new(10, 0, 0, 1),
+            1500,
+        )
+        .await;
 
         let stats = xdp.get_stats().await;
         assert_eq!(stats.packets_fastpath, 1);

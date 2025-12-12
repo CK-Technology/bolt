@@ -8,7 +8,7 @@ use bolt::config::BoltConfig;
 use bolt::grpc::container_service::ContainerServiceImpl;
 use bolt::grpc::generated::container::*;
 use bolt::grpc::network_service::NetworkServiceImpl;
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use futures::StreamExt;
 use std::time::Duration;
 use tokio::runtime::Runtime;
@@ -114,7 +114,7 @@ fn bench_network_stats_throughput(c: &mut Criterion) {
     let service = NetworkServiceImpl::new();
 
     let mut group = c.benchmark_group("grpc_network_stats");
-    group.sample_size(20);  // Reduce sample size for streaming benchmarks
+    group.sample_size(20); // Reduce sample size for streaming benchmarks
 
     for interval_ms in [100, 500, 1000].iter() {
         group.bench_with_input(
@@ -221,7 +221,11 @@ fn bench_protobuf_serialization(c: &mut Criterion) {
         let request = RunRequest {
             image: "alpine:latest".to_string(),
             name: "test-container".to_string(),
-            command: vec!["/bin/sh".to_string(), "-c".to_string(), "echo hello".to_string()],
+            command: vec![
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                "echo hello".to_string(),
+            ],
             entrypoint: vec![],
             env: std::collections::HashMap::from([
                 ("FOO".to_string(), "bar".to_string()),

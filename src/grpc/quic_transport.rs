@@ -31,7 +31,10 @@ pub struct QuicGrpcServer {
 impl QuicGrpcServer {
     /// Create new gRPC-over-QUIC server
     pub fn new(quic_server: RealQUICServer, bind_address: String, port: u16) -> Self {
-        info!("🚀 Creating gRPC-over-QUIC server on {}:{}", bind_address, port);
+        info!(
+            "🚀 Creating gRPC-over-QUIC server on {}:{}",
+            bind_address, port
+        );
         Self {
             quic_server: Arc::new(RwLock::new(quic_server)),
             bind_address,
@@ -45,7 +48,10 @@ impl QuicGrpcServer {
     /// by wrapping QUIC bidirectional streams as HTTP/2 streams for Tonic.
     pub async fn serve<S>(self, service: S) -> Result<()>
     where
-        S: Service<Request<Incoming>, Response = Response<tonic::body::BoxBody>> + Clone + Send + 'static,
+        S: Service<Request<Incoming>, Response = Response<tonic::body::BoxBody>>
+            + Clone
+            + Send
+            + 'static,
         S::Error: std::error::Error + Send + Sync + 'static,
         S::Future: Send + 'static,
     {
@@ -77,7 +83,10 @@ impl QuicGrpcServer {
                         match connecting.await {
                             Ok(connection) => {
                                 let conn: Arc<Connection> = Arc::new(connection);
-                                info!("🔗 New gRPC-over-QUIC connection from {}", conn.remote_address());
+                                info!(
+                                    "🔗 New gRPC-over-QUIC connection from {}",
+                                    conn.remote_address()
+                                );
 
                                 if let Err(e) = Self::handle_connection(conn, service).await {
                                     warn!("❌ Connection handler error: {}", e);
@@ -104,7 +113,10 @@ impl QuicGrpcServer {
     /// and processing gRPC requests
     async fn handle_connection<S>(connection: Arc<Connection>, service: S) -> Result<()>
     where
-        S: Service<Request<Incoming>, Response = Response<tonic::body::BoxBody>> + Clone + Send + 'static,
+        S: Service<Request<Incoming>, Response = Response<tonic::body::BoxBody>>
+            + Clone
+            + Send
+            + 'static,
         S::Error: std::error::Error + Send + Sync + 'static,
         S::Future: Send + 'static,
     {
@@ -140,11 +152,7 @@ impl QuicGrpcServer {
     }
 
     /// Handle a single gRPC request over a QUIC bidirectional stream
-    async fn handle_stream<S>(
-        mut send: SendStream,
-        mut recv: RecvStream,
-        _service: S,
-    ) -> Result<()>
+    async fn handle_stream<S>(mut send: SendStream, mut recv: RecvStream, _service: S) -> Result<()>
     where
         S: Service<Request<Incoming>, Response = Response<tonic::body::BoxBody>> + Send + 'static,
         S::Error: std::error::Error + Send + Sync + 'static,
@@ -177,7 +185,10 @@ impl QuicGrpcServer {
             return Ok(());
         }
 
-        debug!("📥 Received gRPC request: {} bytes (compression={})", message_len, compression_flag[0]);
+        debug!(
+            "📥 Received gRPC request: {} bytes (compression={})",
+            message_len, compression_flag[0]
+        );
 
         // For a full implementation, we would:
         // 1. Decode the request based on the service method
@@ -329,11 +340,7 @@ impl QuicGrpcClient {
     /// Make a unary gRPC call over QUIC
     ///
     /// This is a helper that opens a stream, sends the request, and waits for response.
-    pub async fn call_unary<Req, Res>(
-        &self,
-        method: &str,
-        request: Req,
-    ) -> Result<Res>
+    pub async fn call_unary<Req, Res>(&self, method: &str, request: Req) -> Result<Res>
     where
         Req: prost::Message,
         Res: prost::Message + Default,
@@ -415,10 +422,7 @@ impl QuicGrpcClient {
     /// Open a bidirectional streaming gRPC call over QUIC
     ///
     /// Returns a wrapped stream for full-duplex communication.
-    pub async fn call_bidi_streaming<Req, Res>(
-        &self,
-        method: &str,
-    ) -> Result<QuicStream>
+    pub async fn call_bidi_streaming<Req, Res>(&self, method: &str) -> Result<QuicStream>
     where
         Req: prost::Message,
         Res: prost::Message + Default + 'static,
@@ -439,7 +443,7 @@ impl QuicGrpcClient {
 pub struct QuicResponseStream<Res> {
     recv: RecvStream,
     buffer: BytesMut,
-    _phantom: std::marker::PhantomData<fn() -> Res>,  // Use function pointer for Unpin
+    _phantom: std::marker::PhantomData<fn() -> Res>, // Use function pointer for Unpin
 }
 
 impl<Res> QuicResponseStream<Res> {
@@ -482,7 +486,9 @@ where
                         return Poll::Ready(None);
                     } else {
                         // Incomplete message at EOF
-                        return Poll::Ready(Some(Err(anyhow::anyhow!("Incomplete gRPC message at EOF"))));
+                        return Poll::Ready(Some(Err(anyhow::anyhow!(
+                            "Incomplete gRPC message at EOF"
+                        ))));
                     }
                 }
 
@@ -514,9 +520,10 @@ where
                                 this.buffer.advance(5 + message_len);
                                 Poll::Ready(Some(Ok(message)))
                             }
-                            Err(e) => {
-                                Poll::Ready(Some(Err(anyhow::anyhow!("Failed to decode gRPC message: {}", e))))
-                            }
+                            Err(e) => Poll::Ready(Some(Err(anyhow::anyhow!(
+                                "Failed to decode gRPC message: {}",
+                                e
+                            )))),
                         }
                     } else {
                         // Not enough data yet, wait for more

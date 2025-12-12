@@ -2,9 +2,9 @@
 //!
 //! Provides process listing and management capabilities within containers
 
-use crate::mcp::{tools::McpTool, McpError, Result};
+use crate::mcp::{McpError, Result, tools::McpTool};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::process::Command;
 
 /// Process management tool
@@ -31,9 +31,7 @@ impl ProcessTool {
             .map_err(|e| McpError::ToolExecution(format!("Failed to list processes: {}", e)))?;
 
         if !output.status.success() {
-            return Err(McpError::ToolExecution(
-                "ps command failed".to_string()
-            ));
+            return Err(McpError::ToolExecution("ps command failed".to_string()));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -97,8 +95,8 @@ struct ProcessInfo {
     pid: u32,
     cpu_percent: f32,
     mem_percent: f32,
-    vsz: u64,      // Virtual memory size in KB
-    rss: u64,      // Resident set size in KB
+    vsz: u64, // Virtual memory size in KB
+    rss: u64, // Resident set size in KB
     tty: String,
     stat: String,
     start: String,

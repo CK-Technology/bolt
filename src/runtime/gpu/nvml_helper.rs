@@ -3,9 +3,9 @@
 //! Provides direct access to NVIDIA GPU metrics via native NVML bindings,
 //! replacing nvidia-smi shell command calls for better performance and reliability.
 
+use anyhow::{Context, Result};
 #[cfg(feature = "nvidia-support")]
-use nvml_wrapper::{Nvml, Device};
-use anyhow::{Result, Context};
+use nvml_wrapper::{Device, Nvml};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
@@ -54,7 +54,8 @@ impl NvmlManager {
         let nvml = Nvml::init()
             .context("Failed to initialize NVML. Make sure NVIDIA drivers are installed.")?;
 
-        let device_count = nvml.device_count()
+        let device_count = nvml
+            .device_count()
             .context("Failed to get GPU device count")?;
 
         info!("✅ NVML initialized, found {} GPU(s)", device_count);
@@ -66,9 +67,7 @@ impl NvmlManager {
                 Ok(device) => {
                     // SAFETY: We're leaking the device lifetime to 'static
                     // This is safe because NVML maintains device references internally
-                    let device: Device<'static> = unsafe {
-                        std::mem::transmute(device)
-                    };
+                    let device: Device<'static> = unsafe { std::mem::transmute(device) };
                     devices.push(device);
                 }
                 Err(e) => {
@@ -115,28 +114,35 @@ impl NvmlManager {
 
     /// Get GPU information from a device
     #[cfg(feature = "nvidia-support")]
-    async fn get_gpu_info_from_device(&self, index: u32, device: &Device<'static>) -> Result<GpuInfo> {
+    async fn get_gpu_info_from_device(
+        &self,
+        index: u32,
+        device: &Device<'static>,
+    ) -> Result<GpuInfo> {
         let name = device.name().unwrap_or_else(|_| "Unknown".to_string());
         let uuid = device.uuid().unwrap_or_else(|_| "Unknown".to_string());
 
-        let memory_info = device.memory_info()
-            .context("Failed to get memory info")?;
+        let memory_info = device.memory_info().context("Failed to get memory info")?;
         let memory_total_mb = memory_info.total / (1024 * 1024);
 
-        let compute_capability = device.cuda_compute_capability()
+        let compute_capability = device
+            .cuda_compute_capability()
             .map(|c| (c.major as u32, c.minor as u32))
             .unwrap_or((0, 0));
 
-        let pci_info = device.pci_info()
-            .context("Failed to get PCI info")?;
-        let pci_bus_id = format!("{:04x}:{:02x}:{:02x}.0",
-            pci_info.domain, pci_info.bus, pci_info.device);
+        let pci_info = device.pci_info().context("Failed to get PCI info")?;
+        let pci_bus_id = format!(
+            "{:04x}:{:02x}:{:02x}.0",
+            pci_info.domain, pci_info.bus, pci_info.device
+        );
 
-        let power_limit_w = device.power_management_limit()
-            .map(|p| p / 1000)  // Convert milliwatts to watts
+        let power_limit_w = device
+            .power_management_limit()
+            .map(|p| p / 1000) // Convert milliwatts to watts
             .unwrap_or(0);
 
-        let temperature_c = device.temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu)
+        let temperature_c = device
+            .temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu)
             .unwrap_or(0);
 
         Ok(GpuInfo {
@@ -156,7 +162,8 @@ impl NvmlManager {
     pub async fn get_gpu_metrics(&self, gpu_index: u32) -> Result<GpuMetrics> {
         let devices = self.devices.read().await;
 
-        let device = devices.get(gpu_index as usize)
+        let device = devices
+            .get(gpu_index as usize)
             .context(format!("GPU index {} not found", gpu_index))?;
 
         self.get_metrics_from_device(gpu_index, device).await
@@ -169,36 +176,43 @@ impl NvmlManager {
 
     /// Get metrics from a device
     #[cfg(feature = "nvidia-support")]
-    async fn get_metrics_from_device(&self, index: u32, device: &Device<'static>) -> Result<GpuMetrics> {
+    async fn get_metrics_from_device(
+        &self,
+        index: u32,
+        device: &Device<'static>,
+    ) -> Result<GpuMetrics> {
         // GPU utilization
-        let utilization = device.utilization_rates()
+        let utilization = device
+            .utilization_rates()
             .context("Failed to get utilization rates")?;
         let utilization_percent = utilization.gpu as f32;
 
         // Memory usage
-        let memory_info = device.memory_info()
-            .context("Failed to get memory info")?;
+        let memory_info = device.memory_info().context("Failed to get memory info")?;
         let memory_used_mb = memory_info.used / (1024 * 1024);
         let memory_total_mb = memory_info.total / (1024 * 1024);
 
         // Temperature
-        let temperature_c = device.temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu)
+        let temperature_c = device
+            .temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu)
             .unwrap_or(0);
 
         // Power draw
-        let power_draw_w = device.power_usage()
-            .map(|p| p / 1000)  // Convert milliwatts to watts
+        let power_draw_w = device
+            .power_usage()
+            .map(|p| p / 1000) // Convert milliwatts to watts
             .unwrap_or(0);
 
         // Fan speed
-        let fan_speed_percent = device.fan_speed(0)
-            .unwrap_or(0);
+        let fan_speed_percent = device.fan_speed(0).unwrap_or(0);
 
         // Clock speeds
-        let clock_graphics_mhz = device.clock_info(nvml_wrapper::enum_wrappers::device::Clock::Graphics)
+        let clock_graphics_mhz = device
+            .clock_info(nvml_wrapper::enum_wrappers::device::Clock::Graphics)
             .unwrap_or(0);
 
-        let clock_memory_mhz = device.clock_info(nvml_wrapper::enum_wrappers::device::Clock::Memory)
+        let clock_memory_mhz = device
+            .clock_info(nvml_wrapper::enum_wrappers::device::Clock::Memory)
             .unwrap_or(0);
 
         Ok(GpuMetrics {
@@ -240,7 +254,8 @@ impl NvmlManager {
     /// Get driver version
     #[cfg(feature = "nvidia-support")]
     pub fn get_driver_version(&self) -> Result<String> {
-        self.nvml.sys_driver_version()
+        self.nvml
+            .sys_driver_version()
             .context("Failed to get driver version")
     }
 
@@ -258,7 +273,7 @@ impl NvmlManager {
                 let minor = (version % 1000) / 10;
                 Ok(format!("{}.{}", major, minor))
             }
-            Err(e) => Err(anyhow::anyhow!("Failed to get CUDA version: {}", e))
+            Err(e) => Err(anyhow::anyhow!("Failed to get CUDA version: {}", e)),
         }
     }
 
@@ -272,11 +287,13 @@ impl NvmlManager {
     pub async fn set_power_limit(&self, gpu_index: u32, watts: u32) -> Result<()> {
         let mut devices = self.devices.write().await;
 
-        let device = devices.get_mut(gpu_index as usize)
+        let device = devices
+            .get_mut(gpu_index as usize)
             .context(format!("GPU index {} not found", gpu_index))?;
 
         let milliwatts = watts * 1000;
-        device.set_power_management_limit(milliwatts)
+        device
+            .set_power_management_limit(milliwatts)
             .context("Failed to set power limit")?;
 
         info!("✅ Set GPU {} power limit to {}W", gpu_index, watts);
@@ -320,7 +337,10 @@ mod tests {
                 }
             }
             Err(e) => {
-                println!("NVML init failed (expected on systems without NVIDIA GPUs): {}", e);
+                println!(
+                    "NVML init failed (expected on systems without NVIDIA GPUs): {}",
+                    e
+                );
             }
         }
     }

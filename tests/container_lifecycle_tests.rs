@@ -43,12 +43,9 @@ async fn test_container_operations() -> Result<()> {
     let runtime = BoltRuntime::new()?;
 
     // Test volume operations (prerequisite for container tests)
-    let volume_result = runtime.create_volume(
-        "test-lifecycle-volume",
-        "local",
-        None,
-        &[],
-    ).await;
+    let volume_result = runtime
+        .create_volume("test-lifecycle-volume", "local", None, &[])
+        .await;
 
     match volume_result {
         Ok(vol_info) => {
@@ -63,11 +60,9 @@ async fn test_container_operations() -> Result<()> {
     }
 
     // Test network operations
-    let network_result = runtime.create_network(
-        "test-lifecycle-network",
-        "bolt",
-        Some("172.30.0.0/16"),
-    ).await;
+    let network_result = runtime
+        .create_network("test-lifecycle-network", "bolt", Some("172.30.0.0/16"))
+        .await;
 
     match network_result {
         Ok(_) => {
@@ -126,11 +121,9 @@ async fn test_container_networking() -> Result<()> {
     let runtime = BoltRuntime::new()?;
 
     // Create test network
-    let network_result = runtime.create_network(
-        "test-container-net",
-        "bolt",
-        Some("172.31.0.0/16"),
-    ).await;
+    let network_result = runtime
+        .create_network("test-container-net", "bolt", Some("172.31.0.0/16"))
+        .await;
 
     if let Ok(_) = network_result {
         println!("   Created test network for container");
@@ -157,12 +150,9 @@ async fn test_container_volumes() -> Result<()> {
     let runtime = BoltRuntime::new()?;
 
     // Create test volume
-    let volume_result = runtime.create_volume(
-        "test-container-vol",
-        "local",
-        None,
-        &[],
-    ).await;
+    let volume_result = runtime
+        .create_volume("test-container-vol", "local", None, &[])
+        .await;
 
     if let Ok(vol_info) = volume_result {
         println!("   Created test volume: {}", vol_info.name);
@@ -250,7 +240,10 @@ async fn test_container_health_checks() -> Result<()> {
         retries: 3,
     };
 
-    println!("   Health check configured: {} second interval", health_check.interval);
+    println!(
+        "   Health check configured: {} second interval",
+        health_check.interval
+    );
 
     println!("✅ Container health checks test passed");
     Ok(())
@@ -280,11 +273,9 @@ async fn test_multiple_container_orchestration() -> Result<()> {
     println!("   Testing multi-container orchestration...");
 
     // Create network for containers to communicate
-    let network_result = runtime.create_network(
-        "test-multi-net",
-        "bolt",
-        Some("172.32.0.0/16"),
-    ).await;
+    let network_result = runtime
+        .create_network("test-multi-net", "bolt", Some("172.32.0.0/16"))
+        .await;
 
     if let Ok(_) = network_result {
         println!("   Created orchestration network");
@@ -346,7 +337,10 @@ async fn test_container_security() -> Result<()> {
         cap_add: vec!["NET_ADMIN".to_string()],
     };
 
-    println!("   Security: no_new_privileges={}", security.no_new_privileges);
+    println!(
+        "   Security: no_new_privileges={}",
+        security.no_new_privileges
+    );
     println!("   Dropped {} capabilities", security.cap_drop.len());
     println!("   Added {} capabilities", security.cap_add.len());
 

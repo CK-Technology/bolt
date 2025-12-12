@@ -154,13 +154,14 @@ impl KDEGamingOptimizer {
         }
 
         // Try to activate gaming mode via D-Bus if available
-        if let Ok(_) = Command::new("qdbus")
+        if Command::new("qdbus")
             .args([
                 "org.kde.plasmashell",
                 "/PlasmaShell",
                 "org.kde.PlasmaShell.toggleDashboard",
             ])
             .output()
+            .is_ok()
         {
             debug!("      D-Bus gaming mode activation attempted");
         }
@@ -234,9 +235,10 @@ impl KDEGamingOptimizer {
         }
 
         // Try to enable VRR via xrandr for hybrid setup
-        if let Ok(_) = Command::new("xrandr")
+        if Command::new("xrandr")
             .args(["--output", "DP-1", "--set", "vrr_capable", "1"])
             .output()
+            .is_ok()
         {
             debug!("      VRR enabled via xrandr");
         }

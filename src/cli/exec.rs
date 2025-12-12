@@ -1,8 +1,8 @@
 //! Interactive shell execution in running containers
 
-use clap::Parser;
 use crate::Result;
 use anyhow::anyhow;
+use clap::Parser;
 use tracing::{debug, info};
 
 #[derive(Parser)]
@@ -64,12 +64,13 @@ impl ExecCommand {
 
         // Enter all namespaces
         cmd.args([
-            "-t", &container_pid.to_string(),
-            "-m",  // mount namespace
-            "-u",  // UTS namespace
-            "-i",  // IPC namespace
-            "-n",  // network namespace
-            "-p",  // PID namespace
+            "-t",
+            &container_pid.to_string(),
+            "-m", // mount namespace
+            "-u", // UTS namespace
+            "-i", // IPC namespace
+            "-n", // network namespace
+            "-p", // PID namespace
         ]);
 
         // Set user if specified
@@ -145,7 +146,7 @@ impl ExecCommand {
     }
 
     async fn setup_interactive_tty(&self, cmd: &mut tokio::process::Command) -> Result<()> {
-        use nix::sys::termios::{tcgetattr, tcsetattr, SetArg, LocalFlags};
+        use nix::sys::termios::{LocalFlags, SetArg, tcgetattr, tcsetattr};
         use nix::unistd::isatty;
         use std::os::fd::{AsRawFd, BorrowedFd};
 

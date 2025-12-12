@@ -717,7 +717,10 @@ impl BoltNetworkManager {
 
         // QUIC networking is handled by the QUICServer in the network manager
         // This function registers the container with the QUIC endpoint
-        debug!("Container {} registered for QUIC on interface {}", container_id, container_info.container_interface);
+        debug!(
+            "Container {} registered for QUIC on interface {}",
+            container_id, container_info.container_interface
+        );
 
         Ok(())
     }
@@ -747,7 +750,10 @@ impl BoltNetworkManager {
         &self,
         container_info: &ContainerNetworkInfo,
     ) -> Result<()> {
-        info!("🎮 Applying gaming network optimizations for {}", container_info.container_id);
+        info!(
+            "🎮 Applying gaming network optimizations for {}",
+            container_info.container_id
+        );
 
         // Configure host interface for low-latency
         let sysctls = [
@@ -763,7 +769,11 @@ impl BoltNetworkManager {
                 .await?;
 
             if !output.status.success() {
-                debug!("Sysctl {} failed (may require root): {}", key, String::from_utf8_lossy(&output.stderr));
+                debug!(
+                    "Sysctl {} failed (may require root): {}",
+                    key,
+                    String::from_utf8_lossy(&output.stderr)
+                );
             }
         }
 
@@ -776,7 +786,10 @@ impl BoltNetworkManager {
         &self,
         container_info: &ContainerNetworkInfo,
     ) -> Result<()> {
-        info!("📈 Applying high-throughput network optimizations for {}", container_info.container_id);
+        info!(
+            "📈 Applying high-throughput network optimizations for {}",
+            container_info.container_id
+        );
 
         // Increase TCP buffer sizes for high throughput
         let sysctls = [
@@ -794,7 +807,11 @@ impl BoltNetworkManager {
                 .await?;
 
             if !output.status.success() {
-                debug!("Sysctl {} failed (may require root): {}", sysctl, String::from_utf8_lossy(&output.stderr));
+                debug!(
+                    "Sysctl {} failed (may require root): {}",
+                    sysctl,
+                    String::from_utf8_lossy(&output.stderr)
+                );
             }
         }
 

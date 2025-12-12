@@ -215,8 +215,10 @@ impl QUICSocketProxy {
 
         let connection_pool = Arc::new(Semaphore::new(config.max_connections));
 
-        let mut stats = ProxyStats::default();
-        stats.started_at = Some(Instant::now());
+        let stats = ProxyStats {
+            started_at: Some(Instant::now()),
+            ..Default::default()
+        };
 
         Ok(Self {
             config,

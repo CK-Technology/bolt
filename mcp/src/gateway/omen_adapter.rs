@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -27,18 +27,25 @@ impl OmenProviderAdapter {
 
     /// Initialize the OMEN router with configuration
     pub async fn initialize(&mut self, config: omen::config::Config) -> Result<()> {
-        let router = omen::router::OmenRouter::new(config).await
+        let router = omen::router::OmenRouter::new(config)
+            .await
             .map_err(|e| anyhow!("Failed to initialize OMEN router: {}", e))?;
 
         // Get list of available providers
-        self.providers = router.list_providers().await.iter()
+        self.providers = router
+            .list_providers()
+            .await
+            .iter()
             .map(|p| p.id().to_string())
             .collect();
 
         let mut guard = self.router.write().await;
         *guard = Some(router);
 
-        info!("✅ OMEN provider adapter initialized with {} providers", self.providers.len());
+        info!(
+            "✅ OMEN provider adapter initialized with {} providers",
+            self.providers.len()
+        );
         Ok(())
     }
 
@@ -54,8 +61,9 @@ impl OmenProviderAdapter {
 
     /// Generate virtual MCP server definitions for catalog
     pub fn generate_server_definitions(&self) -> Vec<VirtualServerDefinition> {
-        self.providers.iter().map(|provider_id| {
-            VirtualServerDefinition {
+        self.providers
+            .iter()
+            .map(|provider_id| VirtualServerDefinition {
                 name: format!("omen-{}", provider_id),
                 server_type: "omen-provider".to_string(),
                 description: format!("OMEN AI provider: {}", provider_id),
@@ -73,8 +81,8 @@ impl OmenProviderAdapter {
                     },
                 ],
                 enabled: true,
-            }
-        }).collect()
+            })
+            .collect()
     }
 
     /// Execute a chat completion request
@@ -85,19 +93,21 @@ impl OmenProviderAdapter {
         options: ChatOptions,
     ) -> Result<ChatResponse> {
         let router_guard = self.router.read().await;
-        let router = router_guard.as_ref()
+        let router = router_guard
+            .as_ref()
             .ok_or_else(|| anyhow!("OMEN router not initialized"))?;
 
         // Convert messages to OMEN format
-        let omen_messages: Vec<omen::types::ChatMessage> = messages.into_iter().map(|msg| {
-            omen::types::ChatMessage {
+        let omen_messages: Vec<omen::types::ChatMessage> = messages
+            .into_iter()
+            .map(|msg| omen::types::ChatMessage {
                 role: msg.role,
                 content: omen::types::MessageContent::Text(msg.content),
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
-            }
-        }).collect();
+            })
+            .collect();
 
         // Build request
         let request = omen::types::ChatCompletionRequest {
@@ -137,7 +147,9 @@ impl OmenProviderAdapter {
         info!("🎯 Routing to OMEN provider: {}", provider_id);
 
         // Execute request
-        let response = router.chat_completion(request, context).await
+        let response = router
+            .chat_completion(request, context)
+            .await
             .map_err(|e| {
                 error!("OMEN request failed: {}", e);
                 anyhow!("Chat completion failed: {}", e)
@@ -148,16 +160,18 @@ impl OmenProviderAdapter {
             id: response.id,
             model: response.model,
             created: response.created,
-            choices: response.choices.into_iter().map(|choice| {
-                ChatChoice {
+            choices: response
+                .choices
+                .into_iter()
+                .map(|choice| ChatChoice {
                     index: choice.index,
                     message: OmenChatMessage {
                         role: choice.message.role,
                         content: choice.message.content.text(),
                     },
                     finish_reason: choice.finish_reason,
-                }
-            }).collect(),
+                })
+                .collect(),
             usage: ChatUsage {
                 prompt_tokens: response.usage.prompt_tokens,
                 completion_tokens: response.usage.completion_tokens,
@@ -169,10 +183,13 @@ impl OmenProviderAdapter {
     /// Get provider health status
     pub async fn get_provider_health(&self, provider_id: &str) -> Result<ProviderHealth> {
         let router_guard = self.router.read().await;
-        let router = router_guard.as_ref()
+        let router = router_guard
+            .as_ref()
             .ok_or_else(|| anyhow!("OMEN router not initialized"))?;
 
-        let healthy = router.check_provider_health(provider_id).await
+        let healthy = router
+            .check_provider_health(provider_id)
+            .await
             .unwrap_or(false);
 
         Ok(ProviderHealth {
@@ -186,20 +203,24 @@ impl OmenProviderAdapter {
     /// Get all provider health statuses
     pub async fn get_all_provider_health(&self) -> Result<Vec<ProviderHealth>> {
         let router_guard = self.router.read().await;
-        let router = router_guard.as_ref()
+        let router = router_guard
+            .as_ref()
             .ok_or_else(|| anyhow!("OMEN router not initialized"))?;
 
-        let health_status = router.get_provider_health().await
+        let health_status = router
+            .get_provider_health()
+            .await
             .map_err(|e| anyhow!("Failed to get provider health: {}", e))?;
 
-        Ok(health_status.into_iter().map(|status| {
-            ProviderHealth {
+        Ok(health_status
+            .into_iter()
+            .map(|status| ProviderHealth {
                 provider_id: status.id,
                 healthy: status.healthy,
                 latency_ms: status.latency_ms,
                 last_check: chrono::Utc::now().to_rfc3339(),
-            }
-        }).collect())
+            })
+            .collect())
     }
 }
 

@@ -481,9 +481,7 @@ impl CpuInfo {
 
         match vendor {
             CpuVendor::AMD => {
-                if model_lower.contains("9000") {
-                    CpuArchitecture::Zen4
-                } else if model_lower.contains("7000") {
+                if model_lower.contains("9000") || model_lower.contains("7000") {
                     CpuArchitecture::Zen4
                 } else if model_lower.contains("5000") {
                     CpuArchitecture::Zen3
@@ -494,9 +492,7 @@ impl CpuInfo {
                 }
             }
             CpuVendor::Intel => {
-                if model_lower.contains("14th gen") {
-                    CpuArchitecture::RaptorLake
-                } else if model_lower.contains("13th gen") {
+                if model_lower.contains("14th gen") || model_lower.contains("13th gen") {
                     CpuArchitecture::RaptorLake
                 } else if model_lower.contains("12th gen") {
                     CpuArchitecture::AlderLake
@@ -691,7 +687,7 @@ impl CpuGovernor {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.trim() {
             "performance" => Some(Self::Performance),
             "powersave" => Some(Self::Powersave),
@@ -712,7 +708,7 @@ impl CpuGovernor {
         let governor_str = fs::read_to_string(&path)
             .with_context(|| format!("Failed to read governor for CPU {}", cpu_index))?;
 
-        Self::from_str(&governor_str)
+        Self::parse(&governor_str)
             .ok_or_else(|| anyhow!("Unknown governor: {}", governor_str.trim()))
     }
 
@@ -729,7 +725,7 @@ impl CpuGovernor {
 
         Ok(governors_str
             .split_whitespace()
-            .filter_map(Self::from_str)
+            .filter_map(Self::parse)
             .collect())
     }
 

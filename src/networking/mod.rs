@@ -492,7 +492,10 @@ impl NetworkManager {
             .await?;
 
         if !output.status.success() {
-            warn!("Failed to assign subnet to macvlan: {}", String::from_utf8_lossy(&output.stderr));
+            warn!(
+                "Failed to assign subnet to macvlan: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
 
         info!("  ✓ Macvlan network configured");

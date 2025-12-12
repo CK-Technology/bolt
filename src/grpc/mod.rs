@@ -35,11 +35,11 @@
 //! - **Streaming**: Bidirectional streaming for logs, exec, and stats
 //! - **Connection migration**: Seamless migration across network changes
 
-pub mod quic_transport;
 pub mod container_service;
+pub mod mcp_service;
 pub mod network_service;
 pub mod orchestration_service;
-pub mod mcp_service;
+pub mod quic_transport;
 
 // Generated protobuf code
 pub mod generated {
@@ -71,44 +71,38 @@ pub mod generated {
 
 // Re-export commonly used types
 pub use generated::container::{
-    container_service_server::{ContainerService, ContainerServiceServer},
+    ContainerInfo, ContainerStats, ExecOutput, ExecRequest, ListRequest, ListResponse, LogEntry,
+    LogsRequest, RunRequest, RunResponse, StatsRequest, StopRequest, StopResponse,
     container_service_client::ContainerServiceClient,
-    RunRequest, RunResponse, StopRequest, StopResponse,
-    ListRequest, ListResponse, ContainerInfo,
-    LogsRequest, LogEntry, ExecRequest, ExecOutput,
-    StatsRequest, ContainerStats,
+    container_service_server::{ContainerService, ContainerServiceServer},
 };
 
 pub use generated::network::{
-    network_service_server::{NetworkService, NetworkServiceServer},
+    CreateNetworkRequest, CreateNetworkResponse, ListNetworksRequest, ListNetworksResponse,
+    NetworkInfo, NetworkStatsUpdate, QuicStats, StatsRequest as NetworkStatsRequest,
     network_service_client::NetworkServiceClient,
-    CreateNetworkRequest, CreateNetworkResponse,
-    ListNetworksRequest, ListNetworksResponse, NetworkInfo,
-    StatsRequest as NetworkStatsRequest,
-    NetworkStatsUpdate, QuicStats,
+    network_service_server::{NetworkService, NetworkServiceServer},
 };
 
 pub use generated::orchestration::{
-    orchestration_service_server::{OrchestrationService, OrchestrationServiceServer},
+    DeployProgress, DeployRequest, ScaleRequest, ScaleResponse, ServiceInfo, UpdateProgress,
+    UpdateRequest,
     orchestration_service_client::OrchestrationServiceClient,
-    DeployRequest, DeployProgress, ServiceInfo,
-    ScaleRequest, ScaleResponse,
-    UpdateRequest, UpdateProgress,
+    orchestration_service_server::{OrchestrationService, OrchestrationServiceServer},
 };
 
 pub use generated::mcp::{
-    mcp_tool_service_server::{McpToolService, McpToolServiceServer},
-    mcp_tool_service_client::McpToolServiceClient,
-    mcp_resource_service_server::{McpResourceService, McpResourceServiceServer},
-    mcp_resource_service_client::McpResourceServiceClient,
-    mcp_config_service_server::{McpConfigService, McpConfigServiceServer},
+    CallToolRequest, CallToolResponse, GetCapabilitiesRequest, GetCapabilitiesResponse,
+    ListToolsRequest, ListToolsResponse, McpCapabilities, McpTool,
     mcp_config_service_client::McpConfigServiceClient,
-    ListToolsRequest, ListToolsResponse, McpTool,
-    CallToolRequest, CallToolResponse,
-    GetCapabilitiesRequest, GetCapabilitiesResponse, McpCapabilities,
+    mcp_config_service_server::{McpConfigService, McpConfigServiceServer},
+    mcp_resource_service_client::McpResourceServiceClient,
+    mcp_resource_service_server::{McpResourceService, McpResourceServiceServer},
+    mcp_tool_service_client::McpToolServiceClient,
+    mcp_tool_service_server::{McpToolService, McpToolServiceServer},
 };
 
-pub use quic_transport::{QuicGrpcServer, QuicGrpcClient, QuicStream, QuicGrpcStats};
+pub use quic_transport::{QuicGrpcClient, QuicGrpcServer, QuicGrpcStats, QuicStream};
 
 use anyhow::Result;
 use std::sync::Arc;
@@ -144,7 +138,8 @@ pub async fn start_grpc_server(
     info!("  ✓ Network service initialized");
 
     let config = crate::config::BoltConfig::default();
-    let _orchestration_service = orchestration_service::OrchestrationServiceImpl::new(config.clone());
+    let _orchestration_service =
+        orchestration_service::OrchestrationServiceImpl::new(config.clone());
     info!("  ✓ Orchestration service initialized");
 
     // Initialize MCP services
@@ -210,7 +205,7 @@ impl Default for GrpcConfig {
     fn default() -> Self {
         Self {
             bind_address: "0.0.0.0".to_string(),
-            port: 50051,  // Standard gRPC port
+            port: 50051, // Standard gRPC port
             max_concurrent_streams: 100,
             enable_0rtt: true,
             connection_pool_size: 100,

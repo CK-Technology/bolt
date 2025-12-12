@@ -704,7 +704,7 @@ pub async fn setup_cgroups(container_id: &str, limits: &ResourceLimits) -> Resul
     if let Some(cpu_shares) = limits.cpu_shares {
         let weight_path = cgroup_path.join("cpu.weight");
         // Convert shares to weight (shares: 2-262144, weight: 1-10000)
-        let weight = (cpu_shares * 10000 / 262144).max(1).min(10000);
+        let weight = (cpu_shares * 10000 / 262144).clamp(1, 10000);
         if weight_path.exists() {
             let _ = std::fs::write(&weight_path, weight.to_string());
         }

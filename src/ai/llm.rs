@@ -264,7 +264,7 @@ impl LlmOptimizer {
             model_path: format!("{}_trt", model_name),
             quantization: QuantizationType::INT8, // TensorRT loves INT8
             context_length: self.get_context_length(model_size),
-            batch_size: (gpu_memory_gb / 4).max(1).min(32),
+            batch_size: (gpu_memory_gb / 4).clamp(1, 32),
             gpu_layers: 999, // TensorRT optimizes entire model
             tensor_parallel_size: if gpu_memory_gb >= 48 { 2 } else { 1 },
             pipeline_parallel_size: 1,

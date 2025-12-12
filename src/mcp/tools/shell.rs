@@ -2,11 +2,14 @@
 //!
 //! Provides secure shell command execution within containers with command allowlisting
 
-use crate::mcp::{tools::{McpTool, ToolStreamEvent}, McpError, Result};
+use crate::mcp::{
+    McpError, Result,
+    tools::{McpTool, ToolStreamEvent},
+};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use tokio::process::Command;
+use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command;
 use tokio::sync::mpsc;
 
 /// Shell execution tool
@@ -81,12 +84,11 @@ impl ShellTool {
             return true; // No restrictions
         }
 
-        let cmd_name = command
-            .split_whitespace()
-            .next()
-            .unwrap_or("");
+        let cmd_name = command.split_whitespace().next().unwrap_or("");
 
-        self.allowed_commands.iter().any(|allowed| allowed == cmd_name)
+        self.allowed_commands
+            .iter()
+            .any(|allowed| allowed == cmd_name)
     }
 
     async fn execute_command(&self, command: &str) -> Result<CommandOutput> {
@@ -169,14 +171,20 @@ impl McpTool for ShellTool {
 
         // Validate command is allowed
         if !self.is_command_allowed(&args.command) {
-            let cmd_name = args.command.split_whitespace().next().unwrap_or(&args.command);
-            let _ = tx.send(ToolStreamEvent::Error {
-                error: format!(
-                    "Command '{}' is not in the allowlist. Allowed commands: {:?}",
-                    cmd_name, self.allowed_commands
-                ),
-                error_code: "PERMISSION_DENIED".to_string(),
-            }).await;
+            let cmd_name = args
+                .command
+                .split_whitespace()
+                .next()
+                .unwrap_or(&args.command);
+            let _ = tx
+                .send(ToolStreamEvent::Error {
+                    error: format!(
+                        "Command '{}' is not in the allowlist. Allowed commands: {:?}",
+                        cmd_name, self.allowed_commands
+                    ),
+                    error_code: "PERMISSION_DENIED".to_string(),
+                })
+                .await;
             return Ok(rx);
         }
 
@@ -187,10 +195,12 @@ impl McpTool for ShellTool {
             let start = std::time::Instant::now();
 
             // Send started event
-            let _ = tx.send(ToolStreamEvent::Started {
-                tool_name: tool_name.clone(),
-                timestamp: chrono::Utc::now().timestamp(),
-            }).await;
+            let _ = tx
+                .send(ToolStreamEvent::Started {
+                    tool_name: tool_name.clone(),
+                    timestamp: chrono::Utc::now().timestamp(),
+                })
+                .await;
 
             tracing::info!(command = %command, "Executing shell command with streaming");
 
@@ -204,10 +214,12 @@ impl McpTool for ShellTool {
             {
                 Ok(child) => child,
                 Err(e) => {
-                    let _ = tx.send(ToolStreamEvent::Error {
-                        error: format!("Failed to spawn command: {}", e),
-                        error_code: "SPAWN_FAILED".to_string(),
-                    }).await;
+                    let _ = tx
+                        .send(ToolStreamEvent::Error {
+                            error: format!("Failed to spawn command: {}", e),
+                            error_code: "SPAWN_FAILED".to_string(),
+                        })
+                        .await;
                     return;
                 }
             };
@@ -221,10 +233,12 @@ impl McpTool for ShellTool {
                     while let Ok(Some(line)) = lines.next_line().await {
                         let mut data = line.into_bytes();
                         data.push(b'\n');
-                        let _ = tx_clone.send(ToolStreamEvent::Output {
-                            stream: "stdout".to_string(),
-                            data,
-                        }).await;
+                        let _ = tx_clone
+                            .send(ToolStreamEvent::Output {
+                                stream: "stdout".to_string(),
+                                data,
+                            })
+                            .await;
                     }
                 });
             }
@@ -238,10 +252,12 @@ impl McpTool for ShellTool {
                     while let Ok(Some(line)) = lines.next_line().await {
                         let mut data = line.into_bytes();
                         data.push(b'\n');
-                        let _ = tx_clone.send(ToolStreamEvent::Output {
-                            stream: "stderr".to_string(),
-                            data,
-                        }).await;
+                        let _ = tx_clone
+                            .send(ToolStreamEvent::Output {
+                                stream: "stderr".to_string(),
+                                data,
+                            })
+                            .await;
                     }
                 });
             }
@@ -250,19 +266,23 @@ impl McpTool for ShellTool {
             match child.wait().await {
                 Ok(status) => {
                     let execution_time_ms = start.elapsed().as_millis() as u64;
-                    let _ = tx.send(ToolStreamEvent::Complete {
-                        result: json!({
-                            "exit_code": status.code(),
-                            "success": status.success(),
-                        }),
-                        execution_time_ms,
-                    }).await;
+                    let _ = tx
+                        .send(ToolStreamEvent::Complete {
+                            result: json!({
+                                "exit_code": status.code(),
+                                "success": status.success(),
+                            }),
+                            execution_time_ms,
+                        })
+                        .await;
                 }
                 Err(e) => {
-                    let _ = tx.send(ToolStreamEvent::Error {
-                        error: format!("Failed to wait for command: {}", e),
-                        error_code: "WAIT_FAILED".to_string(),
-                    }).await;
+                    let _ = tx
+                        .send(ToolStreamEvent::Error {
+                            error: format!("Failed to wait for command: {}", e),
+                            error_code: "WAIT_FAILED".to_string(),
+                        })
+                        .await;
                 }
             }
         });
@@ -283,7 +303,7 @@ mod tests {
     fn test_command_allowlist() {
         let tool = ShellTool::with_allowlist(
             "test-container".to_string(),
-            vec!["ls".to_string(), "ps".to_string()]
+            vec!["ls".to_string(), "ps".to_string()],
         );
 
         assert!(tool.is_command_allowed("ls"));
@@ -307,10 +327,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_disallowed_command() {
-        let tool = ShellTool::with_allowlist(
-            "test-container".to_string(),
-            vec!["echo".to_string()]
-        );
+        let tool =
+            ShellTool::with_allowlist("test-container".to_string(), vec!["echo".to_string()]);
 
         let result = tool.execute_command("rm -rf /").await;
         assert!(result.is_err());
@@ -323,7 +341,10 @@ mod tests {
         let tool = ShellTool::new("test-container".to_string());
 
         let input = json!({"command": "echo 'line1' && echo 'line2'"});
-        let mut rx = tool.execute_stream(input).await.expect("Stream should start");
+        let mut rx = tool
+            .execute_stream(input)
+            .await
+            .expect("Stream should start");
 
         let mut events = Vec::new();
         while let Some(event) = rx.recv().await {
@@ -349,7 +370,9 @@ mod tests {
         }
 
         // Should have at least one Output event
-        let has_output = events.iter().any(|e| matches!(e, ToolStreamEvent::Output { .. }));
+        let has_output = events
+            .iter()
+            .any(|e| matches!(e, ToolStreamEvent::Output { .. }));
         assert!(has_output, "Should have at least one Output event");
     }
 }

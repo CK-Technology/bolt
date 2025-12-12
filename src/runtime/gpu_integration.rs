@@ -430,9 +430,7 @@ impl BoltGpuIntegration {
 
         // Step 3: Try to initialize nvbind GPU manager
         info!("🚀 Initializing nvbind GPU manager...");
-        match std::panic::catch_unwind(|| {
-            nvbind::bolt::NvbindGpuManager::with_defaults()
-        }) {
+        match std::panic::catch_unwind(|| nvbind::bolt::NvbindGpuManager::with_defaults()) {
             Ok(manager) => {
                 info!("✅ nvbind GPU manager initialized successfully");
 
@@ -475,10 +473,7 @@ impl BoltGpuIntegration {
         }
 
         // Method 2: Check lspci for NVIDIA GPUs
-        if let Ok(output) = tokio::process::Command::new("lspci")
-            .output()
-            .await
-        {
+        if let Ok(output) = tokio::process::Command::new("lspci").output().await {
             let stdout = String::from_utf8_lossy(&output.stdout);
             if stdout.to_lowercase().contains("nvidia") {
                 debug!("✓ NVIDIA GPU detected via lspci");
@@ -538,9 +533,7 @@ impl BoltGpuIntegration {
 
     /// Verify nvbind manager capabilities
     #[cfg(feature = "nvbind-support")]
-    async fn verify_nvbind_capabilities(
-        _manager: &nvbind::bolt::NvbindGpuManager,
-    ) -> Result<()> {
+    async fn verify_nvbind_capabilities(_manager: &nvbind::bolt::NvbindGpuManager) -> Result<()> {
         // Basic capability check - if manager was created, it should work
         // nvbind will have already validated GPU access during initialization
         Ok(())

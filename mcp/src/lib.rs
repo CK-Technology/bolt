@@ -6,13 +6,8 @@
 pub mod gateway;
 
 pub use gateway::{
-    catalog::Catalog,
-    client_manager::ClientManager,
-    config::GatewayConfig,
-    interceptor::Interceptor,
-    registry::ToolRegistry,
-    secrets::SecretStore,
-    McpGateway,
+    McpGateway, catalog::Catalog, client_manager::ClientManager, config::GatewayConfig,
+    interceptor::Interceptor, registry::ToolRegistry, secrets::SecretStore,
 };
 
 use thiserror::Error;

@@ -12,8 +12,8 @@ use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, warn};
 
 use crate::grpc::generated::mcp::*;
-use crate::mcp::tools::*;
 use crate::mcp::config::McpConfig;
+use crate::mcp::tools::*;
 use crate::runtime::unified::UnifiedRuntime;
 
 /// MCP Tool Service implementation
@@ -79,8 +79,14 @@ impl mcp_tool_service_server::McpToolService for McpToolServiceImpl {
                 McpTool {
                     name: tool.name().to_string(),
                     description: tool.description().to_string(),
-                    category: tool.name().split(':').next().unwrap_or("unknown").to_string(),
-                    input_schema_json: serde_json::to_string(&tool.input_schema()).unwrap_or_default(),
+                    category: tool
+                        .name()
+                        .split(':')
+                        .next()
+                        .unwrap_or("unknown")
+                        .to_string(),
+                    input_schema_json: serde_json::to_string(&tool.input_schema())
+                        .unwrap_or_default(),
                     enabled,
                     metadata: std::collections::HashMap::new(),
                 }
@@ -107,8 +113,8 @@ impl mcp_tool_service_server::McpToolService for McpToolServiceImpl {
             .find(|t| t.name() == req.tool_name)
             .ok_or_else(|| Status::not_found(format!("Tool not found: {}", req.tool_name)))?;
 
-        let input_schema_json = serde_json::to_string_pretty(&tool.input_schema())
-            .unwrap_or_default();
+        let input_schema_json =
+            serde_json::to_string_pretty(&tool.input_schema()).unwrap_or_default();
 
         // Generate example output schema
         let output_schema_json = serde_json::json!({
@@ -118,7 +124,8 @@ impl mcp_tool_service_server::McpToolService for McpToolServiceImpl {
                 "data": { "type": "object" },
                 "error": { "type": "string" }
             }
-        }).to_string();
+        })
+        .to_string();
 
         info!("✅ Retrieved schema for tool: {}", req.tool_name);
         Ok(Response::new(GetToolSchemaResponse {
@@ -135,7 +142,10 @@ impl mcp_tool_service_server::McpToolService for McpToolServiceImpl {
         request: Request<CallToolRequest>,
     ) -> Result<Response<CallToolResponse>, Status> {
         let req = request.into_inner();
-        info!("⚡ MCP CallTool: tool={}, container={}", req.tool_name, req.container_id);
+        info!(
+            "⚡ MCP CallTool: tool={}, container={}",
+            req.tool_name, req.container_id
+        );
 
         let start_time = std::time::Instant::now();
 
@@ -158,7 +168,10 @@ impl mcp_tool_service_server::McpToolService for McpToolServiceImpl {
                 let execution_time_ms = start_time.elapsed().as_millis() as u64;
                 let result_json = serde_json::to_string(&result).unwrap_or_default();
 
-                info!("✅ Tool executed successfully: {} ({}ms)", req.tool_name, execution_time_ms);
+                info!(
+                    "✅ Tool executed successfully: {} ({}ms)",
+                    req.tool_name, execution_time_ms
+                );
                 Ok(Response::new(CallToolResponse {
                     success: true,
                     result_json,
@@ -185,14 +198,18 @@ impl mcp_tool_service_server::McpToolService for McpToolServiceImpl {
     }
 
     /// Call tool with streaming output
-    type CallToolStreamStream = Pin<Box<dyn Stream<Item = Result<CallToolStreamResponse, Status>> + Send>>;
+    type CallToolStreamStream =
+        Pin<Box<dyn Stream<Item = Result<CallToolStreamResponse, Status>> + Send>>;
 
     async fn call_tool_stream(
         &self,
         request: Request<CallToolRequest>,
     ) -> Result<Response<Self::CallToolStreamStream>, Status> {
         let req = request.into_inner();
-        info!("📡 MCP CallToolStream: tool={}, container={}", req.tool_name, req.container_id);
+        info!(
+            "📡 MCP CallToolStream: tool={}, container={}",
+            req.tool_name, req.container_id
+        );
 
         let (tx, rx) = tokio::sync::mpsc::channel(100);
 
@@ -205,12 +222,14 @@ impl mcp_tool_service_server::McpToolService for McpToolServiceImpl {
             let tool = match tools.iter().find(|t| t.name() == tool_name.as_str()) {
                 Some(t) => t,
                 None => {
-                    let _ = tx.send(Ok(CallToolStreamResponse {
-                        event: Some(call_tool_stream_response::Event::Error(ToolError {
-                            error: format!("Tool not found: {}", tool_name),
-                            error_code: "TOOL_NOT_FOUND".to_string(),
-                        })),
-                    })).await;
+                    let _ = tx
+                        .send(Ok(CallToolStreamResponse {
+                            event: Some(call_tool_stream_response::Event::Error(ToolError {
+                                error: format!("Tool not found: {}", tool_name),
+                                error_code: "TOOL_NOT_FOUND".to_string(),
+                            })),
+                        }))
+                        .await;
                     return;
                 }
             };
@@ -219,12 +238,14 @@ impl mcp_tool_service_server::McpToolService for McpToolServiceImpl {
             let arguments = match serde_json::from_str::<serde_json::Value>(&req.arguments_json) {
                 Ok(args) => args,
                 Err(e) => {
-                    let _ = tx.send(Ok(CallToolStreamResponse {
-                        event: Some(call_tool_stream_response::Event::Error(ToolError {
-                            error: format!("Invalid JSON arguments: {}", e),
-                            error_code: "INVALID_ARGUMENTS".to_string(),
-                        })),
-                    })).await;
+                    let _ = tx
+                        .send(Ok(CallToolStreamResponse {
+                            event: Some(call_tool_stream_response::Event::Error(ToolError {
+                                error: format!("Invalid JSON arguments: {}", e),
+                                error_code: "INVALID_ARGUMENTS".to_string(),
+                            })),
+                        }))
+                        .await;
                     return;
                 }
             };
@@ -237,12 +258,13 @@ impl mcp_tool_service_server::McpToolService for McpToolServiceImpl {
                         use crate::mcp::tools::ToolStreamEvent;
 
                         let grpc_event = match event {
-                            ToolStreamEvent::Started { tool_name, timestamp } => {
-                                call_tool_stream_response::Event::Started(ToolStarted {
-                                    tool_name,
-                                    timestamp,
-                                })
-                            }
+                            ToolStreamEvent::Started {
+                                tool_name,
+                                timestamp,
+                            } => call_tool_stream_response::Event::Started(ToolStarted {
+                                tool_name,
+                                timestamp,
+                            }),
                             ToolStreamEvent::Progress { message, percent } => {
                                 call_tool_stream_response::Event::Progress(ToolProgress {
                                     message,
@@ -255,13 +277,14 @@ impl mcp_tool_service_server::McpToolService for McpToolServiceImpl {
                                     data,
                                 })
                             }
-                            ToolStreamEvent::Complete { result, execution_time_ms } => {
-                                call_tool_stream_response::Event::Complete(ToolComplete {
-                                    success: true,
-                                    result_json: serde_json::to_string(&result).unwrap_or_default(),
-                                    execution_time_ms,
-                                })
-                            }
+                            ToolStreamEvent::Complete {
+                                result,
+                                execution_time_ms,
+                            } => call_tool_stream_response::Event::Complete(ToolComplete {
+                                success: true,
+                                result_json: serde_json::to_string(&result).unwrap_or_default(),
+                                execution_time_ms,
+                            }),
                             ToolStreamEvent::Error { error, error_code } => {
                                 call_tool_stream_response::Event::Error(ToolError {
                                     error,
@@ -270,21 +293,27 @@ impl mcp_tool_service_server::McpToolService for McpToolServiceImpl {
                             }
                         };
 
-                        if tx.send(Ok(CallToolStreamResponse {
-                            event: Some(grpc_event),
-                        })).await.is_err() {
+                        if tx
+                            .send(Ok(CallToolStreamResponse {
+                                event: Some(grpc_event),
+                            }))
+                            .await
+                            .is_err()
+                        {
                             // Client disconnected
                             break;
                         }
                     }
                 }
                 Err(e) => {
-                    let _ = tx.send(Ok(CallToolStreamResponse {
-                        event: Some(call_tool_stream_response::Event::Error(ToolError {
-                            error: e.to_string(),
-                            error_code: "EXECUTION_FAILED".to_string(),
-                        })),
-                    })).await;
+                    let _ = tx
+                        .send(Ok(CallToolStreamResponse {
+                            event: Some(call_tool_stream_response::Event::Error(ToolError {
+                                error: e.to_string(),
+                                error_code: "EXECUTION_FAILED".to_string(),
+                            })),
+                        }))
+                        .await;
                 }
             }
         });
@@ -345,13 +374,13 @@ impl mcp_resource_service_server::McpResourceService for McpResourceServiceImpl 
         request: Request<ListResourcesRequest>,
     ) -> Result<Response<ListResourcesResponse>, Status> {
         let req = request.into_inner();
-        info!("📚 MCP ListResources: container={}, pattern={}",
-              req.container_id, req.uri_pattern);
+        info!(
+            "📚 MCP ListResources: container={}, pattern={}",
+            req.container_id, req.uri_pattern
+        );
 
         // Placeholder: would implement actual resource discovery
-        Ok(Response::new(ListResourcesResponse {
-            resources: vec![],
-        }))
+        Ok(Response::new(ListResourcesResponse { resources: vec![] }))
     }
 
     async fn read_resource(
@@ -362,10 +391,13 @@ impl mcp_resource_service_server::McpResourceService for McpResourceServiceImpl 
         info!("📖 MCP ReadResource: uri={}", req.uri);
 
         // Placeholder: would implement actual resource reading
-        Err(Status::unimplemented("Resource reading not yet implemented"))
+        Err(Status::unimplemented(
+            "Resource reading not yet implemented",
+        ))
     }
 
-    type SubscribeResourceStream = Pin<Box<dyn Stream<Item = Result<ResourceUpdate, Status>> + Send>>;
+    type SubscribeResourceStream =
+        Pin<Box<dyn Stream<Item = Result<ResourceUpdate, Status>> + Send>>;
 
     async fn subscribe_resource(
         &self,
@@ -375,7 +407,9 @@ impl mcp_resource_service_server::McpResourceService for McpResourceServiceImpl 
         info!("👀 MCP SubscribeResource: pattern={}", req.uri_pattern);
 
         // Placeholder: would implement resource watching
-        Err(Status::unimplemented("Resource subscription not yet implemented"))
+        Err(Status::unimplemented(
+            "Resource subscription not yet implemented",
+        ))
     }
 }
 
@@ -437,8 +471,10 @@ impl mcp_config_service_server::McpConfigService for McpConfigServiceImpl {
         request: Request<SetToolEnabledRequest>,
     ) -> Result<Response<SetToolEnabledResponse>, Status> {
         let req = request.into_inner();
-        info!("🔀 MCP SetToolEnabled: tool={}, enabled={}",
-              req.tool_name, req.enabled);
+        info!(
+            "🔀 MCP SetToolEnabled: tool={}, enabled={}",
+            req.tool_name, req.enabled
+        );
 
         let mut config = self.mcp_config.write().await;
 

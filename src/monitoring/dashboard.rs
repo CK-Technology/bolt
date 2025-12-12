@@ -1,7 +1,7 @@
 //! Real-time metrics dashboard with GPU and container visualizations
 
-use crate::monitoring::MetricsCollector;
 use crate::BoltRuntime;
+use crate::monitoring::MetricsCollector;
 use anyhow::Result;
 use serde_json::json;
 use std::sync::Arc;
@@ -15,10 +15,7 @@ pub struct MetricsDashboard {
 
 impl MetricsDashboard {
     pub fn new(runtime: Arc<BoltRuntime>, metrics: Arc<MetricsCollector>) -> Self {
-        Self {
-            runtime,
-            metrics,
-        }
+        Self { runtime, metrics }
     }
 
     /// Start the dashboard server on port 9091
@@ -29,8 +26,7 @@ impl MetricsDashboard {
         let metrics = self.metrics.clone();
 
         // Dashboard HTML endpoint
-        let index = warp::path::end()
-            .map(|| warp::reply::html(Self::dashboard_html()));
+        let index = warp::path::end().map(|| warp::reply::html(Self::dashboard_html()));
 
         // Real-time metrics API endpoint
         let runtime_clone = runtime.clone();
@@ -54,22 +50,18 @@ impl MetricsDashboard {
 
         // Container metrics endpoint
         let runtime_clone = runtime.clone();
-        let api_containers = warp::path!("api" / "containers")
-            .and(warp::get())
-            .and_then(move || {
-                let rt = runtime_clone.clone();
-                async move { Self::get_container_metrics(rt).await }
-            });
+        let api_containers =
+            warp::path!("api" / "containers")
+                .and(warp::get())
+                .and_then(move || {
+                    let rt = runtime_clone.clone();
+                    async move { Self::get_container_metrics(rt).await }
+                });
 
-        let routes = index
-            .or(api_metrics)
-            .or(api_gpu)
-            .or(api_containers);
+        let routes = index.or(api_metrics).or(api_gpu).or(api_containers);
 
         tracing::info!("✅ Dashboard ready at http://0.0.0.0:{}", port);
-        warp::serve(routes)
-            .run(([0, 0, 0, 0], port))
-            .await;
+        warp::serve(routes).run(([0, 0, 0, 0], port)).await;
 
         Ok(())
     }
@@ -138,7 +130,7 @@ impl MetricsDashboard {
     async fn get_gpu_metrics(_runtime: Arc<BoltRuntime>) -> Result<impl Reply, warp::Rejection> {
         // Query nvidia-smi for real GPU metrics
         let gpu_data = match tokio::process::Command::new("nvidia-smi")
-            .args(&[
+            .args([
                 "--query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw",
                 "--format=csv,noheader,nounits"
             ])
@@ -185,7 +177,9 @@ impl MetricsDashboard {
         Ok(warp::reply::json(&json!({ "gpus": gpu_data })))
     }
 
-    async fn get_container_metrics(runtime: Arc<BoltRuntime>) -> Result<impl Reply, warp::Rejection> {
+    async fn get_container_metrics(
+        runtime: Arc<BoltRuntime>,
+    ) -> Result<impl Reply, warp::Rejection> {
         let containers = runtime.list_containers(true).await.unwrap_or_default();
 
         let container_data: Vec<_> = containers

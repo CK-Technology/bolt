@@ -36,7 +36,10 @@ async fn test_volume_creation_performance() {
         let _ = volume_manager.remove_volume(&volume_name, false);
     }
 
-    assert!(create_time.as_millis() < 500, "Volume creation should be < 500ms");
+    assert!(
+        create_time.as_millis() < 500,
+        "Volume creation should be < 500ms"
+    );
 }
 
 #[tokio::test]
@@ -67,7 +70,10 @@ async fn test_user_config_load_performance() {
     println!("User config load time: {:?}", elapsed);
 
     assert!(config.is_ok(), "User config should load");
-    assert!(elapsed.as_millis() < 50, "User config load should be < 50ms");
+    assert!(
+        elapsed.as_millis() < 50,
+        "User config load should be < 50ms"
+    );
 }
 
 #[test]
@@ -75,14 +81,16 @@ fn test_hardware_detection_performance() {
     let start = Instant::now();
 
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let result = runtime.block_on(async {
-        bolt::runtime::hardware_detection::HardwareProfile::detect().await
-    });
+    let result = runtime
+        .block_on(async { bolt::runtime::hardware_detection::HardwareProfile::detect().await });
 
     let elapsed = start.elapsed();
 
     println!("Hardware detection time: {:?}", elapsed);
 
     assert!(result.is_ok(), "Hardware detection should succeed");
-    assert!(elapsed.as_millis() < 1000, "Hardware detection should be < 1s");
+    assert!(
+        elapsed.as_millis() < 1000,
+        "Hardware detection should be < 1s"
+    );
 }

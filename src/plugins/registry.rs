@@ -66,7 +66,7 @@ impl PluginRegistry {
             .collect()
     }
 
-    pub async fn install(&self, plugin_name: &str, install_path: &PathBuf) -> Result<()> {
+    pub async fn install(&self, plugin_name: &str, install_path: &std::path::Path) -> Result<()> {
         let entry = self
             .plugins
             .get(plugin_name)

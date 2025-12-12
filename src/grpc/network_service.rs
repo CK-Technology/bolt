@@ -6,14 +6,14 @@ use anyhow::Result;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::Stream;
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info};
 
 use crate::grpc::generated::network::*;
-use crate::networking::quic_real::RealQUICServer;
 use crate::network;
+use crate::networking::quic_real::RealQUICServer;
 
 /// Network service implementation
 pub struct NetworkServiceImpl {
@@ -24,9 +24,7 @@ impl NetworkServiceImpl {
     /// Create new network service
     pub fn new() -> Self {
         info!("🌐 Initializing NetworkService gRPC handler");
-        Self {
-            quic_server: None,
-        }
+        Self { quic_server: None }
     }
 
     /// Create with QUIC server for advanced features
@@ -46,9 +44,16 @@ impl network_service_server::NetworkService for NetworkServiceImpl {
         request: Request<CreateNetworkRequest>,
     ) -> Result<Response<CreateNetworkResponse>, Status> {
         let req = request.into_inner();
-        info!("🔧 gRPC CreateNetwork: name={}, driver={}", req.name, req.driver);
+        info!(
+            "🔧 gRPC CreateNetwork: name={}, driver={}",
+            req.name, req.driver
+        );
 
-        let subnet = if req.subnet.is_empty() { None } else { Some(req.subnet.as_str()) };
+        let subnet = if req.subnet.is_empty() {
+            None
+        } else {
+            Some(req.subnet.as_str())
+        };
         match network::create_network(&req.name, &req.driver, subnet).await {
             Ok(_) => {
                 let network_id = format!("net-{}", uuid::Uuid::new_v4());
@@ -121,8 +126,8 @@ impl network_service_server::NetworkService for NetworkServiceImpl {
                         name: n.name.clone(),
                         driver: n.driver.clone(),
                         subnet: n.subnet.clone().unwrap_or_default(),
-                        gateway: String::new(),  // Not available in bolt::types::NetworkInfo
-                        containers: vec![],      // Not available in bolt::types::NetworkInfo
+                        gateway: String::new(), // Not available in bolt::types::NetworkInfo
+                        containers: vec![],     // Not available in bolt::types::NetworkInfo
                         labels: std::collections::HashMap::new(),
                         created_at: 0,
                     })
@@ -148,8 +153,10 @@ impl network_service_server::NetworkService for NetworkServiceImpl {
         request: Request<StatsRequest>,
     ) -> Result<Response<Self::StreamStatsStream>, Status> {
         let req = request.into_inner();
-        info!("📊 gRPC StreamStats: network_id={}, stream={}, interval={}ms",
-              req.network_id, req.stream, req.interval_ms);
+        info!(
+            "📊 gRPC StreamStats: network_id={}, stream={}, interval={}ms",
+            req.network_id, req.stream, req.interval_ms
+        );
 
         let (tx, rx) = tokio::sync::mpsc::channel(100);
 
@@ -244,20 +251,24 @@ impl network_service_server::NetworkService for NetworkServiceImpl {
                 0.0
             };
 
-            info!("✅ QUIC pool: size={}/{}, reuses={}, rate={:.1}%",
-                  pool_size, max_pool_size, total_reuses, reuse_rate);
+            info!(
+                "✅ QUIC pool: size={}/{}, reuses={}, rate={:.1}%",
+                pool_size, max_pool_size, total_reuses, reuse_rate
+            );
 
             // Get individual connection details from the pool
             let connections = server.get_stats().await;
-            let connection_infos = connections.connection_infos.iter().map(|conn| {
-                PooledConnectionInfo {
+            let connection_infos = connections
+                .connection_infos
+                .iter()
+                .map(|conn| PooledConnectionInfo {
                     remote_addr: conn.remote_addr.to_string(),
                     container_id: conn.container_id.clone(),
                     use_count: conn.use_count,
                     idle_time_ms: conn.idle_time.as_millis() as u64,
                     rtt_ms: conn.rtt_ms,
-                }
-            }).collect();
+                })
+                .collect();
 
             Ok(Response::new(QuicPoolStatsResponse {
                 pool_size: pool_size as u32,
@@ -277,14 +288,20 @@ impl network_service_server::NetworkService for NetworkServiceImpl {
         request: Request<PortForwardRequest>,
     ) -> Result<Response<PortForwardResponse>, Status> {
         let req = request.into_inner();
-        info!("🔀 gRPC SetupPortForward: {}:{} -> container {}:{}",
-              req.host_port, req.protocol, req.container_id, req.container_port);
+        info!(
+            "🔀 gRPC SetupPortForward: {}:{} -> container {}:{}",
+            req.host_port, req.protocol, req.container_id, req.container_port
+        );
 
         if let Some(ref quic_server) = self.quic_server {
             let server = quic_server.read().await;
 
             match server
-                .setup_port_forward(&req.container_id, req.host_port as u16, req.container_port as u16)
+                .setup_port_forward(
+                    &req.container_id,
+                    req.host_port as u16,
+                    req.container_port as u16,
+                )
                 .await
             {
                 Ok(_) => {
@@ -330,30 +347,26 @@ impl network_service_server::NetworkService for NetworkServiceImpl {
 
             // Parse forward_id to get host_port (format: "host_port")
             match req.forward_id.parse::<u16>() {
-                Ok(host_port) => {
-                    match server.remove_port_forward(host_port).await {
-                        Ok(_) => {
-                            info!("✅ Port forward removed: {}", host_port);
-                            Ok(Response::new(RemovePortForwardResponse {
-                                success: true,
-                                error: String::new(),
-                            }))
-                        }
-                        Err(e) => {
-                            warn!("❌ Failed to remove port forward: {}", e);
-                            Ok(Response::new(RemovePortForwardResponse {
-                                success: false,
-                                error: e.to_string(),
-                            }))
-                        }
+                Ok(host_port) => match server.remove_port_forward(host_port).await {
+                    Ok(_) => {
+                        info!("✅ Port forward removed: {}", host_port);
+                        Ok(Response::new(RemovePortForwardResponse {
+                            success: true,
+                            error: String::new(),
+                        }))
                     }
-                }
-                Err(e) => {
-                    Ok(Response::new(RemovePortForwardResponse {
-                        success: false,
-                        error: format!("Invalid forward_id: {}", e),
-                    }))
-                }
+                    Err(e) => {
+                        warn!("❌ Failed to remove port forward: {}", e);
+                        Ok(Response::new(RemovePortForwardResponse {
+                            success: false,
+                            error: e.to_string(),
+                        }))
+                    }
+                },
+                Err(e) => Ok(Response::new(RemovePortForwardResponse {
+                    success: false,
+                    error: format!("Invalid forward_id: {}", e),
+                })),
             }
         } else {
             Err(Status::unavailable("QUIC server not available"))
@@ -366,17 +379,24 @@ impl network_service_server::NetworkService for NetworkServiceImpl {
         request: Request<ConnectContainerRequest>,
     ) -> Result<Response<ConnectContainerResponse>, Status> {
         let req = request.into_inner();
-        info!("🔗 gRPC ConnectContainer: container={} to network={}",
-              req.container_id, req.network_id);
+        info!(
+            "🔗 gRPC ConnectContainer: container={} to network={}",
+            req.container_id, req.network_id
+        );
 
         if let Some(ref quic_server) = self.quic_server {
             let server = quic_server.read().await;
 
             // Connect container to network
-            match server.connect_container(&req.container_id, &req.network_id).await {
+            match server
+                .connect_container(&req.container_id, &req.network_id)
+                .await
+            {
                 Ok(assigned_ip) => {
-                    info!("✅ Container {} connected to network {} with IP {}",
-                          req.container_id, req.network_id, assigned_ip);
+                    info!(
+                        "✅ Container {} connected to network {} with IP {}",
+                        req.container_id, req.network_id, assigned_ip
+                    );
                     Ok(Response::new(ConnectContainerResponse {
                         container_id: req.container_id,
                         network_id: req.network_id,
@@ -407,17 +427,24 @@ impl network_service_server::NetworkService for NetworkServiceImpl {
         request: Request<DisconnectContainerRequest>,
     ) -> Result<Response<DisconnectContainerResponse>, Status> {
         let req = request.into_inner();
-        info!("🔌 gRPC DisconnectContainer: container={} from network={}",
-              req.container_id, req.network_id);
+        info!(
+            "🔌 gRPC DisconnectContainer: container={} from network={}",
+            req.container_id, req.network_id
+        );
 
         if let Some(ref quic_server) = self.quic_server {
             let server = quic_server.read().await;
 
             // Disconnect container from network
-            match server.disconnect_container(&req.container_id, &req.network_id).await {
+            match server
+                .disconnect_container(&req.container_id, &req.network_id)
+                .await
+            {
                 Ok(_) => {
-                    info!("✅ Container {} disconnected from network {}",
-                          req.container_id, req.network_id);
+                    info!(
+                        "✅ Container {} disconnected from network {}",
+                        req.container_id, req.network_id
+                    );
                     Ok(Response::new(DisconnectContainerResponse {
                         success: true,
                         error: String::new(),
@@ -442,8 +469,10 @@ impl network_service_server::NetworkService for NetworkServiceImpl {
         request: Request<OptimizationsRequest>,
     ) -> Result<Response<OptimizationsResponse>, Status> {
         let req = request.into_inner();
-        info!("⚡ gRPC EnableOptimizations: container={}, network={}",
-              req.container_id, req.network_id);
+        info!(
+            "⚡ gRPC EnableOptimizations: container={}, network={}",
+            req.container_id, req.network_id
+        );
 
         let mut enabled_features = Vec::new();
 

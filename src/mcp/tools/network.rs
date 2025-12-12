@@ -2,9 +2,9 @@
 //!
 //! Provides network metrics and statistics for containers
 
-use crate::mcp::{tools::McpTool, McpError, Result};
+use crate::mcp::{McpError, Result, tools::McpTool};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::fs;
 
 /// Network statistics tool

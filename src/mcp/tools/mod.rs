@@ -8,20 +8,20 @@
 //! - Network statistics
 //! - OMEN AI router (Phase 3)
 
-pub mod gpu;
 pub mod filesystem;
-pub mod shell;
-pub mod process;
+pub mod gpu;
 pub mod network;
+pub mod process;
+pub mod shell;
 
 #[cfg(feature = "omen")]
 pub mod omen_router;
 
-pub use gpu::GpuStatsTool;
 pub use filesystem::FilesystemTool;
-pub use shell::ShellTool;
-pub use process::ProcessTool;
+pub use gpu::GpuStatsTool;
 pub use network::NetworkTool;
+pub use process::ProcessTool;
+pub use shell::ShellTool;
 
 #[cfg(feature = "omen")]
 pub use omen_router::OmenRouterTool;
@@ -40,7 +40,10 @@ pub enum ToolStreamEvent {
     /// Output chunk (stdout/stderr)
     Output { stream: String, data: Vec<u8> },
     /// Tool completed successfully
-    Complete { result: Value, execution_time_ms: u64 },
+    Complete {
+        result: Value,
+        execution_time_ms: u64,
+    },
     /// Tool execution failed
     Error { error: String, error_code: String },
 }
@@ -74,25 +77,31 @@ pub trait McpTool: Send + Sync {
             let tool_name = self.name().to_string();
 
             // Send started event
-            let _ = tx.send(ToolStreamEvent::Started {
-                tool_name: tool_name.clone(),
-                timestamp: chrono::Utc::now().timestamp(),
-            }).await;
+            let _ = tx
+                .send(ToolStreamEvent::Started {
+                    tool_name: tool_name.clone(),
+                    timestamp: chrono::Utc::now().timestamp(),
+                })
+                .await;
 
             // Execute tool
             let start = std::time::Instant::now();
             match self.execute(input).await {
                 Ok(result) => {
-                    let _ = tx.send(ToolStreamEvent::Complete {
-                        result,
-                        execution_time_ms: start.elapsed().as_millis() as u64,
-                    }).await;
+                    let _ = tx
+                        .send(ToolStreamEvent::Complete {
+                            result,
+                            execution_time_ms: start.elapsed().as_millis() as u64,
+                        })
+                        .await;
                 }
                 Err(e) => {
-                    let _ = tx.send(ToolStreamEvent::Error {
-                        error: e.to_string(),
-                        error_code: "EXECUTION_FAILED".to_string(),
-                    }).await;
+                    let _ = tx
+                        .send(ToolStreamEvent::Error {
+                            error: e.to_string(),
+                            error_code: "EXECUTION_FAILED".to_string(),
+                        })
+                        .await;
                 }
             }
 

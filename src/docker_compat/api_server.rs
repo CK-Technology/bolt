@@ -582,7 +582,10 @@ impl DockerAPIServer {
     pub async fn start_unix_socket(&self, socket_path: &str) -> Result<()> {
         use std::path::Path;
 
-        tracing::info!("🐳 Starting Docker API server on Unix socket: {}", socket_path);
+        tracing::info!(
+            "🐳 Starting Docker API server on Unix socket: {}",
+            socket_path
+        );
 
         // Remove existing socket if present
         if Path::new(socket_path).exists() {
@@ -603,7 +606,10 @@ impl DockerAPIServer {
             // Create Unix listener
             match tokio::net::UnixListener::bind(&socket_path_owned) {
                 Ok(listener) => {
-                    tracing::info!("✅ Docker API listening on Unix socket: {}", socket_path_owned);
+                    tracing::info!(
+                        "✅ Docker API listening on Unix socket: {}",
+                        socket_path_owned
+                    );
 
                     let service = warp::service(routes);
                     loop {
@@ -648,7 +654,9 @@ impl DockerAPIServer {
     }
 
     /// Build warp routes (shared between TCP and Unix socket)
-    fn build_routes_static(runtime_param: Arc<BoltRuntime>) -> impl warp::Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    fn build_routes_static(
+        runtime_param: Arc<BoltRuntime>,
+    ) -> impl warp::Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
         let runtime = runtime_param.clone();
 
         // Version endpoint
@@ -797,12 +805,14 @@ impl DockerAPIServer {
         let containers_attach = warp::path!("containers" / String / "attach")
             .and(warp::ws())
             .and(warp::query::<HashMap<String, String>>())
-            .map(move |id: String, ws: warp::ws::Ws, params: HashMap<String, String>| {
-                let rt = runtime_clone.clone();
-                ws.on_upgrade(move |websocket| {
-                    Self::handle_container_attach(rt, id, params, websocket)
-                })
-            });
+            .map(
+                move |id: String, ws: warp::ws::Ws, params: HashMap<String, String>| {
+                    let rt = runtime_clone.clone();
+                    ws.on_upgrade(move |websocket| {
+                        Self::handle_container_attach(rt, id, params, websocket)
+                    })
+                },
+            );
 
         // Network endpoints
         let runtime_clone = runtime.clone();
@@ -1425,7 +1435,10 @@ impl DockerAPIServer {
         let _tty = body["Tty"].as_bool().unwrap_or(false);
 
         // Generate exec ID
-        let exec_id = format!("exec-{}", uuid::Uuid::new_v4().to_string().replace("-", "")[..12].to_string());
+        let exec_id = format!(
+            "exec-{}",
+            &uuid::Uuid::new_v4().to_string().replace("-", "")[..12]
+        );
 
         let response = serde_json::json!({
             "Id": exec_id
@@ -1442,10 +1455,7 @@ impl DockerAPIServer {
         tracing::info!("Starting exec instance: {}", exec_id);
 
         // Return empty response (in real impl, would stream output)
-        Ok(warp::reply::with_status(
-            "",
-            warp::http::StatusCode::OK,
-        ))
+        Ok(warp::reply::with_status("", warp::http::StatusCode::OK))
     }
 
     async fn containers_logs_handler(
@@ -1453,20 +1463,22 @@ impl DockerAPIServer {
         container_id: String,
         params: HashMap<String, String>,
     ) -> Result<impl Reply, Rejection> {
-        let _follow = params.get("follow").map(|v| v == "true" || v == "1").unwrap_or(false);
+        let _follow = params
+            .get("follow")
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false);
         let _tail = params.get("tail").and_then(|v| v.parse::<usize>().ok());
-        let _timestamps = params.get("timestamps").map(|v| v == "true" || v == "1").unwrap_or(false);
+        let _timestamps = params
+            .get("timestamps")
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false);
 
         tracing::info!("Fetching logs for container: {}", container_id);
 
         // Return mock logs (in real impl, would stream from /var/log/bolt/containers/{id}.log)
         let logs = format!("Container {} logs\nLine 2\nLine 3\n", container_id);
 
-        Ok(warp::reply::with_header(
-            logs,
-            "content-type",
-            "text/plain",
-        ))
+        Ok(warp::reply::with_header(logs, "content-type", "text/plain"))
     }
 
     async fn containers_stats_handler(
@@ -1474,7 +1486,10 @@ impl DockerAPIServer {
         container_id: String,
         params: HashMap<String, String>,
     ) -> Result<impl Reply, Rejection> {
-        let _stream = params.get("stream").map(|v| v == "true" || v == "1").unwrap_or(true);
+        let _stream = params
+            .get("stream")
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(true);
 
         tracing::info!("Fetching stats for container: {}", container_id);
 
@@ -1525,14 +1540,29 @@ impl DockerAPIServer {
 
         tracing::info!("WebSocket attach to container: {}", container_id);
 
-        let stream = params.get("stream").and_then(|v| v.parse::<bool>().ok()).unwrap_or(true);
-        let stdin = params.get("stdin").and_then(|v| v.parse::<bool>().ok()).unwrap_or(false);
-        let stdout = params.get("stdout").and_then(|v| v.parse::<bool>().ok()).unwrap_or(true);
-        let stderr = params.get("stderr").and_then(|v| v.parse::<bool>().ok()).unwrap_or(true);
+        let stream = params
+            .get("stream")
+            .and_then(|v| v.parse::<bool>().ok())
+            .unwrap_or(true);
+        let stdin = params
+            .get("stdin")
+            .and_then(|v| v.parse::<bool>().ok())
+            .unwrap_or(false);
+        let stdout = params
+            .get("stdout")
+            .and_then(|v| v.parse::<bool>().ok())
+            .unwrap_or(true);
+        let stderr = params
+            .get("stderr")
+            .and_then(|v| v.parse::<bool>().ok())
+            .unwrap_or(true);
 
         tracing::debug!(
             "Attach params - stream: {}, stdin: {}, stdout: {}, stderr: {}",
-            stream, stdin, stdout, stderr
+            stream,
+            stdin,
+            stdout,
+            stderr
         );
 
         let (mut ws_tx, mut ws_rx) = websocket.split();
@@ -1558,8 +1588,14 @@ impl DockerAPIServer {
                     // Check if container is still running
                     match runtime_clone.list_containers(false).await {
                         Ok(containers) => {
-                            if !containers.iter().any(|c| c.id == container_id_clone || c.name == container_id_clone) {
-                                tracing::info!("Container {} no longer running, closing attach", container_id_clone);
+                            if !containers
+                                .iter()
+                                .any(|c| c.id == container_id_clone || c.name == container_id_clone)
+                            {
+                                tracing::info!(
+                                    "Container {} no longer running, closing attach",
+                                    container_id_clone
+                                );
                                 break;
                             }
                         }
@@ -1604,7 +1640,10 @@ impl DockerAPIServer {
                                 tracing::debug!("stdin: {}", text.trim());
                             }
                         } else if msg.is_close() {
-                            tracing::info!("WebSocket close frame received for container {}", container_id);
+                            tracing::info!(
+                                "WebSocket close frame received for container {}",
+                                container_id
+                            );
                             break;
                         }
                     }

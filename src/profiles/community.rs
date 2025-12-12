@@ -44,28 +44,43 @@ pub async fn submit_profile(
     if profile.name.to_lowercase().contains("performance") {
         tags.push("high-performance".to_string());
     }
-    if profile.name.to_lowercase().contains("latency") || profile.name.to_lowercase().contains("low-latency") {
+    if profile.name.to_lowercase().contains("latency")
+        || profile.name.to_lowercase().contains("low-latency")
+    {
         tags.push("low-latency".to_string());
     }
 
     // Add platform tags
-    if profile.name.to_lowercase().contains("amd") || profile.description.to_lowercase().contains("amd") {
+    if profile.name.to_lowercase().contains("amd")
+        || profile.description.to_lowercase().contains("amd")
+    {
         tags.push("amd".to_string());
     }
-    if profile.name.to_lowercase().contains("nvidia") || profile.description.to_lowercase().contains("nvidia") {
+    if profile.name.to_lowercase().contains("nvidia")
+        || profile.description.to_lowercase().contains("nvidia")
+    {
         tags.push("nvidia".to_string());
     }
 
     // Auto-detect compatible games from profile name/description
     let mut compatible_games = Vec::new();
     let game_keywords = [
-        "counter-strike", "cs2", "dota", "apex", "valorant",
-        "fortnite", "overwatch", "warzone", "minecraft", "wow"
+        "counter-strike",
+        "cs2",
+        "dota",
+        "apex",
+        "valorant",
+        "fortnite",
+        "overwatch",
+        "warzone",
+        "minecraft",
+        "wow",
     ];
 
     for keyword in &game_keywords {
-        if profile.name.to_lowercase().contains(keyword) ||
-           profile.description.to_lowercase().contains(keyword) {
+        if profile.name.to_lowercase().contains(keyword)
+            || profile.description.to_lowercase().contains(keyword)
+        {
             compatible_games.push(keyword.to_string());
             tags.push(format!("game-{}", keyword));
         }

@@ -596,7 +596,8 @@ async fn main() -> Result<()> {
                         _ => SnapType::Manual,
                     };
 
-                    let snapshot_manager = bolt::capsules::snapshots::SnapshotManager::new().await?;
+                    let snapshot_manager =
+                        bolt::capsules::snapshots::SnapshotManager::new().await?;
                     snapshot_manager
                         .create_snapshot(&snapshot_name, snap_type, description.as_deref())
                         .await?;
@@ -612,7 +613,8 @@ async fn main() -> Result<()> {
                         info!("Filtering by type: {}", filter);
                     }
 
-                    let snapshot_manager = bolt::capsules::snapshots::SnapshotManager::new().await?;
+                    let snapshot_manager =
+                        bolt::capsules::snapshots::SnapshotManager::new().await?;
                     let snapshots = snapshot_manager.list_snapshots().await?;
 
                     if snapshots.is_empty() {
@@ -624,7 +626,10 @@ async fn main() -> Result<()> {
                     } else {
                         for snapshot in snapshots {
                             if verbose {
-                                println!("{} - {} ({:?})", snapshot.name, snapshot.created_at, snapshot.snapshot_type);
+                                println!(
+                                    "{} - {} ({:?})",
+                                    snapshot.name, snapshot.created_at, snapshot.snapshot_type
+                                );
                             } else {
                                 println!("{}", snapshot.name);
                             }
@@ -634,7 +639,8 @@ async fn main() -> Result<()> {
                 cli::SnapshotCommands::Show { snapshot } => {
                     info!("Showing snapshot details for: {}", snapshot);
 
-                    let snapshot_manager = bolt::capsules::snapshots::SnapshotManager::new().await?;
+                    let snapshot_manager =
+                        bolt::capsules::snapshots::SnapshotManager::new().await?;
                     let snapshots = snapshot_manager.list_snapshots().await?;
 
                     if let Some(snap) = snapshots.iter().find(|s| s.name == snapshot) {
@@ -660,7 +666,8 @@ async fn main() -> Result<()> {
                 cli::SnapshotCommands::Rollback { snapshot, force } => {
                     info!("Rolling back to snapshot '{}' (force: {})", snapshot, force);
 
-                    let snapshot_manager = bolt::capsules::snapshots::SnapshotManager::new().await?;
+                    let snapshot_manager =
+                        bolt::capsules::snapshots::SnapshotManager::new().await?;
                     snapshot_manager.rollback_to_snapshot(&snapshot).await?;
 
                     info!("✅ Rolled back to snapshot '{}' successfully", snapshot);
@@ -668,21 +675,33 @@ async fn main() -> Result<()> {
                 cli::SnapshotCommands::Delete { snapshot, force } => {
                     info!("Deleting snapshot '{}' (force: {})", snapshot, force);
 
-                    let snapshot_manager = bolt::capsules::snapshots::SnapshotManager::new().await?;
+                    let snapshot_manager =
+                        bolt::capsules::snapshots::SnapshotManager::new().await?;
                     snapshot_manager.delete_snapshot(&snapshot).await?;
 
                     info!("✅ Snapshot '{}' deleted successfully", snapshot);
                 }
                 cli::SnapshotCommands::Cleanup { dry_run, force } => {
-                    info!("Cleaning up old snapshots (dry_run: {}, force: {})", dry_run, force);
+                    info!(
+                        "Cleaning up old snapshots (dry_run: {}, force: {})",
+                        dry_run, force
+                    );
 
-                    let snapshot_manager = bolt::capsules::snapshots::SnapshotManager::new().await?;
+                    let snapshot_manager =
+                        bolt::capsules::snapshots::SnapshotManager::new().await?;
                     let snapshots = snapshot_manager.list_snapshots().await?;
 
                     // Keep only last 10 snapshots, or manual snapshots
                     let mut auto_snapshots: Vec<_> = snapshots
                         .iter()
-                        .filter(|s| matches!(s.snapshot_type, bolt::capsules::snapshots::SnapshotType::Auto | bolt::capsules::snapshots::SnapshotType::Daily | bolt::capsules::snapshots::SnapshotType::Weekly))
+                        .filter(|s| {
+                            matches!(
+                                s.snapshot_type,
+                                bolt::capsules::snapshots::SnapshotType::Auto
+                                    | bolt::capsules::snapshots::SnapshotType::Daily
+                                    | bolt::capsules::snapshots::SnapshotType::Weekly
+                            )
+                        })
                         .collect();
 
                     auto_snapshots.sort_by(|a, b| b.created_at.cmp(&a.created_at));
@@ -730,7 +749,10 @@ async fn main() -> Result<()> {
                         println!("  • Keep daily: 7 snapshots");
                         println!("  • Keep weekly: 4 snapshots");
                         println!("  • Storage: /var/lib/bolt/snapshots");
-                        println!("\nConfiguration file will be created at: {}", config_path.display());
+                        println!(
+                            "\nConfiguration file will be created at: {}",
+                            config_path.display()
+                        );
                     }
                 }
                 cli::SnapshotCommands::Auto { action } => {
@@ -999,7 +1021,7 @@ keep_monthly = 3
 
                     if let Some(ref mode_str) = mode {
                         // Parse and set governor
-                        let governor = CpuGovernor::from_str(mode_str)
+                        let governor = CpuGovernor::parse(mode_str)
                             .ok_or_else(|| anyhow::anyhow!("Unknown governor: {}", mode_str))?;
 
                         info!("Setting system-wide CPU governor to: {}", mode_str);
@@ -1080,8 +1102,8 @@ keep_monthly = 3
         }
 
         Commands::Dashboard { port } => {
-            use std::sync::Arc;
             use bolt::monitoring::{MetricsCollector, dashboard::MetricsDashboard};
+            use std::sync::Arc;
 
             info!("🎛️  Starting metrics dashboard on port {}", port);
 
@@ -1160,7 +1182,8 @@ keep_monthly = 3
                         "stdio" => {
                             info!("   📡 Listening on stdio (for Claude Desktop)");
                             println!("\n💡 Add this to your Claude Desktop config:");
-                            println!(r#"{{
+                            println!(
+                                r#"{{
   "mcpServers": {{
     "bolt": {{
       "command": "bolt",
@@ -1168,7 +1191,8 @@ keep_monthly = 3
     }}
   }}
 }}
-"#);
+"#
+                            );
                         }
                         "websocket" => {
                             info!("   📡 WebSocket server: ws://{}:{}", address, port);

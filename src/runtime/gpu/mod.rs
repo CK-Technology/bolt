@@ -311,7 +311,10 @@ impl GPUManager {
     }
 
     async fn setup_native_gaming_gpu(&self, container_id: &str) -> Result<()> {
-        info!("🎯 Configuring GPU for native gaming in container {}", container_id);
+        info!(
+            "🎯 Configuring GPU for native gaming in container {}",
+            container_id
+        );
 
         // Set up OpenGL/Vulkan for native games
         unsafe {
@@ -425,7 +428,10 @@ impl GPUManager {
         container_id: &str,
         _game_config: &GamingConfig,
     ) -> Result<()> {
-        info!("    🔷 Configuring KDE/Plasma Wayland gaming optimizations for container {}", container_id);
+        info!(
+            "    🔷 Configuring KDE/Plasma Wayland gaming optimizations for container {}",
+            container_id
+        );
 
         // Use safe environment management - configurations are already applied in configure_gaming_environment
         info!("      ✅ KDE/Plasma gaming optimizations applied via safe environment manager");

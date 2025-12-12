@@ -233,10 +233,7 @@ impl OmenRouter {
     }
 
     /// Route a completion request to the optimal provider
-    pub async fn route_completion(
-        &self,
-        request: CompletionRequest,
-    ) -> Result<CompletionResponse> {
+    pub async fn route_completion(&self, request: CompletionRequest) -> Result<CompletionResponse> {
         let start = std::time::Instant::now();
         let config = self.config.read().await;
 
@@ -246,7 +243,10 @@ impl OmenRouter {
 
         // Make routing decision
         let decision = self.make_routing_decision(&config, &request).await?;
-        info!("🎯 Routing to {} ({}): {}", decision.provider, decision.model, decision.reason);
+        info!(
+            "🎯 Routing to {} ({}): {}",
+            decision.provider, decision.model, decision.reason
+        );
 
         // Execute completion (placeholder - will integrate with actual Omen client)
         let response = self.execute_completion(&decision, request).await?;
@@ -285,36 +285,72 @@ impl OmenRouter {
             RoutingStrategy::CostOptimized => {
                 // Prefer local Ollama (free)
                 if config.providers.contains(&"ollama".to_string()) {
-                    ("ollama".to_string(), "llama3".to_string(), "Free local inference".to_string())
+                    (
+                        "ollama".to_string(),
+                        "llama3".to_string(),
+                        "Free local inference".to_string(),
+                    )
                 } else {
                     // Fall back to cheapest cloud provider
-                    ("anthropic".to_string(), "claude-3-haiku".to_string(), "Cheapest cloud model".to_string())
+                    (
+                        "anthropic".to_string(),
+                        "claude-3-haiku".to_string(),
+                        "Cheapest cloud model".to_string(),
+                    )
                 }
             }
             RoutingStrategy::LatencyOptimized => {
                 // Prefer local Ollama (fastest)
                 if config.providers.contains(&"ollama".to_string()) {
-                    ("ollama".to_string(), "llama3".to_string(), "Local inference <10ms".to_string())
+                    (
+                        "ollama".to_string(),
+                        "llama3".to_string(),
+                        "Local inference <10ms".to_string(),
+                    )
                 } else {
-                    ("anthropic".to_string(), "claude-3-sonnet".to_string(), "Low-latency cloud".to_string())
+                    (
+                        "anthropic".to_string(),
+                        "claude-3-sonnet".to_string(),
+                        "Low-latency cloud".to_string(),
+                    )
                 }
             }
             RoutingStrategy::Balanced => {
                 // Use Ollama for simple tasks, Claude for complex ones
                 if config.providers.contains(&"ollama".to_string()) {
-                    ("ollama".to_string(), "llama3".to_string(), "Balanced: local first".to_string())
+                    (
+                        "ollama".to_string(),
+                        "llama3".to_string(),
+                        "Balanced: local first".to_string(),
+                    )
                 } else {
-                    ("anthropic".to_string(), "claude-3-sonnet".to_string(), "Balanced: cloud fallback".to_string())
+                    (
+                        "anthropic".to_string(),
+                        "claude-3-sonnet".to_string(),
+                        "Balanced: cloud fallback".to_string(),
+                    )
                 }
             }
             RoutingStrategy::QualityOptimized => {
                 // Use best available model
                 if config.providers.contains(&"anthropic".to_string()) {
-                    ("anthropic".to_string(), "claude-3-opus".to_string(), "Highest quality".to_string())
+                    (
+                        "anthropic".to_string(),
+                        "claude-3-opus".to_string(),
+                        "Highest quality".to_string(),
+                    )
                 } else if config.providers.contains(&"openai".to_string()) {
-                    ("openai".to_string(), "gpt-4".to_string(), "High quality".to_string())
+                    (
+                        "openai".to_string(),
+                        "gpt-4".to_string(),
+                        "High quality".to_string(),
+                    )
                 } else {
-                    ("ollama".to_string(), "llama3".to_string(), "Best local model".to_string())
+                    (
+                        "ollama".to_string(),
+                        "llama3".to_string(),
+                        "Best local model".to_string(),
+                    )
                 }
             }
         };
@@ -342,8 +378,11 @@ impl OmenRouter {
         let start = std::time::Instant::now();
 
         // Build Omen API request (OpenAI-compatible format)
-        let omen_url = format!("{}/v1/chat/completions",
-            self.config.provider_config.get("omen_base_url")
+        let omen_url = format!(
+            "{}/v1/chat/completions",
+            self.config
+                .provider_config
+                .get("omen_base_url")
                 .and_then(|v| v.as_str())
                 .unwrap_or("http://localhost:8080")
         );
@@ -404,7 +443,10 @@ impl OmenRouter {
 
         let status = response.status();
         if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(anyhow!(
                 "Omen gateway returned error {}: {}",
                 status,
@@ -418,13 +460,15 @@ impl OmenRouter {
             .context("Failed to parse Omen response")?;
 
         let latency_ms = start.elapsed().as_millis() as u64;
-        let tokens_used = omen_response.usage
+        let tokens_used = omen_response
+            .usage
             .map(|u| u.total_tokens)
             .unwrap_or(request.max_tokens);
 
         let cost_usd = self.calculate_cost(&decision.provider, &decision.model, tokens_used);
 
-        let text = omen_response.choices
+        let text = omen_response
+            .choices
             .first()
             .map(|c| c.message.content.clone())
             .unwrap_or_else(|| "No response from AI".to_string());
@@ -444,16 +488,28 @@ impl OmenRouter {
         let mut metrics = self.metrics.write().await;
 
         metrics.total_requests += 1;
-        *metrics.requests_by_provider.entry(provider.to_string()).or_insert(0) += 1;
+        *metrics
+            .requests_by_provider
+            .entry(provider.to_string())
+            .or_insert(0) += 1;
 
         metrics.total_cost_usd += cost;
-        *metrics.cost_by_provider.entry(provider.to_string()).or_insert(0.0) += cost;
+        *metrics
+            .cost_by_provider
+            .entry(provider.to_string())
+            .or_insert(0.0) += cost;
 
         // Update average latency
-        let prev_avg = *metrics.avg_latency_by_provider.get(provider).unwrap_or(&0.0);
+        let prev_avg = *metrics
+            .avg_latency_by_provider
+            .get(provider)
+            .unwrap_or(&0.0);
         let request_count = *metrics.requests_by_provider.get(provider).unwrap_or(&1);
-        let new_avg = (prev_avg * (request_count - 1) as f64 + latency_ms as f64) / request_count as f64;
-        metrics.avg_latency_by_provider.insert(provider.to_string(), new_avg);
+        let new_avg =
+            (prev_avg * (request_count - 1) as f64 + latency_ms as f64) / request_count as f64;
+        metrics
+            .avg_latency_by_provider
+            .insert(provider.to_string(), new_avg);
     }
 
     /// Get current routing metrics
@@ -464,23 +520,23 @@ impl OmenRouter {
     /// Estimate cost for a provider/model combination
     fn estimate_cost(&self, provider: &str, model: &str) -> f64 {
         match (provider, model) {
-            ("ollama", _) => 0.0, // Local inference is free
-            ("anthropic", "claude-3-opus") => 0.015,   // $15/1M tokens (input)
+            ("ollama", _) => 0.0,                       // Local inference is free
+            ("anthropic", "claude-3-opus") => 0.015,    // $15/1M tokens (input)
             ("anthropic", "claude-3-sonnet") => 0.003,  // $3/1M tokens
             ("anthropic", "claude-3-haiku") => 0.00025, // $0.25/1M tokens
             ("openai", "gpt-4") => 0.030,               // $30/1M tokens
             ("openai", "gpt-3.5-turbo") => 0.0005,      // $0.50/1M tokens
-            _ => 0.001, // Default estimate
+            _ => 0.001,                                 // Default estimate
         }
     }
 
     /// Estimate latency for a provider
     fn estimate_latency(&self, provider: &str) -> u64 {
         match provider {
-            "ollama" => 10,      // Local: ~10ms
-            "anthropic" => 200,  // Cloud: ~200ms
-            "openai" => 300,     // Cloud: ~300ms
-            _ => 500,            // Unknown: assume high latency
+            "ollama" => 10,     // Local: ~10ms
+            "anthropic" => 200, // Cloud: ~200ms
+            "openai" => 300,    // Cloud: ~300ms
+            _ => 500,           // Unknown: assume high latency
         }
     }
 

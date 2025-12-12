@@ -10,9 +10,9 @@ use std::process::Command;
 use tracing::{debug, info, warn};
 
 pub mod btrfs;
-pub mod zfs;
-pub mod retention;
 pub mod gpu_state;
+pub mod retention;
+pub mod zfs;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotConfig {
@@ -100,11 +100,11 @@ impl Default for SnapshotConfig {
 impl Default for RetentionPolicy {
     fn default() -> Self {
         Self {
-            keep_hourly: 24,  // Keep 24 hours
-            keep_daily: 7,    // Keep 7 days
-            keep_weekly: 4,   // Keep 4 weeks
-            keep_monthly: 6,  // Keep 6 months
-            keep_yearly: 2,   // Keep 2 years
+            keep_hourly: 24, // Keep 24 hours
+            keep_daily: 7,   // Keep 7 days
+            keep_weekly: 4,  // Keep 4 weeks
+            keep_monthly: 6, // Keep 6 months
+            keep_yearly: 2,  // Keep 2 years
         }
     }
 }
@@ -176,7 +176,10 @@ impl SnapshotManager {
                 Ok(FilesystemType::ZFS)
             }
             _ => {
-                warn!("⚠️ Unsupported filesystem: {}, falling back to BTRFS", fstype);
+                warn!(
+                    "⚠️ Unsupported filesystem: {}, falling back to BTRFS",
+                    fstype
+                );
                 Ok(FilesystemType::BTRFS)
             }
         }
@@ -207,10 +210,22 @@ impl SnapshotManager {
 
         let mut snapshot = match self.filesystem_type {
             FilesystemType::BTRFS => {
-                btrfs::create_snapshot(&self.config, &snapshot_id, name.as_deref(), description.as_deref()).await?
+                btrfs::create_snapshot(
+                    &self.config,
+                    &snapshot_id,
+                    name.as_deref(),
+                    description.as_deref(),
+                )
+                .await?
             }
             FilesystemType::ZFS => {
-                zfs::create_snapshot(&self.config, &snapshot_id, name.as_deref(), description.as_deref()).await?
+                zfs::create_snapshot(
+                    &self.config,
+                    &snapshot_id,
+                    name.as_deref(),
+                    description.as_deref(),
+                )
+                .await?
             }
             FilesystemType::Auto => unreachable!("Auto should be resolved during initialization"),
         };
@@ -305,7 +320,8 @@ impl SnapshotManager {
         info!("🧹 Applying retention policy...");
 
         let snapshots = self.list_snapshots().await?;
-        let to_delete = retention::calculate_snapshots_to_delete(&snapshots, &self.config.retention);
+        let to_delete =
+            retention::calculate_snapshots_to_delete(&snapshots, &self.config.retention);
 
         for snapshot_id in to_delete {
             info!("  • Cleaning up old snapshot: {}", snapshot_id);
@@ -317,18 +333,23 @@ impl SnapshotManager {
     }
 
     /// Auto snapshot before major operations
-    pub async fn auto_snapshot_before_operation(&self, operation: &str) -> Result<Option<Snapshot>> {
+    pub async fn auto_snapshot_before_operation(
+        &self,
+        operation: &str,
+    ) -> Result<Option<Snapshot>> {
         if !self.config.auto_snapshot.before_major_operations {
             return Ok(None);
         }
 
         info!("📸 Auto snapshot before operation: {}", operation);
 
-        let snapshot = self.create_snapshot(
-            None,
-            Some(format!("Before operation: {}", operation)),
-            SnapshotType::BeforeOperation(operation.to_string()),
-        ).await?;
+        let snapshot = self
+            .create_snapshot(
+                None,
+                Some(format!("Before operation: {}", operation)),
+                SnapshotType::BeforeOperation(operation.to_string()),
+            )
+            .await?;
 
         Ok(Some(snapshot))
     }

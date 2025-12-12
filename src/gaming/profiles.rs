@@ -434,19 +434,21 @@ impl GamingProfileManager {
     }
 
     /// Apply a profile to a container
-    pub async fn apply_profile(
-        &self,
-        container_id: &str,
-        profile_name: &str,
-    ) -> Result<()> {
+    pub async fn apply_profile(&self, container_id: &str, profile_name: &str) -> Result<()> {
         let profile = self
             .get_profile(profile_name)
             .ok_or_else(|| anyhow::anyhow!("Profile not found: {}", profile_name))?;
 
-        info!("🎮 Applying gaming profile '{}' to container: {}", profile.name, container_id);
+        info!(
+            "🎮 Applying gaming profile '{}' to container: {}",
+            profile.name, container_id
+        );
         info!("   Description: {}", profile.description);
         info!("   Target FPS: {}", profile.performance_hints.target_fps);
-        info!("   Expected VRAM: {}MB", profile.performance_hints.expected_vram_mb);
+        info!(
+            "   Expected VRAM: {}MB",
+            profile.performance_hints.expected_vram_mb
+        );
 
         // Apply GPU configuration
         if let Some(power_limit) = profile.gpu_config.power_limit_watts {

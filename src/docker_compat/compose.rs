@@ -478,6 +478,7 @@ impl DockerComposeParser {
     }
 
     /// Convert Docker Compose service to Bolt service
+    #[allow(clippy::field_reassign_with_default)]
     fn convert_service(docker_service: DockerComposeService) -> Result<Service> {
         let mut service = Service::default();
 

@@ -44,7 +44,9 @@ pub use config::McpConfig;
 pub use server::BoltMcpServer;
 
 #[cfg(feature = "omen")]
-pub use omen_integration::{OmenRouter, OmenConfig, RoutingStrategy, CompletionRequest, CompletionResponse};
+pub use omen_integration::{
+    CompletionRequest, CompletionResponse, OmenConfig, OmenRouter, RoutingStrategy,
+};
 
 use thiserror::Error;
 

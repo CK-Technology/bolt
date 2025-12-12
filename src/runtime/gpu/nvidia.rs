@@ -302,13 +302,13 @@ impl NvidiaManager {
             let uuid = device
                 .uuid()
                 .unwrap_or_else(|_| format!("unknown-uuid-{}", i));
-            let memory_info = device.memory_info().unwrap_or_else(|_| {
+            let memory_info = device.memory_info().unwrap_or({
                 nvml_wrapper::struct_wrappers::device::MemoryInfo {
                     free: 0,
                     reserved: 0,
                     total: 0,
                     used: 0,
-                    version: 2,  // NVML API v2
+                    version: 2, // NVML API v2
                 }
             });
             let memory_mb = (memory_info.total / 1024 / 1024) as u32;
@@ -838,7 +838,10 @@ impl NvidiaManager {
         nvidia_config: &crate::config::NvidiaConfig,
         device_indices: &[u32],
     ) -> Result<()> {
-        info!("🔧 Configuring CUDA environment for container {}", container_id);
+        info!(
+            "🔧 Configuring CUDA environment for container {}",
+            container_id
+        );
 
         // Set CUDA_VISIBLE_DEVICES
         let cuda_devices = device_indices
@@ -936,7 +939,10 @@ impl NvidiaManager {
         container_id: &str,
         nvidia_config: &crate::config::NvidiaConfig,
     ) -> Result<()> {
-        info!("🐳 Configuring nvidia-container-runtime for container {}", container_id);
+        info!(
+            "🐳 Configuring nvidia-container-runtime for container {}",
+            container_id
+        );
         debug!("NVIDIA config: {:?}", nvidia_config);
 
         // This would integrate with the actual nvidia-container-runtime
@@ -1595,7 +1601,10 @@ impl NvidiaManager {
         container_id: &str,
         device_indices: &[u32],
     ) -> Result<()> {
-        info!("    🔧 Configuring NVIDIA Open GPU access for container {}", container_id);
+        info!(
+            "    🔧 Configuring NVIDIA Open GPU access for container {}",
+            container_id
+        );
 
         // NVIDIA Open uses both NVIDIA devices AND DRI devices
         let mut devices = Vec::new();
@@ -1638,7 +1647,10 @@ impl NvidiaManager {
         container_id: &str,
         device_indices: &[u32],
     ) -> Result<()> {
-        info!("    🔧 Configuring nouveau GPU access for container {}", container_id);
+        info!(
+            "    🔧 Configuring nouveau GPU access for container {}",
+            container_id
+        );
 
         // For nouveau, we primarily need DRI devices
         let mut dri_devices = Vec::new();
@@ -1930,6 +1942,7 @@ enum DeviceType {
 }
 
 #[derive(Debug, Clone)]
+#[allow(clippy::upper_case_acronyms)]
 enum NvidiaDriverType {
     NvidiaOpen,    // NVIDIA Open GPU Kernel Modules (primary - supports full Vulkan)
     Proprietary,   // nvidia.ko proprietary driver (traditional - supports full Vulkan)

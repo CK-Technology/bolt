@@ -313,7 +313,8 @@ pub struct McpPermissions {
 
 impl McpPermissions {
     /// Valid access levels
-    const VALID_ACCESS_LEVELS: &'static [&'static str] = &["none", "read_only", "read_write", "full"];
+    const VALID_ACCESS_LEVELS: &'static [&'static str] =
+        &["none", "read_only", "read_write", "full"];
 
     /// Validate permissions configuration
     pub fn validate(&self) -> Result<()> {
@@ -808,7 +809,7 @@ impl BoltFile {
 
         let mut used_host_ports = HashSet::new();
 
-        for (_name, service) in &self.services {
+        for service in self.services.values() {
             if let Some(ref ports) = service.ports {
                 for port_mapping in ports {
                     let host_port = self.extract_host_port(port_mapping)?;
@@ -1456,13 +1457,13 @@ pub fn create_example_boltfile() -> BoltFile {
                     enabled: true,
                     strategy: "balanced".to_string(),
                     max_cost_per_hour: Some(5.0),
-                    providers: vec![
-                        "ollama".to_string(),
-                        "anthropic".to_string(),
-                    ],
+                    providers: vec!["ollama".to_string(), "anthropic".to_string()],
                     provider_config: {
                         let mut config = HashMap::new();
-                        config.insert("ollama_endpoint".to_string(), "http://localhost:11434".to_string());
+                        config.insert(
+                            "ollama_endpoint".to_string(),
+                            "http://localhost:11434".to_string(),
+                        );
                         config
                     },
                 }),
@@ -1654,7 +1655,6 @@ pub fn create_example_boltfile() -> BoltFile {
     }
 }
 
-
 #[cfg(test)]
 mod mcp_validation_tests {
     use super::*;
@@ -1796,4 +1796,3 @@ mod mcp_validation_tests {
         assert!(omen.validate().is_err());
     }
 }
-

@@ -12,7 +12,7 @@ use anyhow::Result;
 #[cfg(feature = "snapshots")]
 mod snapshot_tests {
     use super::*;
-    use bolt::snapshots::{SnapshotManager, SnapshotConfig, FilesystemType, RetentionPolicy};
+    use bolt::snapshots::{FilesystemType, RetentionPolicy, SnapshotConfig, SnapshotManager};
 
     #[tokio::test]
     async fn test_snapshot_manager_initialization() -> Result<()> {
@@ -36,11 +36,13 @@ mod snapshot_tests {
             Ok(mgr) => {
                 println!("   Snapshot manager initialized successfully");
                 // Test that we can create a snapshot
-                let snapshot_result = mgr.create_snapshot(
-                    Some("test-snapshot".to_string()),
-                    Some("Test snapshot for integration testing".to_string()),
-                    "manual".to_string(),
-                ).await;
+                let snapshot_result = mgr
+                    .create_snapshot(
+                        Some("test-snapshot".to_string()),
+                        Some("Test snapshot for integration testing".to_string()),
+                        "manual".to_string(),
+                    )
+                    .await;
 
                 match snapshot_result {
                     Ok(snapshot) => {
@@ -49,12 +51,18 @@ mod snapshot_tests {
                         let _ = mgr.delete_snapshot(&snapshot.id, false).await;
                     }
                     Err(e) => {
-                        println!("   Snapshot creation failed (expected without BTRFS): {}", e);
+                        println!(
+                            "   Snapshot creation failed (expected without BTRFS): {}",
+                            e
+                        );
                     }
                 }
             }
             Err(e) => {
-                println!("   Snapshot manager initialization failed (expected without BTRFS/ZFS): {}", e);
+                println!(
+                    "   Snapshot manager initialization failed (expected without BTRFS/ZFS): {}",
+                    e
+                );
             }
         }
 
@@ -110,11 +118,13 @@ mod snapshot_tests {
         };
 
         if let Ok(manager) = SnapshotManager::new(config).await {
-            let snapshot_result = manager.create_snapshot(
-                Some("gpu-snapshot-test".to_string()),
-                Some("Test snapshot with GPU state".to_string()),
-                "manual".to_string(),
-            ).await;
+            let snapshot_result = manager
+                .create_snapshot(
+                    Some("gpu-snapshot-test".to_string()),
+                    Some("Test snapshot with GPU state".to_string()),
+                    "manual".to_string(),
+                )
+                .await;
 
             match snapshot_result {
                 Ok(snapshot) => {
@@ -160,11 +170,14 @@ mod snapshot_tests {
 
         if let Ok(manager) = SnapshotManager::new(config).await {
             // Create snapshot
-            if let Ok(snapshot) = manager.create_snapshot(
-                Some("rollback-test".to_string()),
-                Some("Test snapshot for rollback".to_string()),
-                "manual".to_string(),
-            ).await {
+            if let Ok(snapshot) = manager
+                .create_snapshot(
+                    Some("rollback-test".to_string()),
+                    Some("Test snapshot for rollback".to_string()),
+                    "manual".to_string(),
+                )
+                .await
+            {
                 println!("   Created snapshot: {}", snapshot.id);
 
                 // Attempt rollback
@@ -212,7 +225,10 @@ mod snapshot_tests {
 
             match cleanup_result {
                 Ok(to_delete) => {
-                    println!("   Retention policy would delete {} snapshots", to_delete.len());
+                    println!(
+                        "   Retention policy would delete {} snapshots",
+                        to_delete.len()
+                    );
                     for snapshot_id in to_delete.iter().take(5) {
                         println!("   - {}", snapshot_id);
                     }
@@ -247,11 +263,14 @@ mod snapshot_tests {
 
         if let Ok(manager) = SnapshotManager::new(config).await {
             // Create snapshot
-            if let Ok(snapshot) = manager.create_snapshot(
-                Some("delete-test".to_string()),
-                Some("Test snapshot for deletion".to_string()),
-                "manual".to_string(),
-            ).await {
+            if let Ok(snapshot) = manager
+                .create_snapshot(
+                    Some("delete-test".to_string()),
+                    Some("Test snapshot for deletion".to_string()),
+                    "manual".to_string(),
+                )
+                .await
+            {
                 println!("   Created snapshot: {}", snapshot.id);
 
                 // Delete snapshot

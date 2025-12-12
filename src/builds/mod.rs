@@ -84,7 +84,9 @@ impl BuildSystem {
         info!("🔨 Building from source (hermetic environment)");
 
         // Execute build in isolated environment
-        let outputs = self.execute_hermetic_build(spec, &build_dir, &inputs).await?;
+        let outputs = self
+            .execute_hermetic_build(spec, &build_dir, &inputs)
+            .await?;
 
         let result = BuildResult {
             id: build_id.clone(),
@@ -117,7 +119,7 @@ impl BuildSystem {
     }
 
     fn compute_build_hash(&self, inputs: &[BuildInput]) -> String {
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
 
         for input in inputs {
@@ -129,7 +131,7 @@ impl BuildSystem {
     }
 
     fn hash_content(&self, content: &[u8]) -> String {
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(content);
         format!("{:x}", hasher.finalize())

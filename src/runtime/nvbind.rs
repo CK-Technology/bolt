@@ -914,12 +914,15 @@ impl GpuPerformanceMonitor {
             // Fallback: Use basic system queries or keep metrics stable
             #[cfg(not(feature = "nvbind-support"))]
             {
-                debug!("nvbind-support not enabled, keeping metrics at baseline for {}", gpu_id);
+                debug!(
+                    "nvbind-support not enabled, keeping metrics at baseline for {}",
+                    gpu_id
+                );
                 // Keep metrics at reasonable baseline values
                 metric.utilization_percent = metric.utilization_percent.min(100.0);
                 metric.memory_used_mb = metric.memory_used_mb.min(24000);
-                metric.temperature_c = metric.temperature_c.max(40).min(85);
-                metric.power_draw_w = metric.power_draw_w.max(50).min(350);
+                metric.temperature_c = metric.temperature_c.clamp(40, 85);
+                metric.power_draw_w = metric.power_draw_w.clamp(50, 350);
                 metric.frame_time_us = 16667; // 60 FPS baseline
                 metric.last_updated = Instant::now();
             }
@@ -946,7 +949,10 @@ impl GpuPerformanceMonitor {
         .await??;
 
         if !output.status.success() {
-            return Err(anyhow::anyhow!("nvidia-smi query failed for GPU {}", gpu_id));
+            return Err(anyhow::anyhow!(
+                "nvidia-smi query failed for GPU {}",
+                gpu_id
+            ));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1057,10 +1063,10 @@ impl GpuMemoryManager {
 pub fn create_nvbind_config_for_gaming(
     gaming_config: &crate::config::GamingConfig,
 ) -> NvbindConfig {
-    let mut config = NvbindConfig::default();
-
-    // Set performance profile for gaming
-    config.performance_profile = PerformanceProfile::Gaming;
+    let mut config = NvbindConfig {
+        performance_profile: PerformanceProfile::Gaming,
+        ..Default::default()
+    };
 
     // Configure GPU devices for gaming
     if gaming_config.gpu_passthrough {

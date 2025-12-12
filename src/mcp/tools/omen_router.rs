@@ -1,5 +1,5 @@
 use crate::mcp::{McpError, McpTool};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{error, info};
@@ -36,8 +36,9 @@ impl OmenRouterTool {
 
     #[cfg(feature = "omen")]
     pub async fn initialize(&self, config: omen::config::Config) -> Result<(), McpError> {
-        let router = omen::router::OmenRouter::new(config).await
-            .map_err(|e| McpError::InternalError(format!("Failed to initialize Omen router: {}", e)))?;
+        let router = omen::router::OmenRouter::new(config).await.map_err(|e| {
+            McpError::InternalError(format!("Failed to initialize Omen router: {}", e))
+        })?;
 
         let mut guard = self.router.write().await;
         *guard = Some(router);
@@ -156,7 +157,7 @@ impl McpTool for OmenRouterTool {
         {
             let _ = input;
             Err(McpError::InternalError(
-                "OMEN integration not enabled. Rebuild with --features omen".to_string()
+                "OMEN integration not enabled. Rebuild with --features omen".to_string(),
             ))
         }
     }
@@ -167,29 +168,36 @@ impl OmenRouterTool {
     async fn execute_async(&self, input: Value) -> Result<Value, McpError> {
         // Parse input
         let messages: Vec<omen::types::ChatMessage> = serde_json::from_value(
-            input.get("messages")
+            input
+                .get("messages")
                 .ok_or_else(|| McpError::InvalidInput("Missing 'messages' field".to_string()))?
-                .clone()
-        ).map_err(|e| McpError::InvalidInput(format!("Invalid messages format: {}", e)))?;
+                .clone(),
+        )
+        .map_err(|e| McpError::InvalidInput(format!("Invalid messages format: {}", e)))?;
 
-        let model = input.get("model")
+        let model = input
+            .get("model")
             .and_then(|v| v.as_str())
             .unwrap_or("auto")
             .to_string();
 
-        let temperature = input.get("temperature")
+        let temperature = input
+            .get("temperature")
             .and_then(|v| v.as_f64())
             .map(|v| v as f32);
 
-        let max_tokens = input.get("max_tokens")
+        let max_tokens = input
+            .get("max_tokens")
             .and_then(|v| v.as_u64())
             .map(|v| v as u32);
 
-        let stream = input.get("stream")
+        let stream = input
+            .get("stream")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let intent = input.get("intent")
+        let intent = input
+            .get("intent")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
@@ -202,9 +210,10 @@ impl OmenRouterTool {
 
         if let Some(providers_arr) = input.get("providers").and_then(|v| v.as_array()) {
             omen_config.providers = Some(
-                providers_arr.iter()
+                providers_arr
+                    .iter()
                     .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect()
+                    .collect(),
             );
         }
 
@@ -249,21 +258,26 @@ impl OmenRouterTool {
 
         // Get router instance
         let router_guard = self.router.read().await;
-        let router = router_guard.as_ref()
+        let router = router_guard
+            .as_ref()
             .ok_or_else(|| McpError::InternalError("Omen router not initialized".to_string()))?;
 
         // Execute request
         if stream {
             // For streaming, we'll return an error for now (streaming requires different handling)
             return Err(McpError::InternalError(
-                "Streaming not yet supported via MCP. Use stream: false".to_string()
+                "Streaming not yet supported via MCP. Use stream: false".to_string(),
             ));
         }
 
-        info!("🎯 Routing AI request to Omen (model: {}, intent: {:?})",
-              request.model, context.intent);
+        info!(
+            "🎯 Routing AI request to Omen (model: {}, intent: {:?})",
+            request.model, context.intent
+        );
 
-        let response = router.chat_completion(request, context).await
+        let response = router
+            .chat_completion(request, context)
+            .await
             .map_err(|e| {
                 error!("Omen request failed: {}", e);
                 McpError::InternalError(format!("AI request failed: {}", e))

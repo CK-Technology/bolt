@@ -169,7 +169,10 @@ impl HealthChecker {
         let checks = &self.checks;
         let overall_status = &self.overall_status;
 
-        debug!("Starting health monitoring loop, current status: {:?}", overall_status);
+        debug!(
+            "Starting health monitoring loop, current status: {:?}",
+            overall_status
+        );
 
         let mut interval = tokio::time::interval(Duration::from_secs(10));
 
@@ -705,7 +708,12 @@ impl HealthChecker {
         use std::fs::OpenOptions;
 
         let test_file = format!("{}/.bolt_write_test", path);
-        match OpenOptions::new().create(true).write(true).open(&test_file) {
+        match OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&test_file)
+        {
             Ok(_) => {
                 let _ = std::fs::remove_file(&test_file);
                 Ok(false)

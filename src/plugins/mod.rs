@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -75,7 +75,7 @@ impl PluginManager {
         }
     }
 
-    pub async fn load_plugin(&self, path: &PathBuf) -> Result<()> {
+    pub async fn load_plugin(&self, path: &std::path::Path) -> Result<()> {
         let manifest = self.load_manifest(path).await?;
         self.validate_permissions(&manifest)?;
 

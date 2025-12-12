@@ -534,9 +534,7 @@ pub async fn list_containers_info(all: bool) -> Result<Vec<ContainerInfo>> {
                 uptime: value
                     .get("CreatedAt")
                     .and_then(|v| v.as_str())
-                    .and_then(|created_str| {
-                        chrono::DateTime::parse_from_rfc3339(created_str).ok()
-                    })
+                    .and_then(|created_str| chrono::DateTime::parse_from_rfc3339(created_str).ok())
                     .map(|created| {
                         let now = chrono::Utc::now();
                         let created_utc = created.with_timezone(&chrono::Utc);

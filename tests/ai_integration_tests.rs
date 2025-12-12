@@ -13,7 +13,7 @@ mod ai_tests {
     use super::*;
     use bolt::ai::model_cache::ModelCache;
     use bolt::ai::model_serving::{ModelServer, ServeConfig, ServingBackend};
-    use bolt::runtime::gpu_scheduler::{GpuScheduler, GpuConfig, GpuRequest, SchedulingStrategy};
+    use bolt::runtime::gpu_scheduler::{GpuConfig, GpuRequest, GpuScheduler, SchedulingStrategy};
 
     #[tokio::test]
     async fn test_gpu_scheduler_initialization() -> Result<()> {
@@ -255,7 +255,10 @@ mod ai_tests {
         let alloc1 = scheduler.allocate("exclusive-1", config.clone()).await;
 
         if let Ok(gpus) = alloc1 {
-            println!("   Exclusive allocation to exclusive-1: {} GPUs", gpus.len());
+            println!(
+                "   Exclusive allocation to exclusive-1: {} GPUs",
+                gpus.len()
+            );
 
             // Second allocation to same GPU should fail with exclusive mode
             // (This would be tested with actual GPU hardware)
@@ -291,7 +294,10 @@ mod ai_tests {
                 scheduler.deallocate("mig-test").await?;
             }
             Err(e) => {
-                println!("   MIG allocation failed (expected without A100/H100): {}", e);
+                println!(
+                    "   MIG allocation failed (expected without A100/H100): {}",
+                    e
+                );
             }
         }
 

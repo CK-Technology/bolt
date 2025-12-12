@@ -927,19 +927,23 @@ impl BoltNativeRuntime {
             let current_uid = nix::unistd::getuid().as_raw();
             let current_gid = nix::unistd::getgid().as_raw();
 
-            let uid_mappings = vec![LinuxIdMappingBuilder::default()
-                .container_id(0u32) // Root in container
-                .host_id(current_uid)
-                .size(1u32)
-                .build()
-                .context("Failed to build uid mapping")?];
+            let uid_mappings = vec![
+                LinuxIdMappingBuilder::default()
+                    .container_id(0u32) // Root in container
+                    .host_id(current_uid)
+                    .size(1u32)
+                    .build()
+                    .context("Failed to build uid mapping")?,
+            ];
 
-            let gid_mappings = vec![LinuxIdMappingBuilder::default()
-                .container_id(0u32) // Root in container
-                .host_id(current_gid)
-                .size(1u32)
-                .build()
-                .context("Failed to build gid mapping")?];
+            let gid_mappings = vec![
+                LinuxIdMappingBuilder::default()
+                    .container_id(0u32) // Root in container
+                    .host_id(current_gid)
+                    .size(1u32)
+                    .build()
+                    .context("Failed to build gid mapping")?,
+            ];
 
             linux.set_uid_mappings(Some(uid_mappings));
             linux.set_gid_mappings(Some(gid_mappings));
@@ -1040,7 +1044,7 @@ impl BoltNativeRuntime {
 
                 let file_mode = node
                     .file_mode
-                    .or_else(|| stat_info.as_ref().map(|stat| (stat.st_mode & 0o7777)));
+                    .or_else(|| stat_info.as_ref().map(|stat| stat.st_mode & 0o7777));
                 if let Some(mode) = file_mode {
                     device.set_file_mode(Some(mode));
                 } else {

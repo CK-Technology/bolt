@@ -86,10 +86,7 @@ impl Default for PolicyConfig {
     fn default() -> Self {
         Self {
             mode: default_policy_mode(),
-            require_consent: vec![
-                "shell.execute".to_string(),
-                "fs.write".to_string(),
-            ],
+            require_consent: vec!["shell.execute".to_string(), "fs.write".to_string()],
             audit_all: true,
             audit_log: None,
             redact_secrets: true,

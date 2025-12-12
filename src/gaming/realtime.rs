@@ -358,7 +358,11 @@ impl RealtimeOptimizer {
             })
             .sum();
 
-        debug!("Detected {} online CPUs from: {}", count, online_cpus.trim());
+        debug!(
+            "Detected {} online CPUs from: {}",
+            count,
+            online_cpus.trim()
+        );
         Ok(count)
     }
 

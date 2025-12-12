@@ -63,7 +63,10 @@ async fn test_container_service_list() -> Result<()> {
     let response = service.list(request).await?;
     let resp = response.into_inner();
 
-    println!("✅ Container list test passed: found {} containers", resp.containers.len());
+    println!(
+        "✅ Container list test passed: found {} containers",
+        resp.containers.len()
+    );
 
     Ok(())
 }
@@ -93,12 +96,15 @@ async fn test_container_service_logs_streaming() -> Result<()> {
         println!("📜 Log: [{}] {}", log.stream, log.message);
         count += 1;
         if count >= 5 {
-            break;  // Read first 5 logs
+            break; // Read first 5 logs
         }
     }
 
     assert!(count > 0, "Should receive at least one log entry");
-    println!("✅ Container logs streaming test passed: received {} logs", count);
+    println!(
+        "✅ Container logs streaming test passed: received {} logs",
+        count
+    );
 
     Ok(())
 }
@@ -121,18 +127,26 @@ async fn test_container_service_stats_streaming() -> Result<()> {
     while let Some(stats_result) = stream.next().await {
         let stats = stats_result?;
         if let Some(cpu) = stats.cpu {
-            println!("📊 Stats: CPU={:.1}%, Memory={} MB",
-                     cpu.usage_percent,
-                     stats.memory.map(|m| m.usage_bytes / (1024 * 1024)).unwrap_or(0));
+            println!(
+                "📊 Stats: CPU={:.1}%, Memory={} MB",
+                cpu.usage_percent,
+                stats
+                    .memory
+                    .map(|m| m.usage_bytes / (1024 * 1024))
+                    .unwrap_or(0)
+            );
         }
         count += 1;
         if count >= 3 {
-            break;  // Read first 3 stat samples
+            break; // Read first 3 stat samples
         }
     }
 
     assert!(count > 0, "Should receive at least one stats sample");
-    println!("✅ Container stats streaming test passed: received {} samples", count);
+    println!(
+        "✅ Container stats streaming test passed: received {} samples",
+        count
+    );
 
     Ok(())
 }
@@ -156,18 +170,26 @@ async fn test_network_service_create_list() -> Result<()> {
     let create_response = service.create_network(create_request).await?;
     let create_resp = create_response.into_inner();
 
-    println!("✅ Network created: name={}, driver={}", create_resp.name, create_resp.driver);
+    println!(
+        "✅ Network created: name={}, driver={}",
+        create_resp.name, create_resp.driver
+    );
 
     // List networks
-    let list_request = Request::new(bolt::grpc::generated::network::ListNetworksRequest {
-        filters: vec![],
-    });
+    let list_request =
+        Request::new(bolt::grpc::generated::network::ListNetworksRequest { filters: vec![] });
 
     let list_response = service.list_networks(list_request).await?;
     let list_resp = list_response.into_inner();
 
-    assert!(!list_resp.networks.is_empty(), "Should have at least one network");
-    println!("✅ Network list test passed: found {} networks", list_resp.networks.len());
+    assert!(
+        !list_resp.networks.is_empty(),
+        "Should have at least one network"
+    );
+    println!(
+        "✅ Network list test passed: found {} networks",
+        list_resp.networks.len()
+    );
 
     Ok(())
 }
@@ -190,11 +212,16 @@ async fn test_network_service_stats_streaming() -> Result<()> {
     let mut count = 0;
     while let Some(stats_result) = stream.next().await {
         let stats = stats_result?;
-        println!("🌐 Network stats: timestamp={}, interfaces={}",
-                 stats.timestamp, stats.interfaces.len());
+        println!(
+            "🌐 Network stats: timestamp={}, interfaces={}",
+            stats.timestamp,
+            stats.interfaces.len()
+        );
         if let Some(quic) = stats.quic {
-            println!("   QUIC: connections={}, bytes_sent={}, bytes_received={}",
-                     quic.connections_established, quic.bytes_sent, quic.bytes_received);
+            println!(
+                "   QUIC: connections={}, bytes_sent={}, bytes_received={}",
+                quic.connections_established, quic.bytes_sent, quic.bytes_received
+            );
         }
         count += 1;
         if count >= 3 {
@@ -202,8 +229,14 @@ async fn test_network_service_stats_streaming() -> Result<()> {
         }
     }
 
-    assert!(count > 0, "Should receive at least one network stats sample");
-    println!("✅ Network stats streaming test passed: received {} samples", count);
+    assert!(
+        count > 0,
+        "Should receive at least one network stats sample"
+    );
+    println!(
+        "✅ Network stats streaming test passed: received {} samples",
+        count
+    );
 
     Ok(())
 }
@@ -234,18 +267,24 @@ async fn test_orchestration_service_deploy() -> Result<()> {
 
         match progress.event {
             Some(bolt::grpc::generated::orchestration::deploy_progress::Event::Started(s)) => {
-                println!("🚀 Deployment started: project={}, services={}",
-                         s.project_name, s.total_services);
+                println!(
+                    "🚀 Deployment started: project={}, services={}",
+                    s.project_name, s.total_services
+                );
                 started = true;
             }
             Some(bolt::grpc::generated::orchestration::deploy_progress::Event::Service(s)) => {
-                println!("📦 Service progress: {} - {} (step {}/{})",
-                         s.service_name, s.status, s.current_step, s.total_steps);
+                println!(
+                    "📦 Service progress: {} - {} (step {}/{})",
+                    s.service_name, s.status, s.current_step, s.total_steps
+                );
                 services_deployed += 1;
             }
             Some(bolt::grpc::generated::orchestration::deploy_progress::Event::Complete(c)) => {
-                println!("✅ Deployment complete: containers={}, time={}ms",
-                         c.total_containers, c.deploy_time_ms);
+                println!(
+                    "✅ Deployment complete: containers={}, time={}ms",
+                    c.total_containers, c.deploy_time_ms
+                );
                 completed = true;
             }
             _ => {}
@@ -281,8 +320,10 @@ async fn test_orchestration_service_scale() -> Result<()> {
     assert_eq!(resp.services.len(), 2, "Should scale 2 services");
 
     for scaled in &resp.services {
-        println!("📈 Scaled {}: {} -> {} replicas",
-                 scaled.service_name, scaled.previous_replicas, scaled.current_replicas);
+        println!(
+            "📈 Scaled {}: {} -> {} replicas",
+            scaled.service_name, scaled.previous_replicas, scaled.current_replicas
+        );
     }
 
     println!("✅ Orchestration scale test passed");
@@ -320,18 +361,24 @@ async fn test_orchestration_service_update() -> Result<()> {
 
         match progress.event {
             Some(bolt::grpc::generated::orchestration::update_progress::Event::Started(s)) => {
-                println!("🔄 Update started: service={}, containers={}",
-                         s.service_name, s.total_containers);
+                println!(
+                    "🔄 Update started: service={}, containers={}",
+                    s.service_name, s.total_containers
+                );
                 started = true;
             }
             Some(bolt::grpc::generated::orchestration::update_progress::Event::Container(c)) => {
-                println!("📦 Container update: {} - {} ({}/{})",
-                         c.container_id, c.status, c.current, c.total);
+                println!(
+                    "📦 Container update: {} - {} ({}/{})",
+                    c.container_id, c.status, c.current, c.total
+                );
                 containers_updated += 1;
             }
             Some(bolt::grpc::generated::orchestration::update_progress::Event::Complete(c)) => {
-                println!("✅ Update complete: updated={}, failed={}, time={}ms",
-                         c.updated_containers, c.failed_containers, c.update_time_ms);
+                println!(
+                    "✅ Update complete: updated={}, failed={}, time={}ms",
+                    c.updated_containers, c.failed_containers, c.update_time_ms
+                );
                 completed = true;
             }
             _ => {}
@@ -340,7 +387,10 @@ async fn test_orchestration_service_update() -> Result<()> {
 
     assert!(started, "Update should start");
     assert!(completed, "Update should complete");
-    assert!(containers_updated > 0, "Should update at least one container");
+    assert!(
+        containers_updated > 0,
+        "Should update at least one container"
+    );
     println!("✅ Orchestration update test passed");
 
     Ok(())

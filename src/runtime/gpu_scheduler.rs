@@ -37,7 +37,7 @@ pub struct GpuState {
     pub temperature_c: u32,
     pub power_draw_w: u32,
     pub power_limit_w: u32,
-    pub allocated_to: Vec<String>,  // Container IDs
+    pub allocated_to: Vec<String>, // Container IDs
     pub is_mig_enabled: bool,
     pub mig_instances: Vec<MigInstance>,
 }
@@ -47,18 +47,19 @@ pub struct GpuState {
 pub struct MigInstance {
     pub id: String,
     pub gpu_id: String,
-    pub gpu_slices: u32,        // 1-7 slices
-    pub memory_mb: u64,          // 5GB, 10GB, 20GB, 40GB, 80GB
-    pub compute_slices: u32,     // 1-7 compute slices
+    pub gpu_slices: u32,     // 1-7 slices
+    pub memory_mb: u64,      // 5GB, 10GB, 20GB, 40GB, 80GB
+    pub compute_slices: u32, // 1-7 compute slices
     pub allocated_to: Option<String>,
 }
 
 /// GPU scheduling strategy
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum SchedulingStrategy {
     /// Simple round-robin allocation
     RoundRobin,
     /// Allocate to GPU with lowest utilization
+    #[default]
     LeastUtilized,
     /// Allocate to GPU with most free memory
     MostMemory,
@@ -82,7 +83,7 @@ pub enum GpuRequest {
     /// Allocate GPUs with at least X MB memory
     Memory(u64),
     /// Allocate MIG instance
-    Mig { profile: String },  // e.g., "1g.5gb", "3g.20gb"
+    Mig { profile: String }, // e.g., "1g.5gb", "3g.20gb"
 }
 
 /// GPU allocation configuration
@@ -90,14 +91,8 @@ pub enum GpuRequest {
 pub struct GpuConfig {
     pub request: GpuRequest,
     pub memory_limit_mb: Option<u64>,
-    pub priority: u32,  // 0-100
+    pub priority: u32, // 0-100
     pub exclusive: bool,
-}
-
-impl Default for SchedulingStrategy {
-    fn default() -> Self {
-        Self::LeastUtilized
-    }
 }
 
 impl GpuScheduler {
@@ -110,13 +105,19 @@ impl GpuScheduler {
         info!("   Detected {} GPU(s)", gpus.len());
 
         for (id, gpu) in &gpus {
-            info!("   • {} - {} ({}MB VRAM)", id, gpu.name, gpu.total_memory_mb);
+            info!(
+                "   • {} - {} ({}MB VRAM)",
+                id, gpu.name, gpu.total_memory_mb
+            );
         }
 
         // Detect MIG support
         let mig_manager = MigManager::detect().await.ok();
         if let Some(ref mgr) = mig_manager {
-            info!("   • MIG support detected ({} instances)", mgr.instances.len());
+            info!(
+                "   • MIG support detected ({} instances)",
+                mgr.instances.len()
+            );
         }
 
         Ok(Self {
@@ -178,7 +179,7 @@ impl GpuScheduler {
                 gpu.allocated_to.push(container_id.to_string());
 
                 if config.exclusive {
-                    gpu.free_memory_mb = 0;  // Mark as fully allocated
+                    gpu.free_memory_mb = 0; // Mark as fully allocated
                 } else if let Some(limit) = config.memory_limit_mb {
                     gpu.free_memory_mb = gpu.free_memory_mb.saturating_sub(limit);
                 }
@@ -187,7 +188,11 @@ impl GpuScheduler {
 
         allocations.insert(container_id.to_string(), selected_gpus.clone());
 
-        info!("✅ Allocated {} GPU(s) to container {}", selected_gpus.len(), container_id);
+        info!(
+            "✅ Allocated {} GPU(s) to container {}",
+            selected_gpus.len(),
+            container_id
+        );
         for gpu_id in &selected_gpus {
             debug!("   • {}", gpu_id);
         }
@@ -303,7 +308,11 @@ impl GpuScheduler {
         let selected = match self.strategy {
             SchedulingStrategy::RoundRobin => {
                 // Simple round-robin: take first N available
-                available.into_iter().take(count).map(|(id, _)| id.clone()).collect()
+                available
+                    .into_iter()
+                    .take(count)
+                    .map(|(id, _)| id.clone())
+                    .collect()
             }
             SchedulingStrategy::LeastUtilized => {
                 // Sort by utilization (lowest first)
@@ -313,13 +322,21 @@ impl GpuScheduler {
                         .partial_cmp(&b.1.utilization_percent)
                         .unwrap()
                 });
-                sorted.into_iter().take(count).map(|(id, _)| id.clone()).collect()
+                sorted
+                    .into_iter()
+                    .take(count)
+                    .map(|(id, _)| id.clone())
+                    .collect()
             }
             SchedulingStrategy::MostMemory => {
                 // Sort by free memory (highest first)
                 let mut sorted = available;
                 sorted.sort_by(|a, b| b.1.free_memory_mb.cmp(&a.1.free_memory_mb));
-                sorted.into_iter().take(count).map(|(id, _)| id.clone()).collect()
+                sorted
+                    .into_iter()
+                    .take(count)
+                    .map(|(id, _)| id.clone())
+                    .collect()
             }
             SchedulingStrategy::Exclusive => {
                 // Only allocate completely free GPUs
@@ -332,7 +349,11 @@ impl GpuScheduler {
             }
             _ => {
                 warn!("Unsupported scheduling strategy, falling back to round-robin");
-                available.into_iter().take(count).map(|(id, _)| id.clone()).collect()
+                available
+                    .into_iter()
+                    .take(count)
+                    .map(|(id, _)| id.clone())
+                    .collect()
             }
         };
 
@@ -471,14 +492,18 @@ impl MigManager {
             id: format!("mig:{}", parts[3]),
             gpu_id: format!("gpu:{}", parts[1].trim_end_matches(':')),
             gpu_slices: 1,
-            memory_mb: 5120,  // 5GB default
+            memory_mb: 5120, // 5GB default
             compute_slices: 1,
             allocated_to: None,
         })
     }
 
     /// Allocate MIG instance
-    pub async fn allocate_instance(&self, container_id: &str, profile: &str) -> Result<Vec<String>> {
+    pub async fn allocate_instance(
+        &self,
+        container_id: &str,
+        profile: &str,
+    ) -> Result<Vec<String>> {
         // Find available MIG instance matching profile
         for (id, instance) in &self.instances {
             if instance.allocated_to.is_none() && Self::matches_profile(instance, profile) {
@@ -487,7 +512,10 @@ impl MigManager {
             }
         }
 
-        Err(anyhow!("No available MIG instance matching profile: {}", profile))
+        Err(anyhow!(
+            "No available MIG instance matching profile: {}",
+            profile
+        ))
     }
 
     fn matches_profile(instance: &MigInstance, profile: &str) -> bool {
@@ -512,7 +540,9 @@ mod tests {
         let req = GpuRequest::Count(2);
         assert!(matches!(req, GpuRequest::Count(2)));
 
-        let req = GpuRequest::Mig { profile: "1g.5gb".to_string() };
+        let req = GpuRequest::Mig {
+            profile: "1g.5gb".to_string(),
+        };
         assert!(matches!(req, GpuRequest::Mig { .. }));
     }
 

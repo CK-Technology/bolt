@@ -318,6 +318,7 @@ impl PredictiveAutoScaler {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn record_scaling_event(
         &self,
         service_name: &str,

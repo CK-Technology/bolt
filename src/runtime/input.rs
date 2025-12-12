@@ -246,13 +246,13 @@ impl UltraLowLatencyInputHandler {
             let id_path = format!("/sys/class/input/event{}/device/id", num);
             if let Ok(file) = File::open(&id_path) {
                 let reader = BufReader::new(file);
-                for line in reader.lines().flatten() {
-                    if line.starts_with("vendor ") {
-                        if let Ok(vendor) = u16::from_str_radix(&line[7..], 16) {
+                for line in reader.lines().map_while(Result::ok) {
+                    if let Some(vendor_str) = line.strip_prefix("vendor ") {
+                        if let Ok(vendor) = u16::from_str_radix(vendor_str, 16) {
                             device.vendor_id = vendor;
                         }
-                    } else if line.starts_with("product ") {
-                        if let Ok(product) = u16::from_str_radix(&line[8..], 16) {
+                    } else if let Some(product_str) = line.strip_prefix("product ") {
+                        if let Ok(product) = u16::from_str_radix(product_str, 16) {
                             device.product_id = product;
                         }
                     }

@@ -1,8 +1,8 @@
 //! GPU management commands
 
-use clap::{Parser, Subcommand};
-use bolt::runtime::gpu_scheduler::{GpuScheduler, GpuState};
 use crate::Result;
+use bolt::runtime::gpu_scheduler::{GpuScheduler, GpuState};
+use clap::{Parser, Subcommand};
 use tracing::info;
 
 #[derive(Parser)]
@@ -59,9 +59,10 @@ impl GpuCommand {
         match &self.command {
             GpuSubcommand::List => self.list_gpus().await,
             GpuSubcommand::Status { detailed } => self.show_status(*detailed).await,
-            GpuSubcommand::Metrics { container, interval } => {
-                self.show_metrics(container.as_deref(), *interval).await
-            }
+            GpuSubcommand::Metrics {
+                container,
+                interval,
+            } => self.show_metrics(container.as_deref(), *interval).await,
             GpuSubcommand::Config { strategy } => {
                 self.configure_scheduler(strategy.as_deref()).await
             }
@@ -110,7 +111,10 @@ impl GpuCommand {
 
         for (id, gpu) in gpus.iter() {
             println!("GPU: {} ({})", id, gpu.name);
-            println!("  Memory: {}/{} MB", gpu.free_memory_mb, gpu.total_memory_mb);
+            println!(
+                "  Memory: {}/{} MB",
+                gpu.free_memory_mb, gpu.total_memory_mb
+            );
             println!("  Utilization: {}%", gpu.utilization_percent as u32);
             println!("  Power: {}/{} W", gpu.power_draw_w, gpu.power_limit_w);
 
@@ -137,7 +141,10 @@ impl GpuCommand {
     }
 
     async fn show_metrics(&self, container: Option<&str>, interval: u64) -> Result<()> {
-        info!("📈 Showing GPU metrics (updating every {}s, press Ctrl+C to exit)...", interval);
+        info!(
+            "📈 Showing GPU metrics (updating every {}s, press Ctrl+C to exit)...",
+            interval
+        );
 
         let scheduler = GpuScheduler::new().await?;
 
@@ -194,10 +201,15 @@ fn print_gpu_metrics(id: &str, gpu: &GpuState) {
 
     // Utilization bar
     let util_bar = create_bar(gpu.utilization_percent as u32, 50);
-    println!("│ Utilization:  {}  {}%", util_bar, gpu.utilization_percent as u32);
+    println!(
+        "│ Utilization:  {}  {}%",
+        util_bar, gpu.utilization_percent as u32
+    );
 
     // Memory bar
-    let mem_percent = ((gpu.total_memory_mb - gpu.free_memory_mb) as f32 / gpu.total_memory_mb as f32 * 100.0) as u32;
+    let mem_percent = ((gpu.total_memory_mb - gpu.free_memory_mb) as f32
+        / gpu.total_memory_mb as f32
+        * 100.0) as u32;
     let mem_bar = create_bar(mem_percent, 50);
     println!(
         "│ Memory:       {}  {}/{} MB ({}%)",
@@ -209,17 +221,23 @@ fn print_gpu_metrics(id: &str, gpu: &GpuState) {
 
     // Temperature
     let temp_color = if gpu.temperature_c > 80 {
-        "\x1b[31m"  // Red
+        "\x1b[31m" // Red
     } else if gpu.temperature_c > 70 {
-        "\x1b[33m"  // Yellow
+        "\x1b[33m" // Yellow
     } else {
-        "\x1b[32m"  // Green
+        "\x1b[32m" // Green
     };
-    println!("│ Temperature:  {}{}°C\x1b[0m", temp_color, gpu.temperature_c);
+    println!(
+        "│ Temperature:  {}{}°C\x1b[0m",
+        temp_color, gpu.temperature_c
+    );
 
     // Power
     let power_percent = (gpu.power_draw_w as f32 / gpu.power_limit_w as f32 * 100.0) as u32;
-    println!("│ Power:        {} W / {} W ({}%)", gpu.power_draw_w, gpu.power_limit_w, power_percent);
+    println!(
+        "│ Power:        {} W / {} W ({}%)",
+        gpu.power_draw_w, gpu.power_limit_w, power_percent
+    );
 
     // Allocated containers
     if !gpu.allocated_to.is_empty() {
@@ -238,11 +256,7 @@ fn create_bar(percent: u32, width: usize) -> String {
     let filled = (percent as usize * width / 100).min(width);
     let empty = width.saturating_sub(filled);
 
-    let bar = format!(
-        "{}{}",
-        "█".repeat(filled),
-        "░".repeat(empty)
-    );
+    let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
 
     format!("[{}]", bar)
 }

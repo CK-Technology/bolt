@@ -184,7 +184,10 @@ impl WaylandGpuIntegration {
         container_id: &str,
         vendor: GPUVendor,
     ) -> Result<()> {
-        info!("    🌊 Setting up Wayland GPU environment for container {}", container_id);
+        info!(
+            "    🌊 Setting up Wayland GPU environment for container {}",
+            container_id
+        );
 
         unsafe {
             // Core Wayland environment
@@ -232,7 +235,10 @@ impl WaylandGpuIntegration {
     }
 
     async fn setup_kde_wayland_optimizations(&self, container_id: &str) -> Result<()> {
-        info!("    🔷 Applying KDE/Plasma Wayland optimizations for container {}", container_id);
+        info!(
+            "    🔷 Applying KDE/Plasma Wayland optimizations for container {}",
+            container_id
+        );
 
         unsafe {
             // KDE/Plasma specific optimizations
@@ -263,7 +269,10 @@ impl WaylandGpuIntegration {
     }
 
     async fn setup_gnome_wayland_optimizations(&self, container_id: &str) -> Result<()> {
-        info!("    🟣 Applying GNOME Wayland optimizations for container {}", container_id);
+        info!(
+            "    🟣 Applying GNOME Wayland optimizations for container {}",
+            container_id
+        );
 
         unsafe {
             // GNOME/Mutter specific
@@ -279,7 +288,10 @@ impl WaylandGpuIntegration {
     }
 
     async fn setup_wlroots_optimizations(&self, container_id: &str) -> Result<()> {
-        info!("    🌊 Applying wlroots-based compositor optimizations for container {}", container_id);
+        info!(
+            "    🌊 Applying wlroots-based compositor optimizations for container {}",
+            container_id
+        );
 
         unsafe {
             // wlroots gaming optimizations (Sway, Hyprland, etc.)
@@ -296,7 +308,10 @@ impl WaylandGpuIntegration {
     }
 
     async fn setup_generic_wayland_optimizations(&self, container_id: &str) -> Result<()> {
-        info!("    🔧 Applying generic Wayland optimizations for container {}", container_id);
+        info!(
+            "    🔧 Applying generic Wayland optimizations for container {}",
+            container_id
+        );
 
         unsafe {
             // Generic optimizations that work across compositors
@@ -309,7 +324,10 @@ impl WaylandGpuIntegration {
     }
 
     pub async fn enable_xwayland_for_legacy(&self, container_id: &str) -> Result<()> {
-        info!("🔄 Enabling XWayland for legacy application support in container {}", container_id);
+        info!(
+            "🔄 Enabling XWayland for legacy application support in container {}",
+            container_id
+        );
 
         unsafe {
             // XWayland configuration

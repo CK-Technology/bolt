@@ -433,17 +433,15 @@ impl ComposeCompat {
 
         // Check for unsupported features
         for (name, service) in &compose.services {
-            if let Some(build) = &service.build {
-                if let ComposeBuild::Complex {
-                    args: Some(args), ..
-                } = build
-                {
-                    if !args.is_empty() {
-                        warnings.push(format!(
-                            "Service '{}': Build args may need manual conversion",
-                            name
-                        ));
-                    }
+            if let Some(ComposeBuild::Complex {
+                args: Some(args), ..
+            }) = &service.build
+            {
+                if !args.is_empty() {
+                    warnings.push(format!(
+                        "Service '{}': Build args may need manual conversion",
+                        name
+                    ));
                 }
             }
 
