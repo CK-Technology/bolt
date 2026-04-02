@@ -1,24 +1,22 @@
-# Bolt
+<p align="center">
+  <img src="assets/icons/sizes/bolt-icon-128.png" alt="Bolt" width="128">
+</p>
 
-<div align="center">
-  <img src="assets/icons/sizes/bolt-icon-128.png" alt="bolt icon" width="128" height="128">
+<h1 align="center">Bolt</h1>
 
-**Next-Generation Container Runtime & Orchestration**  
-*Fast. Secure. Declarative.*
+<p align="center">
+  <strong>Next-Generation Container Runtime & Orchestration</strong>
+</p>
 
-</div>
-
----
-
-## Badges
-
-![Rust](https://img.shields.io/badge/Rust%201.85+-red?logo=rust)  
-![Runtime](https://img.shields.io/badge/Runtime-Containers+nvbind-blue?logo=docker)
-![Orchestration](https://img.shields.io/badge/Orchestration-Surge-orange?logo=kubernetes)
-![Declarative](https://img.shields.io/badge/Config-TOML-green?logo=toml)
-![Virtualization](https://img.shields.io/badge/Virtualization-LXC--like-purple?logo=proxmox)
-![Snapshots](https://img.shields.io/badge/Snapshots-BTRFS%2FZFS-yellow?logo=linux)
-![Gaming](https://img.shields.io/badge/Gaming-GPU+nvbind-red?logo=nvidia)  
+<p align="center">
+  <img src="https://img.shields.io/badge/Rust-CE422B?style=for-the-badge&logo=rust&logoColor=white" alt="Rust">
+  <img src="https://img.shields.io/badge/NVIDIA-76B900?style=for-the-badge&logo=nvidia&logoColor=white" alt="NVIDIA">
+  <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker">
+  <img src="https://img.shields.io/badge/TOML-9C4121?style=for-the-badge&logo=toml&logoColor=white" alt="TOML">
+  <img src="https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux">
+  <img src="https://img.shields.io/badge/BTRFS-FF6600?style=for-the-badge&logo=btrfs&logoColor=white" alt="BTRFS">
+  <img src="https://img.shields.io/badge/Gaming-E60012?style=for-the-badge&logo=playstation&logoColor=white" alt="Gaming">
+</p>  
 
 ---
 
