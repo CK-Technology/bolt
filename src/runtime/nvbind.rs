@@ -838,7 +838,12 @@ impl GpuScheduler {
     }
 
     pub async fn get_context_switch_time(&self) -> Duration {
-        *self.context_switch_time.lock().unwrap()
+        // Recover from a poisoned lock instead of panicking: a stale read here
+        // must never take down the GPU runtime.
+        *self
+            .context_switch_time
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
     }
 }
 
@@ -879,7 +884,9 @@ impl GpuPerformanceMonitor {
         tokio::spawn(async move {
             info!("📊 Starting real-time GPU performance monitoring");
 
-            while *active.lock().unwrap() {
+            // Recover from a poisoned lock rather than panicking the monitoring
+            // task; a poisoned flag simply ends the loop cleanly.
+            while *active.lock().unwrap_or_else(|e| e.into_inner()) {
                 // Update GPU metrics every 100ms for real-time monitoring
                 if let Err(e) = Self::update_gpu_metrics(&metrics).await {
                     warn!("Failed to update GPU metrics: {}", e);

@@ -22,7 +22,7 @@ pkgbase = bolt
 	provides = container-runtime
 	conflicts = bolt-git
 	backup = etc/bolt/bolt.toml
-	source = git+https://github.com/CK-Technology/bolt.git#tag=v0.1.0
+	source = git+https://github.com/CK-Technology/bolt.git#branch=main
 	sha256sums = SKIP
 
 pkgname = bolt

@@ -72,7 +72,7 @@ check_dependencies() {
 build_arch_package() {
     log "Building Arch Linux package..."
 
-    cd "$SCRIPT_DIR"
+    cd "$SCRIPT_DIR/packaging/arch"
 
     # Clean previous builds
     rm -rf pkg src *.pkg.tar.* || true
@@ -113,79 +113,8 @@ build_rpm_package() {
     # Create RPM build environment
     rpmdev-setuptree
 
-    # Create spec file
-    cat > ~/rpmbuild/SPECS/bolt.spec << 'EOF'
-Name:           bolt
-Version:        0.1.0
-Release:        1%{?dist}
-Summary:        Next-generation Rust container runtime with gaming optimizations
-
-License:        MIT
-URL:            https://github.com/CK-Technology/bolt
-Source0:        https://github.com/CK-Technology/bolt/archive/v%{version}.tar.gz
-
-BuildRequires:  rust >= 1.85
-BuildRequires:  cargo
-BuildRequires:  systemd-devel
-BuildRequires:  wayland-devel
-BuildRequires:  libxkbcommon-devel
-BuildRequires:  libxcb-devel
-
-Requires:       systemd
-Requires:       wayland
-Requires:       libxkbcommon
-Requires:       libxcb
-
-%description
-Bolt is a next-generation container runtime written in Rust that provides
-gaming optimizations, GPU passthrough support, QUIC networking, and native
-Wayland support for GUI applications.
-
-%prep
-%autosetup
-
-%build
-cargo build --release --features "gaming,quic-networking,oci-runtime,nvidia-support"
-
-%install
-install -D -m755 target/release/bolt %{buildroot}%{_bindir}/bolt
-
-# Install systemd service
-install -D -m644 debian/bolt.service %{buildroot}%{_unitdir}/bolt.service
-
-# Install configuration
-install -D -m644 debian/bolt.toml %{buildroot}%{_sysconfdir}/bolt/bolt.toml
-
-# Create directories
-mkdir -p %{buildroot}%{_sharedstatedir}/bolt
-mkdir -p %{buildroot}%{_rundir}/bolt
-
-%pre
-getent group bolt >/dev/null || groupadd -r bolt
-getent passwd bolt >/dev/null || useradd -r -g bolt -d %{_sharedstatedir}/bolt -s /sbin/nologin bolt
-
-%post
-%systemd_post bolt.service
-
-%preun
-%systemd_preun bolt.service
-
-%postun
-%systemd_postun_with_restart bolt.service
-
-%files
-%license LICENSE
-%doc README.md
-%{_bindir}/bolt
-%{_unitdir}/bolt.service
-%config(noreplace) %{_sysconfdir}/bolt/bolt.toml
-%attr(755,bolt,bolt) %dir %{_sharedstatedir}/bolt
-%attr(755,bolt,bolt) %dir %{_rundir}/bolt
-
-%changelog
-* Mon Sep 16 2024 CK Technology <ghostkellz@proton.me> - 0.1.0-1
-- Initial RPM release
-EOF
+    # Use the canonical spec from packaging/rpm/
+    cp "$SCRIPT_DIR/packaging/rpm/bolt.spec" ~/rpmbuild/SPECS/bolt.spec
 
     # Build RPM
     rpmbuild -ba ~/rpmbuild/SPECS/bolt.spec

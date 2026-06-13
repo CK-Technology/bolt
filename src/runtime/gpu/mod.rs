@@ -231,13 +231,17 @@ impl GPUManager {
         self.mount_vulkan_drivers(container_id).await?;
 
         // Set environment variables
-        unsafe {
-            std::env::set_var(
-                "VK_ICD_FILENAMES",
-                "/usr/share/vulkan/icd.d/nvidia_icd.json",
-            );
-            std::env::set_var("VK_LAYER_PATH", "/usr/share/vulkan/explicit_layer.d");
-        }
+        let env = env_manager();
+        env.set_container_env(
+            container_id,
+            "VK_ICD_FILENAMES",
+            "/usr/share/vulkan/icd.d/nvidia_icd.json",
+        )?;
+        env.set_container_env(
+            container_id,
+            "VK_LAYER_PATH",
+            "/usr/share/vulkan/explicit_layer.d",
+        )?;
 
         Ok(())
     }
@@ -293,21 +297,19 @@ impl GPUManager {
     async fn setup_wine_gaming_gpu(&self, container_id: &str, game: &GamingConfig) -> Result<()> {
         info!("🍷 Configuring GPU for Wine/Proton gaming");
 
+        let env = env_manager();
+
         // Enable DXVK if specified
         if game.dxvk_enabled {
             info!("  ✓ DXVK enabled (DirectX → Vulkan)");
-            unsafe {
-                std::env::set_var("DXVK_ENABLE_NVAPI", "1");
-                std::env::set_var("DXVK_NVAPI_ALLOW_OTHER", "1");
-            }
+            env.set_container_env(container_id, "DXVK_ENABLE_NVAPI", "1")?;
+            env.set_container_env(container_id, "DXVK_NVAPI_ALLOW_OTHER", "1")?;
         }
 
         // Enable VKD3D for DirectX 12
         if game.vkd3d_enabled {
             info!("  ✓ VKD3D enabled (DirectX 12 → Vulkan)");
-            unsafe {
-                std::env::set_var("VKD3D_CONFIG", "dxr,dxr11");
-            }
+            env.set_container_env(container_id, "VKD3D_CONFIG", "dxr,dxr11")?;
         }
 
         // Configure for NVIDIA specific Wine features
@@ -325,10 +327,9 @@ impl GPUManager {
         );
 
         // Set up OpenGL/Vulkan for native games
-        unsafe {
-            std::env::set_var("__GL_THREADED_OPTIMIZATIONS", "1");
-            std::env::set_var("__GL_SHADER_CACHE", "1");
-        }
+        let env = env_manager();
+        env.set_container_env(container_id, "__GL_THREADED_OPTIMIZATIONS", "1")?;
+        env.set_container_env(container_id, "__GL_SHADER_CACHE", "1")?;
 
         Ok(())
     }

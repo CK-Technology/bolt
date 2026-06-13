@@ -1,10 +1,10 @@
 Source: bolt
 Section: utils
 Priority: optional
-Maintainer: CK Technology <ghostkellz@proton.me>
+Maintainer: Christopher Kelley <ckelley@ghostkellz.sh>
 Build-Depends: debhelper-compat (= 13),
                cargo,
-               rustc (>= 1.85),
+               rustc (>= 1.96),
                pkg-config,
                libwayland-dev,
                libxkbcommon-dev,

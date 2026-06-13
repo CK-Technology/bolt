@@ -14,6 +14,9 @@ debug/
 *.so
 *.rlib
 
+# Bolt local runtime cache
+.bolt/
+
 # IDE
 .vscode/
 .idea/

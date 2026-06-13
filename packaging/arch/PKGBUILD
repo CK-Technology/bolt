@@ -1,4 +1,4 @@
-# Maintainer: CK Technology <ghostkellz@proton.me>
+# Maintainer: Christopher Kelley <ckelley@ghostkellz.sh>
 pkgname=bolt
 pkgver=0.1.0
 pkgrel=1
@@ -19,7 +19,8 @@ conflicts=('bolt-git')
 backup=(
     'etc/bolt/bolt.toml'
 )
-source=("git+https://github.com/CK-Technology/bolt.git#tag=v$pkgver")
+# No release tags yet — build from the main branch.
+source=("git+https://github.com/CK-Technology/bolt.git#branch=main")
 sha256sums=('SKIP')
 
 prepare() {

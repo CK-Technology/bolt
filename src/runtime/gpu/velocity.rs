@@ -1,4 +1,5 @@
 use super::GPUManager;
+use crate::runtime::environment::env_manager;
 use anyhow::Result;
 use nix::unistd;
 use std::path::Path;
@@ -107,31 +108,38 @@ impl GPUManager {
         let device = nvidia_config.device.unwrap_or(0);
 
         // Set up environment variables that nvidia-container-runtime uses
-        unsafe {
-            std::env::set_var("NVIDIA_VISIBLE_DEVICES", device.to_string());
+        let env = env_manager();
+        env.set_container_env(
+            container_id,
+            "NVIDIA_VISIBLE_DEVICES",
+            device.to_string(),
+        )?;
 
-            let mut capabilities = vec!["utility"];
+        let mut capabilities = vec!["utility"];
 
-            if nvidia_config.cuda.unwrap_or(false) {
-                capabilities.push("compute");
-                info!("      🚀 CUDA compute enabled");
-            }
+        if nvidia_config.cuda.unwrap_or(false) {
+            capabilities.push("compute");
+            info!("      🚀 CUDA compute enabled");
+        }
 
-            // Always include graphics capabilities for gaming
-            capabilities.extend(&["graphics", "video", "display"]);
+        // Always include graphics capabilities for gaming
+        capabilities.extend(&["graphics", "video", "display"]);
 
-            std::env::set_var("NVIDIA_DRIVER_CAPABILITIES", capabilities.join(","));
+        env.set_container_env(
+            container_id,
+            "NVIDIA_DRIVER_CAPABILITIES",
+            capabilities.join(","),
+        )?;
 
-            // Advanced features
-            if nvidia_config.dlss.unwrap_or(false) {
-                std::env::set_var("NVIDIA_ENABLE_DLSS", "1");
-                info!("      ✨ DLSS enabled");
-            }
+        // Advanced features
+        if nvidia_config.dlss.unwrap_or(false) {
+            env.set_container_env(container_id, "NVIDIA_ENABLE_DLSS", "1")?;
+            info!("      ✨ DLSS enabled");
+        }
 
-            if nvidia_config.raytracing.unwrap_or(false) {
-                std::env::set_var("NVIDIA_ENABLE_RTX", "1");
-                info!("      🌟 Ray tracing enabled");
-            }
+        if nvidia_config.raytracing.unwrap_or(false) {
+            env.set_container_env(container_id, "NVIDIA_ENABLE_RTX", "1")?;
+            info!("      🌟 Ray tracing enabled");
         }
 
         info!("    ✅ nvidia-container-runtime configuration complete");

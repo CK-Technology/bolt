@@ -5,6 +5,39 @@ external tooling. NVIDIA has device passthrough and CDI v0.6.0 spec generation
 today; AMD and Intel are at the detection and environment stage (see status
 table).
 
+## How nvbind Differs
+
+The NVIDIA Container Toolkit runs an OCI prestart hook that shells out to
+`nvidia-container-cli` to inject driver libraries and device nodes at container
+start. Bolt's built-in nvbind engine detects the GPU and driver in-process and
+emits a CDI v0.6.0 spec directly — no external toolkit, no `ldconfig` hook in
+the critical path. Device-node passthrough and `NVIDIA_*` environment wiring
+work today; full library injection (CDI mount hooks, in-container `ldconfig`
+refresh) is on the roadmap and shown with dashed edges.
+
+```mermaid
+flowchart LR
+    subgraph TK["NVIDIA Container Toolkit"]
+        TR["container runtime"]
+        TH["OCI prestart hook"]
+        TC["nvidia-container-cli"]
+        TR --> TH --> TC
+        TC --> TLib["inject libs + devices"]
+    end
+
+    subgraph NB["Bolt nvbind"]
+        Det["in-process detect<br/>driver · CUDA · arch"]
+        CDI["CDI v0.6.0 spec"]
+        Dev["device-node passthrough<br/>/dev/nvidia* · /dev/dri/*"]
+        Env["NVIDIA_* env wiring"]
+        Lib["library injection<br/>mount hooks · ldconfig"]
+        Det --> CDI
+        CDI --> Dev
+        CDI --> Env
+        CDI -.-> Lib
+    end
+```
+
 ## Supported GPUs
 
 | Vendor | Driver | Status |
@@ -37,6 +70,23 @@ bolt nv doctor
 
 # Run container with GPU
 bolt run --gpu all nvidia/cuda:12.0-base nvidia-smi
+```
+
+## Detection Flow
+
+On a GPU request, Bolt scans for a vendor driver and routes to the matching
+detector. Only the NVIDIA branch performs device passthrough today; AMD and
+Intel resolve to detection plus environment setup.
+
+```mermaid
+flowchart TD
+    REQ["GPU request<br/>--gpu all | 0,1"]
+    SCAN{"detect vendor"}
+    REQ --> SCAN
+    SCAN -->|"/dev/nvidia*"| NV["NVIDIA<br/>passthrough + CDI"]
+    SCAN -->|"/sys/class/drm · amdgpu"| AMD["AMD<br/>detect + env"]
+    SCAN -->|"i915 · Xe"| INT["Intel<br/>detect + env"]
+    SCAN -->|"none"| ERR["error<br/>no GPU available"]
 ```
 
 ## NVIDIA

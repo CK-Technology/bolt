@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 use super::{GPUInfo, GPUVendor};
+use crate::runtime::environment::env_manager;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -848,9 +849,8 @@ impl NvidiaManager {
             .join(",");
 
         info!("  Setting CUDA_VISIBLE_DEVICES={}", cuda_devices);
-        unsafe {
-            std::env::set_var("CUDA_VISIBLE_DEVICES", &cuda_devices);
-        }
+        let env = env_manager();
+        env.set_container_env(container_id, "CUDA_VISIBLE_DEVICES", cuda_devices.as_str())?;
 
         // Set NVIDIA driver capabilities
         let mut capabilities = vec!["compute", "utility"];
@@ -866,23 +866,21 @@ impl NvidiaManager {
             "  Setting NVIDIA_DRIVER_CAPABILITIES={}",
             driver_capabilities
         );
-        unsafe {
-            std::env::set_var("NVIDIA_DRIVER_CAPABILITIES", &driver_capabilities);
-        }
+        env.set_container_env(
+            container_id,
+            "NVIDIA_DRIVER_CAPABILITIES",
+            driver_capabilities.as_str(),
+        )?;
 
         // Set CUDA requirements (using cuda field from config)
         if nvidia_config.cuda.unwrap_or(false) {
             info!("  CUDA support enabled");
-            unsafe {
-                std::env::set_var("NVIDIA_REQUIRE_CUDA", "11.0");
-            }
+            env.set_container_env(container_id, "NVIDIA_REQUIRE_CUDA", "11.0")?;
         }
 
         // Set basic driver requirements
         info!("  Setting basic driver requirements");
-        unsafe {
-            std::env::set_var("NVIDIA_REQUIRE_DRIVER", "470.0");
-        }
+        env.set_container_env(container_id, "NVIDIA_REQUIRE_DRIVER", "470.0")?;
 
         Ok(())
     }
@@ -901,10 +899,9 @@ impl NvidiaManager {
         }
 
         // Set DLSS environment variables
-        unsafe {
-            std::env::set_var("NVIDIA_ENABLE_DLSS", "1");
-            std::env::set_var("DLSS_PERFMODE", "BALANCED"); // PERFORMANCE, BALANCED, QUALITY
-        }
+        let env = env_manager();
+        env.set_container_env(container_id, "NVIDIA_ENABLE_DLSS", "1")?;
+        env.set_container_env(container_id, "DLSS_PERFMODE", "BALANCED")?; // PERFORMANCE, BALANCED, QUALITY
 
         Ok(())
     }
@@ -923,10 +920,9 @@ impl NvidiaManager {
         }
 
         // Enable RTX features
-        unsafe {
-            std::env::set_var("NVIDIA_ENABLE_RTX", "1");
-            std::env::set_var("RTX_OPTIMIZATION", "PERFORMANCE");
-        }
+        let env = env_manager();
+        env.set_container_env(container_id, "NVIDIA_ENABLE_RTX", "1")?;
+        env.set_container_env(container_id, "RTX_OPTIMIZATION", "PERFORMANCE")?;
 
         Ok(())
     }
@@ -1175,9 +1171,7 @@ impl NvidiaManager {
         );
 
         // Set OpenCL environment
-        unsafe {
-            std::env::set_var("OPENCL_VENDOR_PATH", "/etc/OpenCL/vendors");
-        }
+        env_manager().set_container_env(container_id, "OPENCL_VENDOR_PATH", "/etc/OpenCL/vendors")?;
 
         Ok(())
     }
@@ -1414,11 +1408,10 @@ impl NvidiaManager {
         info!("  🔵 Configuring proprietary NVIDIA driver for Wine");
 
         // Enable NVAPI for Wine
-        unsafe {
-            std::env::set_var("WINE_ENABLE_NVAPI", "1");
-            std::env::set_var("DXVK_ENABLE_NVAPI", "1");
-            std::env::set_var("DXVK_NVAPI_ALLOW_OTHER", "1");
-        }
+        let env = env_manager();
+        env.set_container_env(container_id, "WINE_ENABLE_NVAPI", "1")?;
+        env.set_container_env(container_id, "DXVK_ENABLE_NVAPI", "1")?;
+        env.set_container_env(container_id, "DXVK_NVAPI_ALLOW_OTHER", "1")?;
 
         // Set up proprietary driver libraries
         self.setup_proprietary_libraries(container_id).await?;
@@ -1432,16 +1425,19 @@ impl NvidiaManager {
         info!("  🔵 Configuring NVIDIA Open GPU Kernel Modules for Wine");
 
         // NVIDIA Open modules support both proprietary userspace libs AND some open features
-        unsafe {
-            // Can use NVIDIA userspace libraries with open kernel modules
-            std::env::set_var("WINE_ENABLE_NVAPI", "1");
-            std::env::set_var("DXVK_ENABLE_NVAPI", "1");
-            std::env::set_var("DXVK_NVAPI_ALLOW_OTHER", "1");
+        let env = env_manager();
+        // Can use NVIDIA userspace libraries with open kernel modules
+        env.set_container_env(container_id, "WINE_ENABLE_NVAPI", "1")?;
+        env.set_container_env(container_id, "DXVK_ENABLE_NVAPI", "1")?;
+        env.set_container_env(container_id, "DXVK_NVAPI_ALLOW_OTHER", "1")?;
 
-            // Enable Vulkan optimizations (works better with open modules)
-            std::env::set_var("VK_LAYER_PATH", "/usr/share/vulkan/explicit_layer.d");
-            std::env::set_var("NVIDIA_ENABLE_OPEN_OPTIMIZATIONS", "1");
-        }
+        // Enable Vulkan optimizations (works better with open modules)
+        env.set_container_env(
+            container_id,
+            "VK_LAYER_PATH",
+            "/usr/share/vulkan/explicit_layer.d",
+        )?;
+        env.set_container_env(container_id, "NVIDIA_ENABLE_OPEN_OPTIMIZATIONS", "1")?;
 
         // Set up libraries for NVIDIA open
         self.setup_nvidia_open_libraries(container_id).await?;
@@ -1456,12 +1452,11 @@ impl NvidiaManager {
         info!("  🟢 Configuring nouveau open-source driver for Wine");
 
         // For nouveau, we primarily use Mesa/Gallium3D
-        unsafe {
-            std::env::set_var("MESA_LOADER_DRIVER_OVERRIDE", "nouveau");
-            std::env::set_var("GALLIUM_DRIVER", "nouveau");
-            // Disable NVAPI since it's not available with nouveau
-            std::env::set_var("DXVK_ENABLE_NVAPI", "0");
-        }
+        let env = env_manager();
+        env.set_container_env(container_id, "MESA_LOADER_DRIVER_OVERRIDE", "nouveau")?;
+        env.set_container_env(container_id, "GALLIUM_DRIVER", "nouveau")?;
+        // Disable NVAPI since it's not available with nouveau
+        env.set_container_env(container_id, "DXVK_ENABLE_NVAPI", "0")?;
 
         self.setup_mesa_libraries(container_id).await?;
 
@@ -1474,18 +1469,18 @@ impl NvidiaManager {
         info!("  🔴 Configuring NVK (Mesa Vulkan) driver for Wine");
 
         // NVK provides Vulkan support on nouveau
-        unsafe {
-            std::env::set_var(
-                "VK_ICD_FILENAMES",
-                "/usr/share/vulkan/icd.d/nouveau_icd.x86_64.json",
-            );
-            std::env::set_var("MESA_LOADER_DRIVER_OVERRIDE", "nouveau");
-            std::env::set_var("GALLIUM_DRIVER", "nouveau");
-            // VKD3D can work with NVK for DirectX 12
-            std::env::set_var("VKD3D_CONFIG", "vulkan");
-            // Disable NVAPI
-            std::env::set_var("DXVK_ENABLE_NVAPI", "0");
-        }
+        let env = env_manager();
+        env.set_container_env(
+            container_id,
+            "VK_ICD_FILENAMES",
+            "/usr/share/vulkan/icd.d/nouveau_icd.x86_64.json",
+        )?;
+        env.set_container_env(container_id, "MESA_LOADER_DRIVER_OVERRIDE", "nouveau")?;
+        env.set_container_env(container_id, "GALLIUM_DRIVER", "nouveau")?;
+        // VKD3D can work with NVK for DirectX 12
+        env.set_container_env(container_id, "VKD3D_CONFIG", "vulkan")?;
+        // Disable NVAPI
+        env.set_container_env(container_id, "DXVK_ENABLE_NVAPI", "0")?;
 
         self.setup_nvk_libraries(container_id).await?;
 
@@ -1634,7 +1629,7 @@ impl NvidiaManager {
         }
 
         // Set up NVIDIA Open environment
-        self.setup_nvidia_open_environment().await?;
+        self.setup_nvidia_open_environment(container_id).await?;
 
         Ok(())
     }
@@ -1679,46 +1674,50 @@ impl NvidiaManager {
         }
 
         // Set up environment for Mesa/nouveau
-        self.setup_nouveau_environment().await?;
+        self.setup_nouveau_environment(container_id).await?;
 
         Ok(())
     }
 
-    async fn setup_nvidia_open_environment(&self) -> Result<()> {
+    async fn setup_nvidia_open_environment(&self, container_id: &str) -> Result<()> {
         info!("      🌟 Configuring NVIDIA Open GPU Kernel Modules environment");
 
-        unsafe {
-            // NVIDIA Open modules support full NVIDIA userspace stack
-            std::env::set_var(
-                "NVIDIA_DRIVER_CAPABILITIES",
-                "compute,utility,graphics,video,display",
-            );
+        let env = env_manager();
+        // NVIDIA Open modules support full NVIDIA userspace stack
+        env.set_container_env(
+            container_id,
+            "NVIDIA_DRIVER_CAPABILITIES",
+            "compute,utility,graphics,video,display",
+        )?;
 
-            // GSP firmware optimizations (available with open modules)
-            std::env::set_var("NVIDIA_GSP_OPTIMIZATIONS", "1");
-            std::env::set_var("NVIDIA_OPEN_MODULE_FEATURES", "1");
+        // GSP firmware optimizations (available with open modules)
+        env.set_container_env(container_id, "NVIDIA_GSP_OPTIMIZATIONS", "1")?;
+        env.set_container_env(container_id, "NVIDIA_OPEN_MODULE_FEATURES", "1")?;
 
-            // Enhanced Vulkan support (Turing+ with full feature set)
-            std::env::set_var("VK_LAYER_PATH", "/usr/share/vulkan/explicit_layer.d");
-            std::env::set_var("__VK_LAYER_NV_optimus", "NVIDIA_only");
+        // Enhanced Vulkan support (Turing+ with full feature set)
+        env.set_container_env(
+            container_id,
+            "VK_LAYER_PATH",
+            "/usr/share/vulkan/explicit_layer.d",
+        )?;
+        env.set_container_env(container_id, "__VK_LAYER_NV_optimus", "NVIDIA_only")?;
 
-            // OpenGL optimizations
-            std::env::set_var("__GL_THREADED_OPTIMIZATIONS", "1");
-            std::env::set_var("__GL_SHADER_CACHE", "1");
-            std::env::set_var("__GL_ALLOW_UNOFFICIAL_PROTOCOL", "1");
+        // OpenGL optimizations
+        env.set_container_env(container_id, "__GL_THREADED_OPTIMIZATIONS", "1")?;
+        env.set_container_env(container_id, "__GL_SHADER_CACHE", "1")?;
+        env.set_container_env(container_id, "__GL_ALLOW_UNOFFICIAL_PROTOCOL", "1")?;
 
-            // CUDA optimizations for open modules
-            std::env::set_var("CUDA_CACHE_DISABLE", "0");
-            std::env::set_var("CUDA_CACHE_MAXSIZE", "2147483648"); // 2GB cache
+        // CUDA optimizations for open modules
+        env.set_container_env(container_id, "CUDA_CACHE_DISABLE", "0")?;
+        env.set_container_env(container_id, "CUDA_CACHE_MAXSIZE", "2147483648")?; // 2GB cache
 
-            // Memory and performance optimizations specific to open modules
-            std::env::set_var("NVIDIA_OPEN_MEMORY_OPTIMIZATIONS", "1");
-            std::env::set_var("NVIDIA_TURING_OPTIMIZATIONS", "1");
+        // Memory and performance optimizations specific to open modules
+        env.set_container_env(container_id, "NVIDIA_OPEN_MEMORY_OPTIMIZATIONS", "1")?;
+        env.set_container_env(container_id, "NVIDIA_TURING_OPTIMIZATIONS", "1")?;
 
-            // Debug and logging (if DEBUG=1 was used during build)
-            if Path::new("/sys/module/nvidia/parameters/NVreg_EnableVerboseLogging").exists() {
-                std::env::set_var("NVIDIA_ENABLE_DEBUG_LOGGING", "1");
-            }
+        // Debug and logging (if DEBUG=1 was used during build)
+        if Path::new("/sys/module/nvidia/parameters/NVreg_EnableVerboseLogging").exists() {
+            env.set_container_env(container_id, "NVIDIA_ENABLE_DEBUG_LOGGING", "1")?;
         }
 
         info!("        ✅ NVIDIA Open optimizations configured");
@@ -1728,23 +1727,23 @@ impl NvidiaManager {
         Ok(())
     }
 
-    async fn setup_nouveau_environment(&self) -> Result<()> {
+    async fn setup_nouveau_environment(&self, container_id: &str) -> Result<()> {
         info!("      🌱 Configuring nouveau environment");
 
-        unsafe {
-            // Mesa configuration for nouveau
-            std::env::set_var("MESA_LOADER_DRIVER_OVERRIDE", "nouveau");
-            std::env::set_var("GALLIUM_DRIVER", "nouveau");
+        let env = env_manager();
+        // Mesa configuration for nouveau
+        env.set_container_env(container_id, "MESA_LOADER_DRIVER_OVERRIDE", "nouveau")?;
+        env.set_container_env(container_id, "GALLIUM_DRIVER", "nouveau")?;
 
-            // Enable multi-threading for better performance
-            std::env::set_var("mesa_glthread", "true");
+        // Enable multi-threading for better performance
+        env.set_container_env(container_id, "mesa_glthread", "true")?;
 
-            // Vulkan configuration for NVK
-            std::env::set_var(
-                "VK_ICD_FILENAMES",
-                "/usr/share/vulkan/icd.d/nouveau_icd.x86_64.json",
-            );
-        }
+        // Vulkan configuration for NVK
+        env.set_container_env(
+            container_id,
+            "VK_ICD_FILENAMES",
+            "/usr/share/vulkan/icd.d/nouveau_icd.x86_64.json",
+        )?;
 
         Ok(())
     }

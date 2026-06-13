@@ -9,9 +9,12 @@ const { execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
+// Repo root, resolved relative to this script so it works regardless of cwd
+// (e.g. `npm run deploy` from deploy/ or `node deploy/surge-deploy.js` from root).
+const ROOT = path.join(__dirname, "..");
 const SURGE_DOMAIN = "bolt.cktech.sh";
-const BUILD_DIR = "./dist";
-const PACKAGE_DIR = "./packages";
+const BUILD_DIR = path.join(ROOT, "dist");
+const PACKAGE_DIR = path.join(ROOT, "packages");
 
 function log(message) {
   console.log(`[SURGE] ${message}`);
@@ -61,9 +64,10 @@ function createBuildDirectory() {
 function generateStaticSite() {
   log("Generating static site content...");
 
-  // Copy install script
-  if (fs.existsSync("./install.sh")) {
-    fs.copyFileSync("./install.sh", path.join(BUILD_DIR, "install.sh"));
+  // Copy install script (lives in repo root; bolt.cktech.sh serves it from there)
+  const installScript = path.join(ROOT, "install.sh");
+  if (fs.existsSync(installScript)) {
+    fs.copyFileSync(installScript, path.join(BUILD_DIR, "install.sh"));
   }
 
   // Create index.html

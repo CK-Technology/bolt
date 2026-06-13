@@ -1136,13 +1136,16 @@ impl BoltGpuIntegration {
         Ok(devices)
     }
 
-    /// Helper methods for container configuration
+    /// Record an environment variable in the per-container env map. The native
+    /// runtime merges this map into the OCI process env when building the spec
+    /// (see `create_oci_spec`), so values land in the container rather than the
+    /// host process.
     async fn set_container_env(&self, container_id: &str, key: &str, value: &str) -> Result<()> {
         debug!(
             "Setting environment variable for container {}: {}={}",
             container_id, key, value
         );
-        // In real implementation, this would modify the container's environment
+        crate::runtime::environment::env_manager().set_container_env(container_id, key, value)?;
         Ok(())
     }
 

@@ -5,9 +5,10 @@ Summary:        Next-generation Rust container runtime with gaming optimizations
 
 License:        MIT
 URL:            https://github.com/CK-Technology/bolt
-Source0:        https://github.com/CK-Technology/bolt/archive/v%{version}.tar.gz
+# No release tags yet — build from the main branch tarball.
+Source0:        https://github.com/CK-Technology/bolt/archive/refs/heads/main.tar.gz
 
-BuildRequires:  rust >= 1.85
+BuildRequires:  rust >= 1.96
 BuildRequires:  cargo
 BuildRequires:  gcc
 BuildRequires:  openssl-devel
@@ -29,7 +30,7 @@ Bolt is a modern container runtime written in Rust that provides:
 - Memory safety and performance through Rust
 
 %prep
-%autosetup -n bolt-%{version}
+%autosetup -n bolt-main
 
 %build
 export RUSTUP_TOOLCHAIN=stable
@@ -80,5 +81,5 @@ cargo test --release --lib --features "gaming,quic-networking,oci-runtime,nvidia
 %{_docdir}/bolt/README.md
 
 %changelog
-* Thu Dec 12 2024 CK Technology <ghostkellz@proton.me> - 0.1.0-1
+* Thu Dec 12 2024 Christopher Kelley <ckelley@ghostkellz.sh> - 0.1.0-1
 - Initial release

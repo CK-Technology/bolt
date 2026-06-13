@@ -4,7 +4,7 @@ set -euo pipefail
 # Bolt Container Runtime Installation Script
 # Supports Linux distributions with automatic detection
 
-BOLT_VERSION="0.1.1"
+BOLT_VERSION="0.1.0"
 BOLT_REPO="https://github.com/CK-Technology/bolt"
 INSTALL_DIR="/usr/local/bin"
 SERVICE_DIR="/etc/systemd/system"
@@ -186,8 +186,8 @@ install_rust() {
 
     # Ensure minimum Rust version
     RUST_VERSION=$(rustc --version | cut -d' ' -f2)
-    if ! awk "BEGIN {exit !(\"$RUST_VERSION\" >= \"1.85\")}"; then
-        log "Updating Rust to minimum version 1.85..."
+    if ! awk "BEGIN {exit !(\"$RUST_VERSION\" >= \"1.96\")}"; then
+        log "Updating Rust to minimum version 1.96..."
         rustup update stable
     fi
 }

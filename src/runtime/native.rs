@@ -317,6 +317,7 @@ impl BoltNativeRuntime {
         // Create OCI spec from configuration
         let spec = self
             .create_oci_spec(
+                &container_id,
                 &container_state.config,
                 applied_cdi.as_ref(),
                 cpu_affinity.as_ref(),
@@ -477,6 +478,11 @@ impl BoltNativeRuntime {
         self.containers.remove(id);
 
         self.storage.remove_container(id).await?;
+
+        // Drop any per-container environment recorded during GPU/AI/gaming setup.
+        if let Err(err) = crate::runtime::environment::env_manager().clear_container_env(id) {
+            warn!("Failed to clear environment for container {}: {}", id, err);
+        }
 
         info!("✅ Container removed: {}", id);
         Ok(())
@@ -651,6 +657,7 @@ impl BoltNativeRuntime {
 
     async fn create_oci_spec(
         &self,
+        container_id: &str,
         config: &ContainerConfig,
         applied_cdi: Option<&AppliedCdiSpec>,
         cpu_affinity: Option<&Vec<usize>>,
@@ -674,8 +681,15 @@ impl BoltNativeRuntime {
             process.set_user(user);
         }
 
-        // Set environment variables
+        // Set environment variables. Precedence (later wins): image/user
+        // defaults from the config, per-container vars recorded by GPU/AI/gaming
+        // setup (EnvironmentManager), then CDI-provided device env on top.
         let mut combined_env: std::collections::HashMap<String, String> = config.env.clone();
+
+        for entry in crate::runtime::environment::env_manager().get_container_env(container_id)? {
+            combined_env.insert(entry.0, entry.1);
+        }
+
         if let Some(cdi) = applied_cdi {
             for entry in &cdi.env {
                 if let Some((key, value)) = entry.split_once('=') {

@@ -169,7 +169,7 @@ pub mod object_store {
     use super::*;
     use aws_config::BehaviorVersion;
     use aws_sdk_s3::Client as S3Client;
-    use aws_sdk_s3::config::{Builder as S3ConfigBuilder, Region};
+    use aws_sdk_s3::config::{Builder as S3ConfigBuilder, Credentials, Region};
     use aws_smithy_types::byte_stream::ByteStream;
 
     use async_trait::async_trait;
@@ -341,16 +341,20 @@ pub mod object_store {
                 loader = loader.endpoint_url(endpoint.clone());
             }
 
-            // AWS SDK v1 uses environment variables or default credentials chain
-            // For explicit credentials, set them as environment variables before loading
+            // Pass explicit credentials through the SDK's credential provider
+            // rather than the process environment. Mutating AWS_* via
+            // std::env::set_var is process-global and races across concurrent
+            // clients; a per-config provider keeps credentials scoped to this
+            // client. Falls back to the default credential chain when unset.
             if let (Some(access_key), Some(secret_key)) = (&config.access_key, &config.secret_key) {
-                unsafe {
-                    std::env::set_var("AWS_ACCESS_KEY_ID", access_key);
-                    std::env::set_var("AWS_SECRET_ACCESS_KEY", secret_key);
-                    if let Some(token) = &config.session_token {
-                        std::env::set_var("AWS_SESSION_TOKEN", token);
-                    }
-                }
+                let credentials = Credentials::new(
+                    access_key.clone(),
+                    secret_key.clone(),
+                    config.session_token.clone(),
+                    None,
+                    "bolt-object-store",
+                );
+                loader = loader.credentials_provider(credentials);
             }
 
             let shared_config = loader.load().await;

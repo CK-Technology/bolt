@@ -3,7 +3,7 @@ members = ["."]
 
 [package]
 name = "bolt"
-version = "0.1.2"
+version = "0.1.0"
 edition = "2024"
 description = "Performance-first Rust container runtime with revolutionary networking, GPU optimization, and intelligent resource management"
 license = "MIT"
@@ -14,7 +14,7 @@ documentation = "https://github.com/CK-Technology/bolt#api"
 readme = "README.md"
 keywords = ["containers", "performance", "gpu", "quic", "networking", "optimization"]
 categories = ["virtualization", "development-tools", "network-programming"]
-rust-version = "1.91"
+rust-version = "1.96"
 
 [lib]
 name = "bolt"

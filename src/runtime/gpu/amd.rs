@@ -1,4 +1,5 @@
 use super::{GPUInfo, GPUVendor};
+use crate::runtime::environment::env_manager;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -516,17 +517,14 @@ impl AmdManager {
         info!("⚡ Setting up ROCm access for container {}", container_id);
 
         // Set ROCm environment variables
+        let env = env_manager();
         if let Some(device_id) = amd_config.device {
             info!("  Setting ROCM_VISIBLE_DEVICES={}", device_id);
-            unsafe {
-                std::env::set_var("ROCM_VISIBLE_DEVICES", device_id.to_string());
-            }
+            env.set_container_env(container_id, "ROCM_VISIBLE_DEVICES", device_id.to_string())?;
         }
 
-        unsafe {
-            std::env::set_var("HIP_VISIBLE_DEVICES", "0"); // Default to first GPU
-            std::env::set_var("HSA_OVERRIDE_GFX_VERSION", "10.3.0"); // Common compatibility
-        }
+        env.set_container_env(container_id, "HIP_VISIBLE_DEVICES", "0")?; // Default to first GPU
+        env.set_container_env(container_id, "HSA_OVERRIDE_GFX_VERSION", "10.3.0")?; // Common compatibility
 
         Ok(())
     }
@@ -547,9 +545,7 @@ impl AmdManager {
         for path in &vulkan_paths {
             if Path::new(path).exists() {
                 info!("  ✓ AMD Vulkan ICD found: {}", path);
-                unsafe {
-                    std::env::set_var("VK_ICD_FILENAMES", path);
-                }
+                env_manager().set_container_env(container_id, "VK_ICD_FILENAMES", *path)?;
                 break;
             }
         }

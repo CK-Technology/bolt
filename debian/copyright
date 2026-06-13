@@ -1,14 +1,14 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: bolt
-Upstream-Contact: CK Technology <ghostkellz@proton.me>
+Upstream-Contact: Christopher Kelley <ckelley@ghostkellz.sh>
 Source: https://github.com/CK-Technology/bolt
 
 Files: *
-Copyright: 2024 CK Technology
+Copyright: 2026 CK Technology LLC
 License: MIT
 
 Files: debian/*
-Copyright: 2024 CK Technology <ghostkellz@proton.me>
+Copyright: 2026 CK Technology LLC <ckelley@ghostkellz.sh>
 License: MIT
 
 License: MIT

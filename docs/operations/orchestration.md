@@ -2,6 +2,32 @@
 
 Bolt includes **Surge**, a built-in orchestration system for multi-service stacks.
 
+## How `surge up` Works
+
+Surge parses `Boltfile.toml`, orders services by their `depends_on` edges, then
+launches each one through the `UnifiedRuntime`. The set of started services is
+persisted to `surge_state.json` so `surge down` and `surge status` can act on
+the running stack.
+
+```mermaid
+sequenceDiagram
+    participant U as bolt surge up
+    participant S as Surge
+    participant BF as Boltfile parser
+    participant RT as UnifiedRuntime
+    participant ST as surge_state.json
+
+    U->>S: invoke
+    S->>BF: load Boltfile.toml
+    BF-->>S: services + depends_on
+    S->>S: order by dependencies
+    loop each service in order
+        S->>RT: run_container(service)
+        RT-->>S: container id
+    end
+    S->>ST: record deployed services
+```
+
 ## Boltfile.toml
 
 Create a `Boltfile.toml` in your project root:

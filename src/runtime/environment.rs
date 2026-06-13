@@ -304,3 +304,62 @@ static ENVIRONMENT_MANAGER: std::sync::OnceLock<EnvironmentManager> = std::sync:
 pub fn env_manager() -> &'static EnvironmentManager {
     ENVIRONMENT_MANAGER.get_or_init(EnvironmentManager::new)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_and_get_round_trip() {
+        let mgr = EnvironmentManager::new();
+        mgr.set_container_env("c1", "NVIDIA_VISIBLE_DEVICES", "0,1")
+            .unwrap();
+
+        let env = mgr.get_container_env("c1").unwrap();
+        assert_eq!(env.get("NVIDIA_VISIBLE_DEVICES").map(String::as_str), Some("0,1"));
+    }
+
+    #[test]
+    fn batch_insert_and_to_env_vec() {
+        let mgr = EnvironmentManager::new();
+        let mut vars = HashMap::new();
+        vars.insert("CUDA_VISIBLE_DEVICES".to_string(), "0".to_string());
+        vars.insert("NVIDIA_DRIVER_CAPABILITIES".to_string(), "compute".to_string());
+        mgr.set_container_env_batch("c1", vars).unwrap();
+
+        let mut env_vec = mgr.to_env_vec("c1").unwrap();
+        env_vec.sort();
+        assert_eq!(
+            env_vec,
+            vec![
+                "CUDA_VISIBLE_DEVICES=0".to_string(),
+                "NVIDIA_DRIVER_CAPABILITIES=compute".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn containers_are_isolated() {
+        let mgr = EnvironmentManager::new();
+        mgr.set_container_env("a", "K", "va").unwrap();
+        mgr.set_container_env("b", "K", "vb").unwrap();
+
+        assert_eq!(mgr.get_container_env("a").unwrap().get("K").unwrap(), "va");
+        assert_eq!(mgr.get_container_env("b").unwrap().get("K").unwrap(), "vb");
+    }
+
+    #[test]
+    fn clear_removes_container_env() {
+        let mgr = EnvironmentManager::new();
+        mgr.set_container_env("c1", "K", "v").unwrap();
+        mgr.clear_container_env("c1").unwrap();
+
+        assert!(mgr.get_container_env("c1").unwrap().is_empty());
+    }
+
+    #[test]
+    fn missing_container_yields_empty() {
+        let mgr = EnvironmentManager::new();
+        assert!(mgr.get_container_env("nope").unwrap().is_empty());
+    }
+}

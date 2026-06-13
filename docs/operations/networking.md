@@ -2,6 +2,36 @@
 
 Bolt provides QUIC-based networking for container communication.
 
+## Networking Model
+
+Docker routes container traffic through a Linux bridge (`docker0`) and rewrites
+packets with iptables NAT for every published port. Bolt keeps the familiar
+bridge/veth data path for compatibility, but layers an optional QUIC transport
+for encrypted, multiplexed service-to-service traffic. Dashed edges mark the
+QUIC path, which is still rolling out.
+
+```mermaid
+flowchart LR
+    subgraph DOCKER["Docker"]
+        DC["container<br/>eth0 · veth"]
+        DB["docker0 bridge"]
+        DNAT["iptables NAT<br/>per-port DNAT/SNAT"]
+        DH["host TCP/IP"]
+        DC --> DB --> DNAT --> DH
+    end
+
+    subgraph BOLT["Bolt"]
+        BC["container<br/>eth0 · veth"]
+        BB["bolt bridge"]
+        BNAT["port-forward rules"]
+        BH["host UDP·TCP/IP"]
+        BQ["QUIC transport<br/>encrypted · multiplexed"]
+        BC --> BB --> BNAT --> BH
+        BC -.-> BQ
+        BQ -.-> BH
+    end
+```
+
 ## Networks
 
 ### Create Network
@@ -83,6 +113,34 @@ Bolt uses QUIC for container-to-container communication:
 - Multiplexed streams
 - Built-in encryption
 - Connection migration
+
+A `QUICServer` tracks live connections and host-port forwards, selecting a
+congestion controller per workload profile — BBR for latency-sensitive traffic,
+Cubic for bandwidth-heavy transfers, with NewReno as the conservative default.
+
+```mermaid
+flowchart LR
+    subgraph HOST["Host"]
+        QS["QUICServer"]
+        CC["congestion control<br/>NewReno · Cubic · BBR"]
+        CM["connection map"]
+        PF["port-forward rules<br/>host:port → container:port"]
+        QS --> CC
+        QS --> CM
+        QS --> PF
+    end
+
+    subgraph CTRS["Containers"]
+        C1["service A"]
+        C2["service B"]
+    end
+
+    Client["external client"] -->|"published port"| PF
+    PF --> C1
+    C1 <-->|"QUIC streams"| QS
+    C2 <-->|"QUIC streams"| QS
+    QS --> CM
+```
 
 ## Environment Variables
 

@@ -239,7 +239,7 @@ bolt surge up
 
 ## Requirements
 
-- **Rust 1.91+** (Required by this crate's `rust-version`)
+- **Rust 1.96+** (Required by this crate's `rust-version`)
 - **Linux Kernel 5.4+** (For container namespaces and cgroups v2 support)
 - **Tokio 1.0+** (Async runtime integration)
 

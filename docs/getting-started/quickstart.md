@@ -15,7 +15,7 @@ cargo build --release
 ## Requirements
 
 - Linux kernel 5.4+
-- Rust 1.91+ (for building)
+- Rust 1.96+ (for building)
 - BTRFS or ZFS (for snapshots)
 - GPU drivers (for GPU passthrough)
 

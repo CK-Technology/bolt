@@ -11,4 +11,4 @@ bolt (0.1.0-1) unstable; urgency=medium
   * Support for NVIDIA and AMD GPU acceleration
   * Rootless and rootful container execution modes
 
- -- CK Technology <ghostkellz@proton.me>  Mon, 16 Sep 2024 12:00:00 +0000
+ -- Christopher Kelley <ckelley@ghostkellz.sh>  Mon, 16 Sep 2024 12:00:00 +0000

@@ -14,7 +14,7 @@ Thank you for your interest in contributing to Bolt.
 ## Development Setup
 
 ### Requirements
-- Rust 1.91+
+- Rust 1.96+
 - Linux (kernel 5.4+)
 - For GPU testing: NVIDIA, AMD, or Intel GPU with appropriate drivers
 

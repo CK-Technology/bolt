@@ -30,17 +30,51 @@ Bolt is a container runtime with native GPU support. The NVIDIA nvbind path is b
 
 ## Architecture
 
-```
-bolt
-├── Runtime        # OCI container execution
-├── GPU Manager    # Multi-vendor GPU detection
-│   ├── NVIDIA     # Built-in nvbind support
-│   ├── AMD        # ROCm integration
-│   └── Intel      # oneAPI/Level Zero
-├── Profiles       # Gaming & AI optimizations
-├── CDI            # Container Device Interface
-├── Surge          # Orchestration (Boltfile.toml)
-└── Snapshots      # BTRFS/ZFS automation
+A single `bolt` CLI drives every subsystem. The runtime executes containers
+(natively where possible, delegating to podman/docker otherwise); GPU, networking,
+orchestration, and snapshots are layered services it composes. Dashed edges mark
+paths that are planned or still rolling out.
+
+```mermaid
+flowchart TB
+    CLI["bolt CLI<br/>run · surge · nv / amd / arc · snapshot"]
+
+    subgraph RT["Runtime"]
+        UR["UnifiedRuntime<br/>native or delegate"]
+        OCI["OCI execution<br/>podman / docker fallback"]
+        CAP["Bolt capsule (bolt://)<br/>LXC-like · planned"]
+    end
+
+    subgraph GPU["GPU — built-in nvbind engine"]
+        NV["NVIDIA<br/>detect · passthrough · CDI"]
+        AMD["AMD<br/>detect only · experimental"]
+        INT["Intel<br/>detect only · experimental"]
+    end
+
+    subgraph NET["Networking"]
+        BR["Bridge / veth · NAT<br/>port forwarding"]
+        QUIC["QUIC transport<br/>encrypted · multiplexed"]
+    end
+
+    subgraph ORCH["Surge orchestration"]
+        BF["Boltfile.toml parser"]
+        DEP["dependency ordering"]
+    end
+
+    SNAP["Snapshots<br/>BTRFS / ZFS automation"]
+
+    CLI --> UR
+    UR --> OCI
+    UR -.-> CAP
+    CLI --> NV
+    CLI --> AMD
+    CLI --> INT
+    UR --> BR
+    BR --> QUIC
+    CLI --> BF
+    BF --> DEP
+    DEP --> UR
+    CLI --> SNAP
 ```
 
 ## Structure
