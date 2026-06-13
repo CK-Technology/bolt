@@ -192,12 +192,12 @@ impl QuicFabric {
 
         // Generate self-signed certificate for development
         let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
-        let cert_der = cert.serialize_der()?;
-        let priv_key = cert.serialize_private_key_der();
+        let cert_der = cert.cert.der().clone();
+        let priv_key = cert.key_pair.serialize_der();
 
         // Use modern rustls API
-        use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-        let cert_chain = vec![CertificateDer::from(cert_der)];
+        use rustls::pki_types::PrivateKeyDer;
+        let cert_chain = vec![cert_der];
         let key = PrivateKeyDer::try_from(priv_key)?;
 
         let mut tls_config = TlsServerConfig::builder()
@@ -383,7 +383,7 @@ impl QuicFabric {
         debug!("📤 Sending message: {:?}", message.message_type);
 
         // Serialize message
-        let serialized = bincode::serialize(&message)?;
+        let serialized = rmp_serde::to_vec(&message)?;
 
         // Open bidirectional stream
         let (mut send, mut recv) = connection.open_bi().await?;

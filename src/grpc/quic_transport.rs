@@ -48,7 +48,7 @@ impl QuicGrpcServer {
     /// by wrapping QUIC bidirectional streams as HTTP/2 streams for Tonic.
     pub async fn serve<S>(self, service: S) -> Result<()>
     where
-        S: Service<Request<Incoming>, Response = Response<tonic::body::BoxBody>>
+        S: Service<Request<Incoming>, Response = Response<tonic::body::Body>>
             + Clone
             + Send
             + 'static,
@@ -113,7 +113,7 @@ impl QuicGrpcServer {
     /// and processing gRPC requests
     async fn handle_connection<S>(connection: Arc<Connection>, service: S) -> Result<()>
     where
-        S: Service<Request<Incoming>, Response = Response<tonic::body::BoxBody>>
+        S: Service<Request<Incoming>, Response = Response<tonic::body::Body>>
             + Clone
             + Send
             + 'static,
@@ -154,7 +154,7 @@ impl QuicGrpcServer {
     /// Handle a single gRPC request over a QUIC bidirectional stream
     async fn handle_stream<S>(mut send: SendStream, mut recv: RecvStream, _service: S) -> Result<()>
     where
-        S: Service<Request<Incoming>, Response = Response<tonic::body::BoxBody>> + Send + 'static,
+        S: Service<Request<Incoming>, Response = Response<tonic::body::Body>> + Send + 'static,
         S::Error: std::error::Error + Send + Sync + 'static,
         S::Future: Send + 'static,
     {

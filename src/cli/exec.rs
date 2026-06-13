@@ -157,7 +157,7 @@ impl ExecCommand {
         let stdin_fd = stdin.as_raw_fd();
 
         // Check if stdin is a TTY
-        if !isatty(stdin_fd).unwrap_or(false) {
+        if !isatty(&stdin).unwrap_or(false) {
             return Ok(());
         }
 

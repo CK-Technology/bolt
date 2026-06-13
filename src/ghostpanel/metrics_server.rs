@@ -256,7 +256,7 @@ impl GhostPanelMetricsServer {
                         }
                     };
 
-                    if sender.send(Message::Text(json)).await.is_err() {
+                    if sender.send(Message::Text(json.into())).await.is_err() {
                         debug!("WebSocket client disconnected");
                         break;
                     }

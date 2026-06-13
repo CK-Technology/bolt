@@ -242,14 +242,14 @@ impl RealQUICServer {
 
         // Generate self-signed certificate
         let cert = self.generate_self_signed_cert()?;
-        let cert_der = cert.serialize_der()?;
-        let key_der = cert.serialize_private_key_der();
+        let cert_der = cert.cert.der().clone();
+        let key_der = cert.key_pair.serialize_der();
 
         // Create rustls server config
         let mut server_crypto = rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(
-                vec![CertificateDer::from(cert_der)],
+                vec![cert_der],
                 rustls::pki_types::PrivateKeyDer::try_from(key_der)
                     .map_err(|e| anyhow::anyhow!("Invalid private key: {:?}", e))?,
             )?;
@@ -279,7 +279,7 @@ impl RealQUICServer {
     }
 
     /// Generate self-signed certificate for development
-    fn generate_self_signed_cert(&self) -> Result<rcgen::Certificate> {
+    fn generate_self_signed_cert(&self) -> Result<rcgen::CertifiedKey> {
         info!("📜 Generating self-signed certificate for QUIC TLS");
 
         let subject_alt_names = vec![

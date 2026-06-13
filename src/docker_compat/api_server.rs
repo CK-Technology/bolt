@@ -600,7 +600,7 @@ impl DockerAPIServer {
         let routes = Self::build_routes_static(self.runtime.clone());
         let socket_path_owned = socket_path.to_string();
 
-        // Start server on Unix socket in background using hyperlocal
+        // Start server on Unix socket in background
         #[cfg(unix)]
         tokio::spawn(async move {
             // Create Unix listener
