@@ -26,19 +26,17 @@ pub async fn fetch_profiles(
     for (name, profile_data) in profiles {
         if let Ok(profile) =
             serde_json::from_value::<OptimizationProfile>(profile_data["profile"].clone())
-        {
-            if let Ok(metadata) =
+            && let Ok(metadata) =
                 serde_json::from_value::<ProfileMetadata>(profile_data["metadata"].clone())
-            {
-                let entry = ProfileEntry {
-                    profile,
-                    metadata,
-                    source: ProfileSource::Community {
-                        repository: repository.name.clone(),
-                    },
-                };
-                result.insert(name, entry);
-            }
+        {
+            let entry = ProfileEntry {
+                profile,
+                metadata,
+                source: ProfileSource::Community {
+                    repository: repository.name.clone(),
+                },
+            };
+            result.insert(name, entry);
         }
     }
 

@@ -345,24 +345,39 @@ impl MetricsCollector {
                 Ok(nvml) => {
                     if let Ok(device_count) = nvml.device_count() {
                         for i in 0..device_count {
-                            if let Ok(device) = nvml.device_by_index(i) {
-                                if let Ok(name) = device.name() {
-                                    let gpu_metrics = GPUMetrics {
-                                        gpu_id: format!("gpu-{}", i),
-                                        gpu_name: name,
-                                        gpu_vendor: "NVIDIA".to_string(),
-                                        utilization_percent: device.utilization_rates().map(|u| u.gpu as f64).unwrap_or(0.0),
-                                        memory_used_bytes: device.memory_info().map(|m| m.used).unwrap_or(0),
-                                        memory_total_bytes: device.memory_info().map(|m| m.total).unwrap_or(0),
-                                        temperature_celsius: device.temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu).unwrap_or(0) as f64,
-                                        power_usage_watts: device.power_usage().unwrap_or(0) as f64 / 1000.0,
-                                        fan_speed_percent: device.fan_speed(0).unwrap_or(0) as f64,
-                                        container_assignments: Vec::new(), // Would be populated from container assignments
-                                        last_updated: SystemTime::now(),
-                                    };
+                            if let Ok(device) = nvml.device_by_index(i)
+                                && let Ok(name) = device.name()
+                            {
+                                let gpu_metrics = GPUMetrics {
+                                    gpu_id: format!("gpu-{}", i),
+                                    gpu_name: name,
+                                    gpu_vendor: "NVIDIA".to_string(),
+                                    utilization_percent: device
+                                        .utilization_rates()
+                                        .map(|u| u.gpu as f64)
+                                        .unwrap_or(0.0),
+                                    memory_used_bytes: device
+                                        .memory_info()
+                                        .map(|m| m.used)
+                                        .unwrap_or(0),
+                                    memory_total_bytes: device
+                                        .memory_info()
+                                        .map(|m| m.total)
+                                        .unwrap_or(0),
+                                    temperature_celsius: device
+                                        .temperature(
+                                            nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu,
+                                        )
+                                        .unwrap_or(0)
+                                        as f64,
+                                    power_usage_watts: device.power_usage().unwrap_or(0) as f64
+                                        / 1000.0,
+                                    fan_speed_percent: device.fan_speed(0).unwrap_or(0) as f64,
+                                    container_assignments: Vec::new(), // Would be populated from container assignments
+                                    last_updated: SystemTime::now(),
+                                };
 
-                                    self.record_gpu_metric(gpu_metrics).await;
-                                }
+                                self.record_gpu_metric(gpu_metrics).await;
                             }
                         }
                     }

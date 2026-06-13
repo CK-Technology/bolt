@@ -155,10 +155,10 @@ impl ComposeCompat {
         }
 
         // Network configuration
-        if let Some(networks) = &compose_service.networks {
-            if !networks.is_empty() {
-                service.networks = Some(networks.clone());
-            }
+        if let Some(networks) = &compose_service.networks
+            && !networks.is_empty()
+        {
+            service.networks = Some(networks.clone());
         }
 
         // Resource limits and configuration
@@ -295,14 +295,15 @@ impl ComposeCompat {
                 );
             }
 
-            if let Some(image) = &service.image {
-                if image.contains("postgres") || image.contains("mysql") || image.contains("redis")
-                {
-                    notes.push(format!(
-                        "  ✨ Recommended: Use Bolt capsule for {} (better isolation)",
-                        image
-                    ));
-                }
+            if let Some(image) = &service.image
+                && (image.contains("postgres")
+                    || image.contains("mysql")
+                    || image.contains("redis"))
+            {
+                notes.push(format!(
+                    "  ✨ Recommended: Use Bolt capsule for {} (better isolation)",
+                    image
+                ));
             }
 
             if service.privileged.unwrap_or(false) {
@@ -311,10 +312,13 @@ impl ComposeCompat {
                 );
             }
 
-            if let Some(networks) = &service.networks {
-                if networks.len() > 1 {
-                    notes.push("  🌐 Multiple networks detected - Bolt supports single network per service".to_string());
-                }
+            if let Some(networks) = &service.networks
+                && networks.len() > 1
+            {
+                notes.push(
+                    "  🌐 Multiple networks detected - Bolt supports single network per service"
+                        .to_string(),
+                );
             }
 
             notes.push("".to_string());
@@ -436,13 +440,12 @@ impl ComposeCompat {
             if let Some(ComposeBuild::Complex {
                 args: Some(args), ..
             }) = &service.build
+                && !args.is_empty()
             {
-                if !args.is_empty() {
-                    warnings.push(format!(
-                        "Service '{}': Build args may need manual conversion",
-                        name
-                    ));
-                }
+                warnings.push(format!(
+                    "Service '{}': Build args may need manual conversion",
+                    name
+                ));
             }
 
             if service.privileged.unwrap_or(false) {
@@ -452,13 +455,13 @@ impl ComposeCompat {
                 ));
             }
 
-            if let Some(networks) = &service.networks {
-                if networks.len() > 1 {
-                    warnings.push(format!(
-                        "Service '{}': Multiple networks - Bolt supports single network",
-                        name
-                    ));
-                }
+            if let Some(networks) = &service.networks
+                && networks.len() > 1
+            {
+                warnings.push(format!(
+                    "Service '{}': Multiple networks - Bolt supports single network",
+                    name
+                ));
             }
         }
 

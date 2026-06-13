@@ -448,31 +448,30 @@ impl NvidiaManager {
         if let Ok(entries) = std::fs::read_dir("/sys/class/drm") {
             for entry in entries.filter_map(Result::ok) {
                 let path = entry.path();
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name.starts_with("card") && !name.contains("-") {
-                        // Read vendor ID to check if it's NVIDIA (0x10de)
-                        let vendor_path = path.join("device/vendor");
-                        if let Ok(vendor) = std::fs::read_to_string(&vendor_path) {
-                            if vendor.trim() == "0x10de" {
-                                let index = name
-                                    .strip_prefix("card")
-                                    .and_then(|s| s.parse::<u32>().ok())
-                                    .unwrap_or(0);
+                if let Some(name) = path.file_name().and_then(|n| n.to_str())
+                    && name.starts_with("card")
+                    && !name.contains("-")
+                {
+                    // Read vendor ID to check if it's NVIDIA (0x10de)
+                    let vendor_path = path.join("device/vendor");
+                    if let Ok(vendor) = std::fs::read_to_string(&vendor_path)
+                        && vendor.trim() == "0x10de"
+                    {
+                        let index = name
+                            .strip_prefix("card")
+                            .and_then(|s| s.parse::<u32>().ok())
+                            .unwrap_or(0);
 
-                                // Try to read device name
-                                let device_name = path
-                                    .join("device/device")
-                                    .as_path()
-                                    .to_str()
-                                    .and_then(|p| std::fs::read_to_string(p).ok())
-                                    .unwrap_or_else(|| format!("NVIDIA GPU {}", index));
+                        // Try to read device name
+                        let device_name = path
+                            .join("device/device")
+                            .as_path()
+                            .to_str()
+                            .and_then(|p| std::fs::read_to_string(p).ok())
+                            .unwrap_or_else(|| format!("NVIDIA GPU {}", index));
 
-                                device_info.insert(
-                                    index,
-                                    (name.to_string(), device_name.trim().to_string()),
-                                );
-                            }
-                        }
+                        device_info
+                            .insert(index, (name.to_string(), device_name.trim().to_string()));
                     }
                 }
             }
@@ -481,14 +480,14 @@ impl NvidiaManager {
         // Also check /dev/nvidia* devices
         if let Ok(entries) = std::fs::read_dir("/dev") {
             for entry in entries.filter_map(Result::ok) {
-                if let Some(name) = entry.file_name().to_str() {
-                    if name.starts_with("nvidia") && name.len() > 6 {
-                        if let Ok(index) = name[6..].parse::<u32>() {
-                            device_info.entry(index).or_insert_with(|| {
-                                (name.to_string(), format!("NVIDIA GPU {}", index))
-                            });
-                        }
-                    }
+                if let Some(name) = entry.file_name().to_str()
+                    && name.starts_with("nvidia")
+                    && name.len() > 6
+                    && let Ok(index) = name[6..].parse::<u32>()
+                {
+                    device_info
+                        .entry(index)
+                        .or_insert_with(|| (name.to_string(), format!("NVIDIA GPU {}", index)));
                 }
             }
         }
@@ -600,12 +599,11 @@ impl NvidiaManager {
         // Try nvcc first
         if let Ok(output) = Command::new("nvcc").arg("--version").output() {
             let output_str = String::from_utf8(output.stdout)?;
-            if let Some(line) = output_str.lines().find(|l| l.contains("release")) {
-                if let Some(version_part) = line.split("release").nth(1) {
-                    if let Some(version) = version_part.split(',').next() {
-                        return Ok(version.trim().to_string());
-                    }
-                }
+            if let Some(line) = output_str.lines().find(|l| l.contains("release"))
+                && let Some(version_part) = line.split("release").nth(1)
+                && let Some(version) = version_part.split(',').next()
+            {
+                return Ok(version.trim().to_string());
             }
         }
 
@@ -702,11 +700,10 @@ impl NvidiaManager {
             spec if spec.contains('-') => {
                 // Range: "0-2"
                 let parts: Vec<&str> = spec.split('-').collect();
-                if parts.len() == 2 {
-                    if let (Ok(start), Ok(end)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>())
-                    {
-                        indices.extend(start..=end);
-                    }
+                if parts.len() == 2
+                    && let (Ok(start), Ok(end)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>())
+                {
+                    indices.extend(start..=end);
                 }
             }
             spec => {
@@ -1289,11 +1286,10 @@ impl NvidiaManager {
             // Final check: modeset parameter often enabled with open driver
             if let Ok(modeset) =
                 std::fs::read_to_string("/sys/module/nvidia_drm/parameters/modeset")
+                && modeset.trim() == "Y"
             {
-                if modeset.trim() == "Y" {
-                    info!("      ✅ Modeset enabled (typical for NVIDIA Open)");
-                    return Ok(true);
-                }
+                info!("      ✅ Modeset enabled (typical for NVIDIA Open)");
+                return Ok(true);
             }
         }
 
@@ -1390,11 +1386,12 @@ impl NvidiaManager {
         }
 
         // Open modules often have better integration with kernel
-        if let Ok(modules) = std::fs::read_to_string("/proc/modules") {
-            if modules.contains("nvidia_drm") && modules.contains("nvidia_modeset") {
-                open_features += 1;
-                debug!("        Full module stack loaded");
-            }
+        if let Ok(modules) = std::fs::read_to_string("/proc/modules")
+            && modules.contains("nvidia_drm")
+            && modules.contains("nvidia_modeset")
+        {
+            open_features += 1;
+            debug!("        Full module stack loaded");
         }
 
         Ok(open_features >= 2)
@@ -1915,6 +1912,236 @@ impl NvidiaManager {
             }
         })
     }
+
+    // ============= CDI Generation Methods =============
+
+    /// Get required device paths for NVIDIA GPU passthrough
+    pub fn get_required_devices(&self) -> Vec<String> {
+        let mut devices = vec![
+            "/dev/nvidiactl".to_string(),
+            "/dev/nvidia-modeset".to_string(),
+            "/dev/nvidia-uvm".to_string(),
+            "/dev/nvidia-uvm-tools".to_string(),
+        ];
+
+        // Add per-GPU devices
+        for gpu in &self.gpus {
+            devices.push(format!("/dev/nvidia{}", gpu.index));
+            // Add DRI devices
+            let render_device = format!("/dev/dri/renderD{}", 128 + gpu.index);
+            if Path::new(&render_device).exists() {
+                devices.push(render_device);
+            }
+        }
+
+        devices
+    }
+
+    /// Generate a gaming-optimized CDI specification
+    pub async fn generate_gaming_cdi_spec(&self) -> Result<NvidiaCdiSpec> {
+        info!("Generating gaming-optimized CDI spec for NVIDIA");
+
+        let mut env = self.get_base_env();
+        env.extend(vec![
+            "NVIDIA_DRIVER_CAPABILITIES=all".to_string(),
+            "NVIDIA_VISIBLE_DEVICES=all".to_string(),
+            "__GL_SYNC_TO_VBLANK=0".to_string(),
+            "__GL_THREADED_OPTIMIZATIONS=1".to_string(),
+            "__GL_SHADER_CACHE=1".to_string(),
+        ]);
+
+        // DLSS/RTX support
+        if self.gpus.iter().any(|g| g.name.contains("RTX")) {
+            env.push("NVIDIA_DLSS_ENABLED=1".to_string());
+            env.push("NVIDIA_ENABLE_RTX=1".to_string());
+        }
+
+        Ok(self.build_cdi_spec("gaming", env))
+    }
+
+    /// Generate an AI/ML-optimized CDI specification
+    pub async fn generate_aiml_cdi_spec(&self) -> Result<NvidiaCdiSpec> {
+        info!("Generating AI/ML-optimized CDI spec for NVIDIA");
+
+        let mut env = self.get_base_env();
+        env.extend(vec![
+            "NVIDIA_DRIVER_CAPABILITIES=compute,utility".to_string(),
+            "NVIDIA_VISIBLE_DEVICES=all".to_string(),
+            "CUDA_DEVICE_ORDER=PCI_BUS_ID".to_string(),
+        ]);
+
+        // Tensor core optimizations
+        if self.supports_tensor_cores() {
+            env.push("NVIDIA_TF32_OVERRIDE=1".to_string());
+            env.push("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1".to_string());
+        }
+
+        // Memory optimizations
+        env.push("MALLOC_MMAP_THRESHOLD_=131072".to_string());
+        env.push("PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128".to_string());
+
+        Ok(self.build_cdi_spec("aiml", env))
+    }
+
+    /// Generate a general-purpose CDI specification
+    pub async fn generate_default_cdi_spec(&self) -> Result<NvidiaCdiSpec> {
+        info!("Generating general-purpose CDI spec for NVIDIA");
+
+        let env = self.get_base_env();
+        Ok(self.build_cdi_spec("general", env))
+    }
+
+    fn get_base_env(&self) -> Vec<String> {
+        let mut env = vec![format!("NVIDIA_DRIVER_VERSION={}", self.driver_version)];
+
+        if let Some(ref cuda) = self.cuda_version {
+            env.push(format!("CUDA_VERSION={}", cuda));
+        }
+
+        env
+    }
+
+    fn build_cdi_spec(&self, profile: &str, env: Vec<String>) -> NvidiaCdiSpec {
+        let devices: Vec<NvidiaCdiDevice> = self
+            .gpus
+            .iter()
+            .map(|gpu| NvidiaCdiDevice {
+                name: format!("gpu{}", gpu.index),
+                container_edits: NvidiaCdiContainerEdits {
+                    env: vec![],
+                    device_nodes: vec![NvidiaCdiDeviceNode::new(&format!(
+                        "/dev/nvidia{}",
+                        gpu.index
+                    ))],
+                    mounts: vec![],
+                },
+            })
+            .collect();
+
+        // Build container edits with all devices
+        let device_nodes: Vec<NvidiaCdiDeviceNode> = self
+            .get_required_devices()
+            .iter()
+            .filter(|path| Path::new(path).exists())
+            .map(|path| NvidiaCdiDeviceNode::new(path))
+            .collect();
+
+        let mounts = self.find_library_mounts();
+
+        NvidiaCdiSpec {
+            cdi_version: "0.6.0".to_string(),
+            kind: format!("nvidia.com/{}", profile),
+            devices,
+            container_edits: NvidiaCdiContainerEdits {
+                env,
+                device_nodes,
+                mounts,
+            },
+        }
+    }
+
+    fn find_library_mounts(&self) -> Vec<NvidiaCdiMount> {
+        let mut mounts = Vec::new();
+
+        // Vulkan ICD files
+        let icd_paths = ["/usr/share/vulkan/icd.d", "/etc/vulkan/icd.d"];
+
+        for path in &icd_paths {
+            if Path::new(path).exists() {
+                mounts.push(NvidiaCdiMount {
+                    host_path: path.to_string(),
+                    container_path: path.to_string(),
+                    options: vec!["bind".to_string(), "ro".to_string()],
+                });
+            }
+        }
+
+        // NVIDIA driver libraries
+        let lib_paths = [
+            "/usr/lib/x86_64-linux-gnu/nvidia",
+            "/usr/lib64/nvidia",
+            "/usr/lib/nvidia",
+        ];
+
+        for path in &lib_paths {
+            if Path::new(path).exists() {
+                mounts.push(NvidiaCdiMount {
+                    host_path: path.to_string(),
+                    container_path: path.to_string(),
+                    options: vec!["bind".to_string(), "ro".to_string()],
+                });
+            }
+        }
+
+        // CUDA libraries
+        let cuda_paths = ["/usr/local/cuda"];
+        for path in &cuda_paths {
+            if Path::new(path).exists() {
+                mounts.push(NvidiaCdiMount {
+                    host_path: path.to_string(),
+                    container_path: path.to_string(),
+                    options: vec!["bind".to_string(), "ro".to_string()],
+                });
+            }
+        }
+
+        mounts
+    }
+}
+
+// ============= NVIDIA CDI Specification Types =============
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NvidiaCdiSpec {
+    pub cdi_version: String,
+    pub kind: String,
+    pub devices: Vec<NvidiaCdiDevice>,
+    pub container_edits: NvidiaCdiContainerEdits,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NvidiaCdiDevice {
+    pub name: String,
+    pub container_edits: NvidiaCdiContainerEdits,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct NvidiaCdiContainerEdits {
+    pub env: Vec<String>,
+    pub device_nodes: Vec<NvidiaCdiDeviceNode>,
+    pub mounts: Vec<NvidiaCdiMount>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NvidiaCdiDeviceNode {
+    pub path: String,
+    pub host_path: Option<String>,
+    #[serde(rename = "type")]
+    pub device_type: Option<String>,
+    pub permissions: Option<String>,
+}
+
+impl NvidiaCdiDeviceNode {
+    pub fn new(path: &str) -> Self {
+        Self {
+            path: path.to_string(),
+            host_path: Some(path.to_string()),
+            device_type: Some("c".to_string()),
+            permissions: Some("rw".to_string()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NvidiaCdiMount {
+    pub host_path: String,
+    pub container_path: String,
+    pub options: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

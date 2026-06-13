@@ -387,13 +387,13 @@ impl BridgeManager {
     /// Release IP addresses allocated to container
     async fn release_container_ips(&self, container_id: &str, network_name: &str) -> Result<()> {
         let mut allocations = self.ip_allocation.write().await;
-        if let Some(allocation) = allocations.get_mut(network_name) {
-            if let Some((ip_v4, ip_v6)) = allocation.allocated_ips.remove(container_id) {
-                debug!(
-                    "Released IPs for {}: IPv4={:?}, IPv6={:?}",
-                    container_id, ip_v4, ip_v6
-                );
-            }
+        if let Some(allocation) = allocations.get_mut(network_name)
+            && let Some((ip_v4, ip_v6)) = allocation.allocated_ips.remove(container_id)
+        {
+            debug!(
+                "Released IPs for {}: IPv4={:?}, IPv6={:?}",
+                container_id, ip_v4, ip_v6
+            );
         }
         Ok(())
     }

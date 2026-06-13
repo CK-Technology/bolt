@@ -1,6 +1,6 @@
 use anyhow::Result;
 use bolt::config::{GpuConfig, NvidiaConfig};
-use bolt::runtime::gpu::{GPUManager, velocity::RootlessGpuSupport};
+use bolt::runtime::gpu::GPUManager;
 use tracing::{info, warn};
 
 #[tokio::main]
@@ -63,7 +63,7 @@ async fn test_gpu_detection(gpu_manager: &GPUManager) -> Result<()> {
         info!("✅ Driver priority: NVIDIA Open → Proprietary → nouveau → NVK");
 
         // Test NVIDIA Open detection specifically
-        if let Some(ref nvidia_manager) = gpu_manager.nvidia {
+        if gpu_manager.nvidia.is_some() {
             info!("  🔍 Testing NVIDIA driver type detection...");
             // This would call the internal detection method if it were public
         }
@@ -118,9 +118,11 @@ async fn test_gpu_configuration(gpu_manager: &GPUManager) -> Result<()> {
             dlss: Some(true),
             raytracing: Some(true),
             cuda: Some(true),
+            ..Default::default()
         }),
         amd: None,
         passthrough: Some(false),
+        ..Default::default()
     };
 
     // Test with nvidia-container-runtime preference

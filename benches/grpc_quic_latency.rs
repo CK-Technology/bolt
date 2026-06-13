@@ -4,12 +4,13 @@
 
 #![cfg(feature = "grpc")]
 
-use bolt::config::BoltConfig;
 use bolt::grpc::container_service::ContainerServiceImpl;
 use bolt::grpc::generated::container::*;
 use bolt::grpc::network_service::NetworkServiceImpl;
+use bolt::grpc::{ContainerService, NetworkService};
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use futures::StreamExt;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::runtime::Runtime;
 use tonic::Request;
@@ -18,7 +19,7 @@ use tonic::Request;
 fn bench_unary_rpc_latency(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
-    let service = rt.block_on(async { ContainerServiceImpl::new().await.unwrap() });
+    let service = Arc::new(rt.block_on(async { ContainerServiceImpl::new().await.unwrap() }));
 
     c.bench_function("grpc_unary_list_containers", |b| {
         b.to_async(&rt).iter(|| async {
@@ -38,7 +39,7 @@ fn bench_unary_rpc_latency(c: &mut Criterion) {
 fn bench_server_streaming_throughput(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
-    let service = rt.block_on(async { ContainerServiceImpl::new().await.unwrap() });
+    let service = Arc::new(rt.block_on(async { ContainerServiceImpl::new().await.unwrap() }));
 
     let mut group = c.benchmark_group("grpc_server_streaming");
 
@@ -153,7 +154,7 @@ fn bench_network_stats_throughput(c: &mut Criterion) {
 fn bench_concurrent_rpcs(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
-    let service = rt.block_on(async { ContainerServiceImpl::new().await.unwrap() });
+    let service = Arc::new(rt.block_on(async { ContainerServiceImpl::new().await.unwrap() }));
 
     let mut group = c.benchmark_group("grpc_concurrent_rpcs");
 
@@ -163,27 +164,32 @@ fn bench_concurrent_rpcs(c: &mut Criterion) {
             BenchmarkId::from_parameter(format!("{}_concurrent", concurrency)),
             concurrency,
             |b, &count| {
-                b.to_async(&rt).iter(|| async {
-                    let mut handles = Vec::new();
+                let service = Arc::clone(&service);
+                b.to_async(&rt).iter(move || {
+                    let service = Arc::clone(&service);
+                    async move {
+                        let mut handles = Vec::new();
 
-                    for _ in 0..count {
-                        let request = Request::new(ListRequest {
-                            all: true,
-                            filters: vec![],
-                            limit: 0,
-                        });
+                        for _ in 0..count {
+                            let service = Arc::clone(&service);
+                            let request = Request::new(ListRequest {
+                                all: true,
+                                filters: vec![],
+                                limit: 0,
+                            });
 
-                        let handle = tokio::spawn(async move {
-                            let response = service.list(request).await.unwrap();
-                            response.into_inner()
-                        });
+                            let handle = tokio::spawn(async move {
+                                let response = service.list(request).await.unwrap();
+                                response.into_inner()
+                            });
 
-                        handles.push(handle);
-                    }
+                            handles.push(handle);
+                        }
 
-                    // Wait for all to complete
-                    for handle in handles {
-                        black_box(handle.await.unwrap());
+                        // Wait for all to complete
+                        for handle in handles {
+                            black_box(handle.await.unwrap());
+                        }
                     }
                 });
             },

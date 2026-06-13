@@ -303,10 +303,10 @@ impl CpuInfo {
                 if name_str.starts_with("cpu") && name_str[3..].chars().all(|c| c.is_ascii_digit())
                 {
                     let core_id_path = entry.path().join("topology/core_id");
-                    if let Ok(core_id) = fs::read_to_string(&core_id_path) {
-                        if let Ok(id) = core_id.trim().parse::<usize>() {
-                            cores.insert(id);
-                        }
+                    if let Ok(core_id) = fs::read_to_string(&core_id_path)
+                        && let Ok(id) = core_id.trim().parse::<usize>()
+                    {
+                        cores.insert(id);
                     }
                 }
             }
@@ -325,13 +325,13 @@ impl CpuInfo {
         if let Ok(entries) = fs::read_dir(cache_path) {
             for entry in entries.flatten() {
                 let level_path = entry.path().join("level");
-                if let Ok(level) = fs::read_to_string(&level_path) {
-                    if level.trim() == "3" {
-                        let size_path = entry.path().join("size");
-                        if let Ok(size_str) = fs::read_to_string(&size_path) {
-                            // Size is in format "32768K" or "32M"
-                            return Self::parse_cache_size(&size_str);
-                        }
+                if let Ok(level) = fs::read_to_string(&level_path)
+                    && level.trim() == "3"
+                {
+                    let size_path = entry.path().join("size");
+                    if let Ok(size_str) = fs::read_to_string(&size_path) {
+                        // Size is in format "32768K" or "32M"
+                        return Self::parse_cache_size(&size_str);
                     }
                 }
             }
@@ -641,14 +641,13 @@ impl MemoryInfo {
                 if let Some(pages) = value.split_whitespace().next() {
                     hugepages_2mb = pages.parse::<u64>().unwrap_or(0);
                 }
-            } else if let Some(value) = line.strip_prefix("Hugepagesize:") {
-                if let Some(size) = value.split_whitespace().next() {
-                    if size == "1048576" {
-                        // 1GB in KB
-                        if let Some(pages) = line.split_whitespace().nth(1) {
-                            hugepages_1gb = pages.parse::<u64>().unwrap_or(0);
-                        }
-                    }
+            } else if let Some(value) = line.strip_prefix("Hugepagesize:")
+                && let Some(size) = value.split_whitespace().next()
+                && size == "1048576"
+            {
+                // 1GB in KB
+                if let Some(pages) = line.split_whitespace().nth(1) {
+                    hugepages_1gb = pages.parse::<u64>().unwrap_or(0);
                 }
             }
         }

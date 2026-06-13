@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use tracing::debug;
 
 pub mod llm;
+pub mod model_cache;
+pub mod model_serving;
 pub mod ollama;
 
 /// AI/ML workload optimization module for Bolt

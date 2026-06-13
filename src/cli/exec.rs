@@ -52,7 +52,7 @@ impl ExecCommand {
         debug!("Command: {:?}", self.command);
 
         if self.command.is_empty() {
-            return Err(anyhow!("No command specified").into());
+            return Err(anyhow!("No command specified"));
         }
 
         // Get container PID
@@ -132,7 +132,10 @@ impl ExecCommand {
         let state_file = runtime_dir.join(container_id).join("state.json");
 
         if !state_file.exists() {
-            return Err(anyhow!("Container {} not found or not running", container_id).into());
+            return Err(anyhow!(
+                "Container {} not found or not running",
+                container_id
+            ));
         }
 
         let state_json = tokio::fs::read_to_string(&state_file).await?;
@@ -160,7 +163,7 @@ impl ExecCommand {
 
         // Get current terminal settings
         let stdin_borrowed = unsafe { BorrowedFd::borrow_raw(stdin_fd) };
-        let mut termios = tcgetattr(&stdin_borrowed)?;
+        let mut termios = tcgetattr(stdin_borrowed)?;
 
         // Store original settings for restoration
         let original_termios = termios.clone();
@@ -169,13 +172,13 @@ impl ExecCommand {
         termios.local_flags &= !(LocalFlags::ICANON | LocalFlags::ECHO);
 
         // Apply raw mode
-        tcsetattr(&stdin_borrowed, SetArg::TCSANOW, &termios)?;
+        tcsetattr(stdin_borrowed, SetArg::TCSANOW, &termios)?;
 
         // Setup signal handler to restore terminal on exit
         tokio::spawn(async move {
             tokio::signal::ctrl_c().await.ok();
             let stdin_borrowed_restore = unsafe { BorrowedFd::borrow_raw(stdin_fd) };
-            let _ = tcsetattr(&stdin_borrowed_restore, SetArg::TCSANOW, &original_termios);
+            let _ = tcsetattr(stdin_borrowed_restore, SetArg::TCSANOW, &original_termios);
             std::process::exit(0);
         });
 

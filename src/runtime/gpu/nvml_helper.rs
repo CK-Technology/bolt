@@ -3,11 +3,16 @@
 //! Provides direct access to NVIDIA GPU metrics via native NVML bindings,
 //! replacing nvidia-smi shell command calls for better performance and reliability.
 
-use anyhow::{Context, Result};
+#[cfg(feature = "nvidia-support")]
+use anyhow::Context;
+use anyhow::Result;
 #[cfg(feature = "nvidia-support")]
 use nvml_wrapper::{Device, Nvml};
+#[cfg(feature = "nvidia-support")]
 use std::sync::Arc;
+#[cfg(feature = "nvidia-support")]
 use tokio::sync::RwLock;
+#[cfg(feature = "nvidia-support")]
 use tracing::{info, warn};
 
 /// NVML Manager for direct GPU access
@@ -16,6 +21,14 @@ pub struct NvmlManager {
     nvml: Arc<Nvml>,
     #[cfg(feature = "nvidia-support")]
     devices: Arc<RwLock<Vec<Device<'static>>>>,
+}
+
+impl std::fmt::Debug for NvmlManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NvmlManager")
+            .field("available", &cfg!(feature = "nvidia-support"))
+            .finish()
+    }
 }
 
 /// GPU Information structure

@@ -28,12 +28,9 @@ pub mod registry;
 pub mod runtime;
 pub mod snapshots;
 pub mod surge;
+pub mod tools;
 pub mod types;
 pub mod volume;
-
-// MCP (Model Context Protocol) integration
-#[cfg(feature = "mcp")]
-pub mod mcp;
 
 // gRPC services for container management over QUIC
 #[cfg(feature = "grpc")]
@@ -177,6 +174,25 @@ impl BoltRuntime {
         let runtime = self.unified_runtime().await?;
         runtime
             .run_container(image, name, ports, env, volumes, detach)
+            .await
+            .map(|_| ())
+    }
+
+    /// Run a container with GPU configuration
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_container_with_gpu(
+        &self,
+        image: &str,
+        name: Option<&str>,
+        ports: &[String],
+        env: &[String],
+        volumes: &[String],
+        detach: bool,
+        gpu_config: Option<runtime::gpu_integration::GpuConfig>,
+    ) -> Result<()> {
+        let runtime = self.unified_runtime().await?;
+        runtime
+            .run_container_with_gpu(image, name, ports, env, volumes, detach, gpu_config)
             .await
             .map(|_| ())
     }
@@ -389,6 +405,15 @@ impl BoltRuntime {
     pub async fn list_volumes(&self) -> Result<Vec<volume::VolumeInfo>> {
         let volume_manager = volume::VolumeManager::new_async(self.config.data_dir.clone()).await?;
         volume_manager.list_volumes_async().await
+    }
+
+    /// Inspect a volume by name.
+    pub async fn inspect_volume(&self, name: &str) -> Result<volume::VolumeInfo> {
+        let volumes = self.list_volumes().await?;
+        volumes
+            .into_iter()
+            .find(|volume| volume.name == name)
+            .ok_or_else(|| BoltError::NotFound(format!("volume '{}'", name)))
     }
 
     /// Remove a volume

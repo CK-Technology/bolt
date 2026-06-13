@@ -91,10 +91,10 @@ impl KDEGamingOptimizer {
         }
 
         // Check DRM for VRR capability
-        if Path::new("/sys/class/drm/card0/vrr_capable").exists() {
-            if let Ok(vrr_capable) = std::fs::read_to_string("/sys/class/drm/card0/vrr_capable") {
-                return vrr_capable.trim() == "1";
-            }
+        if Path::new("/sys/class/drm/card0/vrr_capable").exists()
+            && let Ok(vrr_capable) = std::fs::read_to_string("/sys/class/drm/card0/vrr_capable")
+        {
+            return vrr_capable.trim() == "1";
         }
 
         false

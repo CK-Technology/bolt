@@ -162,10 +162,10 @@ impl GpuCommand {
 
             for (id, gpu) in gpus.iter() {
                 // Filter by container if specified
-                if let Some(container_id) = container {
-                    if !gpu.allocated_to.contains(&container_id.to_string()) {
-                        continue;
-                    }
+                if let Some(container_id) = container
+                    && !gpu.allocated_to.contains(&container_id.to_string())
+                {
+                    continue;
                 }
 
                 print_gpu_metrics(id, gpu);

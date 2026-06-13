@@ -251,10 +251,10 @@ pub async fn list_runtime_containers(runtime: &str) -> Result<Vec<String>> {
             continue;
         }
 
-        if let Ok(container) = serde_json::from_str::<serde_json::Value>(line) {
-            if let Some(id) = container.get("id").and_then(|v| v.as_str()) {
-                container_ids.push(id.to_string());
-            }
+        if let Ok(container) = serde_json::from_str::<serde_json::Value>(line)
+            && let Some(id) = container.get("id").and_then(|v| v.as_str())
+        {
+            container_ids.push(id.to_string());
         }
     }
 
@@ -691,13 +691,13 @@ pub async fn setup_cgroups(container_id: &str, limits: &ResourceLimits) -> Resul
     }
 
     // Set CPU limits
-    if let Some(cpu_quota) = limits.cpu_quota {
-        if let Some(cpu_period) = limits.cpu_period {
-            let cpu_path = cgroup_path.join("cpu.max");
-            let limit = format!("{} {}", cpu_quota, cpu_period);
-            std::fs::write(&cpu_path, limit)
-                .with_context(|| format!("Failed to set CPU quota at {:?}", cpu_path))?;
-        }
+    if let Some(cpu_quota) = limits.cpu_quota
+        && let Some(cpu_period) = limits.cpu_period
+    {
+        let cpu_path = cgroup_path.join("cpu.max");
+        let limit = format!("{} {}", cpu_quota, cpu_period);
+        std::fs::write(&cpu_path, limit)
+            .with_context(|| format!("Failed to set CPU quota at {:?}", cpu_path))?;
     }
 
     // Set CPU shares for relative priority
@@ -757,15 +757,15 @@ pub async fn cleanup_cgroups(container_id: &str) -> Result<()> {
     if cgroup_path.exists() {
         // First, try to kill any remaining processes in the cgroup
         let procs_path = cgroup_path.join("cgroup.procs");
-        if procs_path.exists() {
-            if let Ok(procs) = std::fs::read_to_string(&procs_path) {
-                for pid_str in procs.lines() {
-                    if let Ok(pid) = pid_str.parse::<i32>() {
-                        let _ = nix::sys::signal::kill(
-                            nix::unistd::Pid::from_raw(pid),
-                            nix::sys::signal::Signal::SIGKILL,
-                        );
-                    }
+        if procs_path.exists()
+            && let Ok(procs) = std::fs::read_to_string(&procs_path)
+        {
+            for pid_str in procs.lines() {
+                if let Ok(pid) = pid_str.parse::<i32>() {
+                    let _ = nix::sys::signal::kill(
+                        nix::unistd::Pid::from_raw(pid),
+                        nix::sys::signal::Signal::SIGKILL,
+                    );
                 }
             }
         }

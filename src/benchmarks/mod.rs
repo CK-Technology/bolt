@@ -127,7 +127,7 @@ impl BenchmarkSuite {
                     total_duration += start.elapsed();
                 }
                 _ => {
-                    // Fallback: simulate sub-microsecond passthrough
+                    // Fallback: simulate a low-latency passthrough path
                     tokio::time::sleep(Duration::from_nanos(800)).await;
                     total_duration += start.elapsed();
                 }

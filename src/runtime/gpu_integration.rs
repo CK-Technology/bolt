@@ -9,10 +9,9 @@ use tokio::sync::RwLock;
 use tokio::task::spawn_blocking;
 use tracing::{debug, info, warn};
 
-/// Bolt GPU Integration Manager with nvbind support
+/// Bolt GPU Integration Manager with native GPU support
 pub struct BoltGpuIntegration {
-    #[cfg(feature = "nvbind-support")]
-    gpu_manager: Option<nvbind::bolt::NvbindGpuManager>,
+    nvidia_manager: Option<super::gpu::nvbind::NvbindManager>,
     containers: Arc<RwLock<HashMap<String, GpuContainerInfo>>>,
     fallback_mode: bool,
     amd_backend: Option<AmdGpuBackend>,
@@ -204,111 +203,7 @@ impl CdiDeviceNode {
     }
 }
 
-#[cfg(feature = "nvbind-support")]
-impl From<&nvbind::cdi::Mount> for CdiMount {
-    fn from(value: &nvbind::cdi::Mount) -> Self {
-        Self {
-            host_path: value.host_path.clone(),
-            container_path: value.container_path.clone(),
-            options: value.options.clone().unwrap_or_else(|| {
-                vec![
-                    "bind".to_string(),
-                    "ro".to_string(),
-                    "nosuid".to_string(),
-                    "nodev".to_string(),
-                ]
-            }),
-        }
-    }
-}
-
-#[cfg(feature = "nvbind-support")]
-impl From<&nvbind::cdi::Hook> for CdiHook {
-    fn from(value: &nvbind::cdi::Hook) -> Self {
-        Self {
-            hook_name: value.hook_name.clone(),
-            path: value.path.clone(),
-            args: value.args.clone().unwrap_or_default(),
-            env: value.env.clone().unwrap_or_default(),
-            timeout: value.timeout,
-        }
-    }
-}
-
-#[cfg(feature = "nvbind-support")]
-impl From<&nvbind::cdi::DeviceNode> for CdiDeviceNode {
-    fn from(value: &nvbind::cdi::DeviceNode) -> Self {
-        Self {
-            path: value.path.clone(),
-            device_type: value.device_type.clone(),
-            major: value.major.map(|m| m as i64),
-            minor: value.minor.map(|m| m as i64),
-            file_mode: value.file_mode,
-            uid: value.uid,
-            gid: value.gid,
-        }
-    }
-}
-
-#[cfg(feature = "nvbind-support")]
-impl AppliedCdiSpec {
-    fn from_nvbind_spec(spec: &nvbind::cdi::CdiSpec) -> Self {
-        use nvbind::cdi::ContainerEdits;
-
-        fn harvest_edits(
-            edits: &ContainerEdits,
-        ) -> (Vec<String>, Vec<CdiDeviceNode>, Vec<CdiMount>, Vec<CdiHook>) {
-            let env = edits.env.clone().unwrap_or_default();
-            let device_nodes = edits
-                .device_nodes
-                .as_ref()
-                .map(|nodes| nodes.iter().map(CdiDeviceNode::from).collect())
-                .unwrap_or_default();
-            let mounts = edits
-                .mounts
-                .as_ref()
-                .map(|mounts| mounts.iter().map(CdiMount::from).collect())
-                .unwrap_or_default();
-            let hooks = edits
-                .hooks
-                .as_ref()
-                .map(|hooks| hooks.iter().map(CdiHook::from).collect())
-                .unwrap_or_default();
-            (env, device_nodes, mounts, hooks)
-        }
-
-        let mut env = Vec::new();
-        let mut device_nodes = Vec::new();
-        let mut mounts = Vec::new();
-        let mut hooks = Vec::new();
-
-        let (common_env, common_devices, common_mounts, common_hooks) =
-            harvest_edits(&spec.container_edits);
-        env.extend(common_env);
-        device_nodes.extend(common_devices);
-        mounts.extend(common_mounts);
-        hooks.extend(common_hooks);
-
-        for device in &spec.devices {
-            // container_edits is a direct field, not an Option in nvbind 0.1.0
-            let (dev_env, dev_devices, dev_mounts, dev_hooks) =
-                harvest_edits(&device.container_edits);
-            env.extend(dev_env);
-            device_nodes.extend(dev_devices);
-            mounts.extend(dev_mounts);
-            hooks.extend(dev_hooks);
-        }
-
-        let mut applied = Self {
-            env,
-            device_nodes,
-            mounts,
-            hooks,
-        };
-        applied.dedup();
-        applied
-    }
-}
+// NOTE: External nvbind CDI conversions removed - native GPU support integrated directly
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GpuWorkloadType {
@@ -348,17 +243,13 @@ pub struct GpuConfig {
 }
 
 impl BoltGpuIntegration {
-    /// Initialize GPU integration with nvbind support
+    /// Initialize GPU integration with native GPU support
     pub async fn new() -> Result<Self> {
-        info!("🎮 Initializing Bolt GPU Integration");
+        info!("🎮 Initializing Bolt GPU Integration (native)");
 
-        #[cfg(feature = "nvbind-support")]
-        let gpu_manager = Self::initialize_nvbind_manager().await;
-
-        #[cfg(not(feature = "nvbind-support"))]
-        let gpu_manager: Option<()> = None;
-
-        let fallback_mode = gpu_manager.is_none();
+        // Initialize native NVIDIA GPU manager
+        let nvidia_manager = Self::initialize_nvidia_manager().await;
+        let fallback_mode = nvidia_manager.is_none();
 
         let amd_backend = match AmdGpuBackend::detect().await {
             Ok(Some(backend)) => {
@@ -399,8 +290,7 @@ impl BoltGpuIntegration {
         };
 
         Ok(Self {
-            #[cfg(feature = "nvbind-support")]
-            gpu_manager,
+            nvidia_manager,
             containers: Arc::new(RwLock::new(HashMap::new())),
             fallback_mode,
             amd_backend,
@@ -408,135 +298,48 @@ impl BoltGpuIntegration {
         })
     }
 
-    /// Initialize nvbind GPU manager with comprehensive auto-detection
-    #[cfg(feature = "nvbind-support")]
-    async fn initialize_nvbind_manager() -> Option<nvbind::bolt::NvbindGpuManager> {
-        info!("🔍 Auto-detecting nvbind GPU capabilities...");
+    /// Initialize native NVIDIA GPU manager
+    async fn initialize_nvidia_manager() -> Option<super::gpu::nvbind::NvbindManager> {
+        info!("🔍 Auto-detecting NVIDIA GPU capabilities (native)...");
 
-        // Step 1: Check if NVIDIA GPUs are present
-        let nvidia_present = Self::detect_nvidia_gpus().await;
-        if !nvidia_present {
-            info!("ℹ️  No NVIDIA GPUs detected, skipping nvbind initialization");
-            return None;
-        }
-
-        // Step 2: Check if NVIDIA drivers are loaded
-        if !Self::check_nvidia_drivers().await {
-            warn!("⚠️  NVIDIA drivers not detected or not loaded");
-            warn!("   nvbind requires NVIDIA drivers to be installed and loaded");
-            warn!("   Recommended: NVIDIA open-gpu-kernel-modules (515.43.04+)");
-            return None;
-        }
-
-        // Step 3: Try to initialize nvbind GPU manager
-        info!("🚀 Initializing nvbind GPU manager...");
-        match std::panic::catch_unwind(|| nvbind::bolt::NvbindGpuManager::with_defaults()) {
+        // Use native NvbindManager detection
+        match super::gpu::nvbind::NvbindManager::detect() {
             Ok(manager) => {
-                info!("✅ nvbind GPU manager initialized successfully");
+                if manager.is_available {
+                    info!("✅ Native NVIDIA GPU manager initialized successfully");
+                    info!("🎯 Native GPU features available:");
+                    info!("   • Direct GPU device passthrough");
+                    info!("   • CDI specification generation");
+                    info!("   • Driver detection (Open/Proprietary/Nouveau)");
+                    info!("   • No nvidia-container-toolkit required");
 
-                // Step 4: Verify manager capabilities
-                if let Err(e) = Self::verify_nvbind_capabilities(&manager).await {
-                    warn!("⚠️  nvbind capabilities verification failed: {}", e);
-                    warn!("   Falling back to alternative GPU methods");
-                    return None;
+                    if let Some(ref driver_info) = manager.driver_info {
+                        info!(
+                            "   • Driver: {} ({})",
+                            driver_info.version,
+                            driver_info.driver_type.name()
+                        );
+                        if let Some(ref cuda) = driver_info.cuda_version {
+                            info!("   • CUDA: {}", cuda);
+                        }
+                    }
+
+                    info!("   • GPUs detected: {}", manager.detected_gpus.len());
+                    for gpu in &manager.detected_gpus {
+                        info!("     - {}: {} ({:?})", gpu.id, gpu.name, gpu.architecture);
+                    }
+
+                    Some(manager)
+                } else {
+                    info!("ℹ️  No NVIDIA GPUs detected");
+                    None
                 }
-
-                info!("🎯 nvbind features available:");
-                info!("   • Sub-microsecond GPU passthrough");
-                info!("   • Direct GPU memory access");
-                info!("   • Zero-copy GPU buffer sharing");
-                info!("   • Hardware-accelerated context switching");
-
-                Some(manager)
             }
             Err(e) => {
-                warn!("❌ Failed to initialize nvbind GPU manager: {:?}", e);
-                warn!("   This may indicate:");
-                warn!("   • Incompatible NVIDIA driver version");
-                warn!("   • Missing GPU permissions");
-                warn!("   • GPU device not accessible");
-                warn!("   Falling back to alternative GPU methods");
+                warn!("⚠️  Native NVIDIA GPU detection failed: {}", e);
                 None
             }
         }
-    }
-
-    /// Detect NVIDIA GPUs in the system
-    #[cfg(feature = "nvbind-support")]
-    async fn detect_nvidia_gpus() -> bool {
-        // Try multiple detection methods
-
-        // Method 1: Check for NVIDIA device nodes
-        if std::path::Path::new("/dev/nvidia0").exists() {
-            debug!("✓ NVIDIA device node /dev/nvidia0 found");
-            return true;
-        }
-
-        // Method 2: Check lspci for NVIDIA GPUs
-        if let Ok(output) = tokio::process::Command::new("lspci").output().await {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            if stdout.to_lowercase().contains("nvidia") {
-                debug!("✓ NVIDIA GPU detected via lspci");
-                return true;
-            }
-        }
-
-        // Method 3: Check /proc/driver/nvidia
-        if std::path::Path::new("/proc/driver/nvidia").exists() {
-            debug!("✓ NVIDIA driver /proc entry found");
-            return true;
-        }
-
-        false
-    }
-
-    /// Check if NVIDIA drivers are properly loaded
-    #[cfg(feature = "nvbind-support")]
-    async fn check_nvidia_drivers() -> bool {
-        // Check if nvidia kernel module is loaded
-        if let Ok(modules) = tokio::fs::read_to_string("/proc/modules").await {
-            if modules.contains("nvidia ") {
-                debug!("✓ NVIDIA kernel module loaded");
-
-                // Try to get driver version
-                if let Ok(output) = tokio::process::Command::new("nvidia-smi")
-                    .arg("--query-gpu=driver_version")
-                    .arg("--format=csv,noheader")
-                    .output()
-                    .await
-                {
-                    if output.status.success() {
-                        let driver_version = String::from_utf8_lossy(&output.stdout);
-                        info!("   NVIDIA driver version: {}", driver_version.trim());
-                        return true;
-                    }
-                }
-
-                return true;
-            }
-        }
-
-        // Fallback: check nvidia-smi availability
-        if let Ok(output) = tokio::process::Command::new("nvidia-smi")
-            .arg("-L")
-            .output()
-            .await
-        {
-            if output.status.success() {
-                debug!("✓ nvidia-smi accessible");
-                return true;
-            }
-        }
-
-        false
-    }
-
-    /// Verify nvbind manager capabilities
-    #[cfg(feature = "nvbind-support")]
-    async fn verify_nvbind_capabilities(_manager: &nvbind::bolt::NvbindGpuManager) -> Result<()> {
-        // Basic capability check - if manager was created, it should work
-        // nvbind will have already validated GPU access during initialization
-        Ok(())
     }
 
     /// Setup GPU for container with nvbind optimization
@@ -551,19 +354,19 @@ impl BoltGpuIntegration {
 
         info!("🔧 Setting up GPU for container: {}", container_id);
 
-        #[cfg(feature = "nvbind-support")]
-        if let Some(ref gpu_manager) = self.gpu_manager {
+        // Use native NVIDIA manager if available
+        if let Some(ref nvidia_manager) = self.nvidia_manager {
             return self
-                .setup_with_nvbind(container_id, gpu_config, gpu_manager)
+                .setup_with_native_nvidia(container_id, gpu_config, nvidia_manager)
                 .await;
         }
 
-        if let Some(ref backend) = self.amd_backend {
-            if backend.is_available() {
-                return self
-                    .setup_with_amd_backend(container_id, gpu_config, backend)
-                    .await;
-            }
+        if let Some(ref backend) = self.amd_backend
+            && backend.is_available()
+        {
+            return self
+                .setup_with_amd_backend(container_id, gpu_config, backend)
+                .await;
         }
 
         // Fallback to basic GPU setup
@@ -581,46 +384,45 @@ impl BoltGpuIntegration {
         })
     }
 
-    #[cfg(feature = "nvbind-support")]
-    async fn setup_with_nvbind(
+    /// Setup GPU with native NVIDIA manager
+    async fn setup_with_native_nvidia(
         &self,
         container_id: &str,
         gpu_config: &GpuConfig,
-        gpu_manager: &nvbind::bolt::NvbindGpuManager,
+        nvidia_manager: &super::gpu::nvbind::NvbindManager,
     ) -> Result<AppliedCdiSpec> {
         info!(
-            "🚀 Setting up GPU with nvbind for container: {}",
+            "🚀 Setting up GPU with native NVIDIA manager for container: {}",
             container_id
         );
 
         // Generate CDI specification based on workload type
         let cdi_spec = match &gpu_config.workload_type {
             GpuWorkloadType::Gaming { .. } => {
-                info!("🎮 Generating gaming-optimized CDI spec");
-                gpu_manager
+                info!("🎮 Generating gaming-optimized CDI spec (native)");
+                nvidia_manager
                     .generate_gaming_cdi_spec()
                     .await
-                    .context("Failed to generate gaming CDI spec")?
+                    .map_err(|e| anyhow!("Failed to generate gaming CDI spec: {}", e))?
             }
             GpuWorkloadType::AiMl { .. } => {
-                info!("🧠 Generating AI/ML-optimized CDI spec");
-                gpu_manager
+                info!("🧠 Generating AI/ML-optimized CDI spec (native)");
+                nvidia_manager
                     .generate_aiml_cdi_spec()
                     .await
-                    .context("Failed to generate AI/ML CDI spec")?
+                    .map_err(|e| anyhow!("Failed to generate AI/ML CDI spec: {}", e))?
             }
             GpuWorkloadType::General => {
-                info!("📊 Generating general-purpose CDI spec (using gaming profile)");
-                // nvbind doesn't have a separate default - use gaming as general purpose
-                gpu_manager
-                    .generate_gaming_cdi_spec()
+                info!("📊 Generating general-purpose CDI spec (native)");
+                nvidia_manager
+                    .generate_default_cdi_spec()
                     .await
-                    .context("Failed to generate CDI spec")?
+                    .map_err(|e| anyhow!("Failed to generate CDI spec: {}", e))?
             }
         };
 
         // Apply CDI specification to container context
-        let applied_cdi = self.apply_nvbind_cdi_spec(container_id, &cdi_spec).await?;
+        let applied_cdi = self.apply_native_cdi_spec(container_id, &cdi_spec).await?;
 
         // Setup GPU isolation
         self.setup_gpu_isolation(container_id, &gpu_config.isolation_level)
@@ -650,7 +452,7 @@ impl BoltGpuIntegration {
         containers.insert(container_id.to_string(), container_info);
 
         info!(
-            "✅ nvbind GPU setup completed for container: {}",
+            "✅ Native NVIDIA GPU setup completed for container: {}",
             container_id
         );
         Ok(applied_cdi)
@@ -763,15 +565,70 @@ impl BoltGpuIntegration {
         Ok(applied_cdi)
     }
 
-    #[cfg(feature = "nvbind-support")]
-    async fn apply_nvbind_cdi_spec(
+    /// Apply native CDI spec to container
+    async fn apply_native_cdi_spec(
         &self,
         container_id: &str,
-        cdi_spec: &nvbind::cdi::CdiSpec,
+        cdi_spec: &super::gpu::nvbind::CdiSpec,
     ) -> Result<AppliedCdiSpec> {
-        info!("🔌 Applying nvbind CDI spec to container: {}", container_id);
+        info!("🔌 Applying native CDI spec to container: {}", container_id);
 
-        let mut applied = AppliedCdiSpec::from_nvbind_spec(cdi_spec);
+        // Convert native CdiSpec to AppliedCdiSpec
+        let mut applied = AppliedCdiSpec {
+            env: cdi_spec.container_edits.env.clone(),
+            device_nodes: cdi_spec
+                .container_edits
+                .device_nodes
+                .iter()
+                .map(|node| CdiDeviceNode {
+                    path: node.path.clone(),
+                    device_type: node.device_type.clone(),
+                    major: node.major,
+                    minor: node.minor,
+                    file_mode: node.file_mode,
+                    uid: node.uid,
+                    gid: node.gid,
+                })
+                .collect(),
+            mounts: cdi_spec
+                .container_edits
+                .mounts
+                .iter()
+                .map(|mount| CdiMount {
+                    host_path: mount.host_path.clone(),
+                    container_path: mount.container_path.clone(),
+                    options: mount.options.clone(),
+                })
+                .collect(),
+            hooks: cdi_spec
+                .container_edits
+                .hooks
+                .iter()
+                .map(|hook| CdiHook {
+                    hook_name: hook.hook_name.clone(),
+                    path: hook.path.clone(),
+                    args: hook.args.clone(),
+                    env: hook.env.clone(),
+                    timeout: hook.timeout,
+                })
+                .collect(),
+        };
+
+        // Also include device edits from individual devices
+        for device in &cdi_spec.devices {
+            for node in &device.container_edits.device_nodes {
+                applied.device_nodes.push(CdiDeviceNode {
+                    path: node.path.clone(),
+                    device_type: node.device_type.clone(),
+                    major: node.major,
+                    minor: node.minor,
+                    file_mode: node.file_mode,
+                    uid: node.uid,
+                    gid: node.gid,
+                });
+            }
+        }
+
         applied.dedup();
         Self::log_cdi_artifacts(container_id, &applied);
         Ok(applied)
@@ -1249,10 +1106,10 @@ impl BoltGpuIntegration {
 
     /// Detect available GPU devices (fallback)
     async fn detect_gpu_devices(&self) -> Result<Vec<String>> {
-        if let Some(ref backend) = self.amd_backend {
-            if backend.is_available() {
-                return Ok(backend.device_nodes());
-            }
+        if let Some(ref backend) = self.amd_backend
+            && backend.is_available()
+        {
+            return Ok(backend.device_nodes());
         }
 
         let mut devices = Vec::new();
@@ -1351,33 +1208,27 @@ impl BoltGpuIntegration {
         let container_info = containers.get(container_id);
 
         // Try AMD metrics first if available
-        if let (Some(monitor), Some(info)) = (&self.amd_monitor, container_info) {
-            // Get device index from container info (assumes first device for now)
-            if let Some(device_node) = info.device_nodes.first() {
-                // Extract card index from path like /dev/dri/card0
-                if let Some(card_idx) = device_node.path.strip_prefix("/dev/dri/card") {
-                    if let Ok(index) = card_idx.parse::<u32>() {
-                        match monitor.get_metrics(index).await {
-                            Ok(amd_metrics) => {
-                                info!(
-                                    "🔥 AMD GPU metrics for container {}: {}% util, {:.1}°C",
-                                    container_id,
-                                    amd_metrics.gpu_utilization,
-                                    amd_metrics.temperature_c
-                                );
-                                return Ok(GpuMetrics {
-                                    utilization: amd_metrics.gpu_utilization as f64,
-                                    memory_used: amd_metrics.memory_used_mb,
-                                    memory_total: amd_metrics.memory_total_mb,
-                                    temperature: amd_metrics.temperature_c as f64,
-                                    power_draw: amd_metrics.power_draw_watts as f64,
-                                });
-                            }
-                            Err(e) => {
-                                warn!("Failed to get AMD GPU metrics: {}", e);
-                            }
-                        }
-                    }
+        if let (Some(monitor), Some(info)) = (&self.amd_monitor, container_info)
+            && let Some(device_node) = info.device_nodes.first()
+            && let Some(card_idx) = device_node.path.strip_prefix("/dev/dri/card")
+            && let Ok(index) = card_idx.parse::<u32>()
+        {
+            match monitor.get_metrics(index).await {
+                Ok(amd_metrics) => {
+                    info!(
+                        "🔥 AMD GPU metrics for container {}: {}% util, {:.1}°C",
+                        container_id, amd_metrics.gpu_utilization, amd_metrics.temperature_c
+                    );
+                    return Ok(GpuMetrics {
+                        utilization: amd_metrics.gpu_utilization as f64,
+                        memory_used: amd_metrics.memory_used_mb,
+                        memory_total: amd_metrics.memory_total_mb,
+                        temperature: amd_metrics.temperature_c as f64,
+                        power_draw: amd_metrics.power_draw_watts as f64,
+                    });
+                }
+                Err(e) => {
+                    warn!("Failed to get AMD GPU metrics: {}", e);
                 }
             }
         }
@@ -1430,9 +1281,14 @@ impl BoltGpuIntegration {
         })
     }
 
-    /// Check if nvbind is available
+    /// Check if native NVIDIA GPU support is available
     pub fn is_nvbind_available(&self) -> bool {
-        !self.fallback_mode
+        self.nvidia_manager.is_some()
+    }
+
+    /// Get reference to native NVIDIA manager
+    pub fn nvidia_manager(&self) -> Option<&super::gpu::nvbind::NvbindManager> {
+        self.nvidia_manager.as_ref()
     }
 
     /// Check if AMD GPU monitoring is available
@@ -1789,58 +1645,7 @@ pub struct GpuMetrics {
     pub power_draw: f64,
 }
 
-// Mock nvbind types when feature is not enabled
-#[cfg(not(feature = "nvbind-support"))]
-mod nvbind {
-    use super::*;
-
-    #[allow(dead_code)]
-    pub struct GpuManager;
-
-    #[allow(dead_code)]
-    impl GpuManager {
-        pub async fn new() -> Result<Self> {
-            Err(anyhow!("nvbind feature not enabled").into())
-        }
-
-        pub async fn generate_gaming_cdi_spec(&self) -> Result<super::CdiSpec> {
-            Ok(super::CdiSpec {
-                devices: Some(vec!["/dev/nvidia0".to_string()]),
-                mounts: None,
-                hooks: None,
-            })
-        }
-
-        pub async fn generate_aiml_cdi_spec(&self) -> Result<super::CdiSpec> {
-            Ok(super::CdiSpec {
-                devices: Some(vec!["/dev/nvidia0".to_string()]),
-                mounts: None,
-                hooks: None,
-            })
-        }
-
-        pub async fn generate_default_cdi_spec(&self) -> Result<super::CdiSpec> {
-            Ok(super::CdiSpec {
-                devices: Some(vec!["/dev/nvidia0".to_string()]),
-                mounts: None,
-                hooks: None,
-            })
-        }
-
-        pub async fn get_container_metrics(
-            &self,
-            _container_id: &str,
-        ) -> Result<super::GpuMetrics> {
-            Ok(super::GpuMetrics {
-                utilization: 0.0,
-                memory_used: 0,
-                memory_total: 0,
-                temperature: 0.0,
-                power_draw: 0.0,
-            })
-        }
-    }
-}
+// Native NVIDIA GPU support is now always available via src/runtime/gpu/nvbind.rs
 
 #[cfg(test)]
 mod tests {

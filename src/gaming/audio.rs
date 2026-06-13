@@ -155,10 +155,9 @@ impl AudioManager {
             .args(["--user", "is-active", "pipewire"])
             .output()
             .await
+            && output.status.success()
         {
-            if output.status.success() {
-                return true;
-            }
+            return true;
         }
 
         // Check for PipeWire socket

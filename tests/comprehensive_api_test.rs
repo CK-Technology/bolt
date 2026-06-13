@@ -19,15 +19,22 @@ async fn test_complete_api_surface() {
         "BoltRuntime should create successfully"
     );
 
-    let runtime = runtime_result.unwrap();
+    let _runtime = runtime_result.unwrap();
 
     // 3. Test all main data structures can be created
     let container = ContainerInfo {
         id: "test-123".to_string(),
+        names: vec!["test-container".to_string()],
         name: "test-container".to_string(),
         image: "nginx:latest".to_string(),
+        image_id: "sha256:test".to_string(),
+        command: "nginx".to_string(),
+        created: "2026-01-01T00:00:00Z".to_string(),
         status: "running".to_string(),
         ports: vec!["80:8080".to_string(), "443:8443".to_string()],
+        labels: Default::default(),
+        uptime: None,
+        runtime: Some("native".to_string()),
     };
     assert_eq!(container.name, "test-container");
     assert_eq!(container.ports.len(), 2);
@@ -40,9 +47,11 @@ async fn test_complete_api_surface() {
     assert_eq!(service.replicas, 3);
 
     let network = NetworkInfo {
+        id: "net-test".to_string(),
         name: "bolt-network".to_string(),
         driver: "bridge".to_string(),
         subnet: Some("172.20.0.0/16".to_string()),
+        created: None,
     };
     assert!(network.subnet.is_some());
 
@@ -58,7 +67,7 @@ async fn test_complete_api_surface() {
         image: Some("redis:7".to_string()),
         ports: Some(vec!["6379:6379".to_string()]),
         environment: Some([("REDIS_PASSWORD".to_string(), "secret".to_string())].into()),
-        restart: Some(bolt::config::RestartPolicy::Always),
+        restart: Some("always".to_string()),
         ..Default::default()
     };
 
@@ -117,8 +126,10 @@ async fn test_error_handling_system() {
 
     // Test Result type
     let success_result: Result<String> = Ok("success".to_string());
-    assert!(success_result.is_ok());
-    assert_eq!(success_result.unwrap(), "success");
+    match success_result {
+        Ok(value) => assert_eq!(value, "success"),
+        Err(_) => panic!("expected success result"),
+    }
 
     let error_result: Result<String> =
         Err(BoltError::Config(bolt::error::ConfigError::InvalidFormat {

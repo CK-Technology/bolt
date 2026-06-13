@@ -272,10 +272,9 @@ impl FramePacingManager {
                     if parts.len() == 2 {
                         // Parse resolution
                         if let Some(res_part) = parts[0].split('x').collect::<Vec<&str>>().get(0..2)
+                            && let (Ok(w), Ok(h)) = (res_part[0].parse(), res_part[1].parse())
                         {
-                            if let (Ok(w), Ok(h)) = (res_part[0].parse(), res_part[1].parse()) {
-                                resolution = (w, h);
-                            }
+                            resolution = (w, h);
                         }
                         // Parse refresh rate
                         if let Ok(rate) = parts[1].trim_end_matches("Hz").parse::<f64>() {
@@ -321,22 +320,21 @@ impl FramePacingManager {
         let mut adaptive_sync_supported = false;
 
         for line in output.lines() {
-            if line.contains(" connected") && !line.contains("disconnected") {
-                if let Some(name) = line.split_whitespace().next() {
-                    display_name = name.to_string();
-                }
+            if line.contains(" connected")
+                && !line.contains("disconnected")
+                && let Some(name) = line.split_whitespace().next()
+            {
+                display_name = name.to_string();
             }
 
             if line.contains("*") && line.contains("+") {
                 // Parse current mode
                 let parts: Vec<&str> = line.split_whitespace().collect();
-                if let Some(mode) = parts.first() {
-                    // Parse resolution
-                    if let Some(res_parts) = mode.split('x').collect::<Vec<&str>>().get(0..2) {
-                        if let (Ok(w), Ok(h)) = (res_parts[0].parse(), res_parts[1].parse()) {
-                            resolution = (w, h);
-                        }
-                    }
+                if let Some(mode) = parts.first()
+                    && let Some(res_parts) = mode.split('x').collect::<Vec<&str>>().get(0..2)
+                    && let (Ok(w), Ok(h)) = (res_parts[0].parse(), res_parts[1].parse())
+                {
+                    resolution = (w, h);
                 }
 
                 // Parse refresh rate from the line

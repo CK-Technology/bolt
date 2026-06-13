@@ -138,16 +138,15 @@ impl QUICConnectionPool {
     /// Add a connection to the pool
     fn add(&mut self, remote_addr: String, container_id: String, connection: Arc<Connection>) {
         // Enforce max pool size by removing oldest connection
-        if self.pool.len() >= self.max_pool_size {
-            if let Some(oldest_key) = self
+        if self.pool.len() >= self.max_pool_size
+            && let Some(oldest_key) = self
                 .pool
                 .iter()
                 .min_by_key(|(_, v)| v.last_used)
                 .map(|(k, _)| k.clone())
-            {
-                debug!("🗑️  Pool full, removing oldest connection");
-                self.pool.remove(&oldest_key);
-            }
+        {
+            debug!("🗑️  Pool full, removing oldest connection");
+            self.pool.remove(&oldest_key);
         }
 
         let key = (remote_addr.clone(), container_id);

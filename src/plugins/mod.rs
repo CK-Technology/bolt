@@ -168,12 +168,12 @@ impl PluginManager {
 
     fn validate_permissions(&self, manifest: &PluginManifest) -> Result<()> {
         for permission in &manifest.permissions {
-            if let Permission::SystemControl = permission {
-                if !self.has_root_privileges() {
-                    return Err(anyhow::anyhow!(
-                        "Plugin requires system control but running without privileges"
-                    ));
-                }
+            if let Permission::SystemControl = permission
+                && !self.has_root_privileges()
+            {
+                return Err(anyhow::anyhow!(
+                    "Plugin requires system control but running without privileges"
+                ));
             }
         }
         Ok(())

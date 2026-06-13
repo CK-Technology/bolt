@@ -9,7 +9,7 @@ use tokio::sync::RwLock;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::{Stream, StreamExt};
 use tonic::{Request, Response, Status, Streaming};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 use crate::grpc::generated::container::*;
 use crate::runtime::unified::UnifiedRuntime;
@@ -203,40 +203,40 @@ impl container_service_server::ContainerService for ContainerServiceImpl {
         // Spawn task to handle bidirectional streaming
         tokio::spawn(async move {
             // Read first message to get ExecStart
-            if let Some(Ok(req)) = stream.next().await {
-                if let Some(exec_request::Request::Start(start)) = req.request {
-                    debug!(
-                        "🚀 Exec started: container_id={}, command={:?}",
-                        start.container_id, start.command
-                    );
+            if let Some(Ok(req)) = stream.next().await
+                && let Some(exec_request::Request::Start(start)) = req.request
+            {
+                debug!(
+                    "🚀 Exec started: container_id={}, command={:?}",
+                    start.container_id, start.command
+                );
 
-                    // Send started response
-                    let _ = tx
-                        .send(Ok(ExecOutput {
-                            output: Some(exec_output::Output::Started(ExecStarted {
-                                exec_id: format!("exec-{}", uuid::Uuid::new_v4()),
-                            })),
-                        }))
-                        .await;
+                // Send started response
+                let _ = tx
+                    .send(Ok(ExecOutput {
+                        output: Some(exec_output::Output::Started(ExecStarted {
+                            exec_id: format!("exec-{}", uuid::Uuid::new_v4()),
+                        })),
+                    }))
+                    .await;
 
-                    // Simulate command execution
-                    let output = format!("Executed: {}", start.command.join(" "));
-                    let _ = tx
-                        .send(Ok(ExecOutput {
-                            output: Some(exec_output::Output::Data(ExecData {
-                                stream: "stdout".to_string(),
-                                data: output.into_bytes(),
-                            })),
-                        }))
-                        .await;
+                // Simulate command execution
+                let output = format!("Executed: {}", start.command.join(" "));
+                let _ = tx
+                    .send(Ok(ExecOutput {
+                        output: Some(exec_output::Output::Data(ExecData {
+                            stream: "stdout".to_string(),
+                            data: output.into_bytes(),
+                        })),
+                    }))
+                    .await;
 
-                    // Send exit code
-                    let _ = tx
-                        .send(Ok(ExecOutput {
-                            output: Some(exec_output::Output::Exit(ExecExit { exit_code: 0 })),
-                        }))
-                        .await;
-                }
+                // Send exit code
+                let _ = tx
+                    .send(Ok(ExecOutput {
+                        output: Some(exec_output::Output::Exit(ExecExit { exit_code: 0 })),
+                    }))
+                    .await;
             }
         });
 
@@ -335,32 +335,32 @@ impl container_service_server::ContainerService for ContainerServiceImpl {
 
         // Spawn task to handle attach
         tokio::spawn(async move {
-            if let Some(Ok(req)) = stream.next().await {
-                if let Some(attach_request::Request::Start(start)) = req.request {
-                    debug!("🔗 Attached to container: {}", start.container_id);
+            if let Some(Ok(req)) = stream.next().await
+                && let Some(attach_request::Request::Start(start)) = req.request
+            {
+                debug!("🔗 Attached to container: {}", start.container_id);
 
-                    // Simulate container output
-                    for i in 0..5 {
-                        let output = format!("Container output line {}\n", i);
-                        let _ = tx
-                            .send(Ok(AttachOutput {
-                                output: Some(attach_output::Output::Data(AttachData {
-                                    stream: "stdout".to_string(),
-                                    data: output.into_bytes(),
-                                })),
-                            }))
-                            .await;
-
-                        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-                    }
-
-                    // Send exit
+                // Simulate container output
+                for i in 0..5 {
+                    let output = format!("Container output line {}\n", i);
                     let _ = tx
                         .send(Ok(AttachOutput {
-                            output: Some(attach_output::Output::Exit(AttachExit { exit_code: 0 })),
+                            output: Some(attach_output::Output::Data(AttachData {
+                                stream: "stdout".to_string(),
+                                data: output.into_bytes(),
+                            })),
                         }))
                         .await;
+
+                    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
                 }
+
+                // Send exit
+                let _ = tx
+                    .send(Ok(AttachOutput {
+                        output: Some(attach_output::Output::Exit(AttachExit { exit_code: 0 })),
+                    }))
+                    .await;
             }
         });
 

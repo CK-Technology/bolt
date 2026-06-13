@@ -226,12 +226,12 @@ impl ProfileManager {
         let mut registry = self.registry.write().await;
 
         while let Some(entry) = entries.next_entry().await? {
-            if let Some(extension) = entry.path().extension() {
-                if extension == "toml" {
-                    let content = tokio::fs::read_to_string(entry.path()).await?;
-                    if let Ok(profile) = toml::from_str::<OptimizationProfile>(&content) {
-                        registry.user_profiles.insert(profile.name.clone(), profile);
-                    }
+            if let Some(extension) = entry.path().extension()
+                && extension == "toml"
+            {
+                let content = tokio::fs::read_to_string(entry.path()).await?;
+                if let Ok(profile) = toml::from_str::<OptimizationProfile>(&content) {
+                    registry.user_profiles.insert(profile.name.clone(), profile);
                 }
             }
         }
@@ -247,12 +247,12 @@ impl ProfileManager {
         };
 
         for repo in repositories {
-            if repo.enabled {
-                if let Ok(profiles) = repository::fetch_profiles(&repo).await {
-                    let mut registry = registry_clone.write().await;
-                    for (name, entry) in profiles {
-                        registry.profiles.insert(name, entry);
-                    }
+            if repo.enabled
+                && let Ok(profiles) = repository::fetch_profiles(&repo).await
+            {
+                let mut registry = registry_clone.write().await;
+                for (name, entry) in profiles {
+                    registry.profiles.insert(name, entry);
                 }
             }
         }

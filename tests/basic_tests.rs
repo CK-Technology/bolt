@@ -20,10 +20,17 @@ async fn test_bolt_types_available() {
     // Test that core types are available
     let _container = bolt::ContainerInfo {
         id: "test".to_string(),
+        names: vec!["test".to_string()],
         name: "test".to_string(),
         image: "test".to_string(),
+        image_id: "test".to_string(),
+        command: "test".to_string(),
+        created: "test".to_string(),
         status: "test".to_string(),
         ports: vec![],
+        labels: Default::default(),
+        uptime: None,
+        runtime: None,
     };
 
     let _service = bolt::ServiceInfo {
@@ -33,9 +40,11 @@ async fn test_bolt_types_available() {
     };
 
     let _network = bolt::NetworkInfo {
+        id: "test".to_string(),
         name: "test".to_string(),
         driver: "test".to_string(),
         subnet: None,
+        created: None,
     };
 
     println!("✅ Core types compile");
@@ -46,5 +55,5 @@ fn test_compilation_succeeds() {
     // This test passes if the project compiles
     println!("✅ BOLT library compilation successful");
     println!("✅ All compilation errors fixed");
-    println!("✅ Library is production-ready");
+    println!("✅ Library compile smoke test passed");
 }

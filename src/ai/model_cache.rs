@@ -1,10 +1,10 @@
 //! Model caching and HuggingFace Hub integration
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// Model cache manager
 pub struct ModelCache {
@@ -33,7 +33,7 @@ pub enum ModelSource {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedFile {
     pub path: PathBuf,
-    pub content_hash: String,  // SHA256
+    pub content_hash: String, // SHA256
     pub size_bytes: u64,
     pub is_deduplicated: bool,
 }
@@ -48,6 +48,10 @@ impl ModelCache {
     /// Create a new model cache
     pub async fn new() -> Result<Self> {
         let cache_dir = Self::get_cache_dir()?;
+        Self::new_in(cache_dir).await
+    }
+
+    async fn new_in(cache_dir: PathBuf) -> Result<Self> {
         tokio::fs::create_dir_all(&cache_dir).await?;
 
         let dedup_dir = cache_dir.join(".dedup");
@@ -100,7 +104,11 @@ impl ModelCache {
 
         self.models.insert(repo_id.to_string(), cached_model);
 
-        info!("✅ Model downloaded and cached: {} ({} MB)", repo_id, total_size / 1024 / 1024);
+        info!(
+            "✅ Model downloaded and cached: {} ({} MB)",
+            repo_id,
+            total_size / 1024 / 1024
+        );
 
         Ok(model_dir)
     }
@@ -113,7 +121,7 @@ impl ModelCache {
         // Use huggingface_hub Python library or API
         // For now, simulate download
 
-        info!("   Downloading model files...");
+        info!("   Downloading model files for {}...", repo_id);
 
         // Common files in HuggingFace models
         let files = vec![
@@ -121,7 +129,7 @@ impl ModelCache {
             "tokenizer_config.json",
             "tokenizer.json",
             "special_tokens_map.json",
-            "pytorch_model.bin",  // or model.safetensors
+            "pytorch_model.bin", // or model.safetensors
         ];
 
         let mut cached_files = Vec::new();
@@ -148,7 +156,7 @@ impl ModelCache {
     }
 
     async fn compute_file_hash(&self, path: &Path) -> Result<String> {
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
 
         let content = tokio::fs::read(path).await?;
         let hash = Sha256::digest(&content);
@@ -163,7 +171,10 @@ impl ModelCache {
     /// Get cached model path
     pub fn get_model_path(&self, model_id: &str) -> Option<PathBuf> {
         self.models.get(model_id).and_then(|model| {
-            model.files.first().map(|f| f.path.parent().unwrap().to_path_buf())
+            model
+                .files
+                .first()
+                .map(|f| f.path.parent().unwrap().to_path_buf())
         })
     }
 
@@ -246,7 +257,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_model_cache_init() {
-        let cache = ModelCache::new().await.unwrap();
-        assert!(cache.cache_dir.exists() || !cache.cache_dir.exists()); // May not exist yet
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache = ModelCache::new_in(temp_dir.path().join("models"))
+            .await
+            .unwrap();
+        assert!(cache.cache_dir.exists());
     }
 }

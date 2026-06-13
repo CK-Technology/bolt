@@ -46,24 +46,24 @@ impl MigrationHelper {
     /// Check if Docker Compose is available
     async fn check_docker_compose_availability() -> bool {
         // Try docker compose (new)
-        if let Ok(output) = Command::new("docker").args(["compose", "version"]).output() {
-            if output.status.success() {
-                let version = String::from_utf8_lossy(&output.stdout);
-                info!("✅ Docker Compose (plugin) detected: {}", version.trim());
-                return true;
-            }
+        if let Ok(output) = Command::new("docker").args(["compose", "version"]).output()
+            && output.status.success()
+        {
+            let version = String::from_utf8_lossy(&output.stdout);
+            info!("✅ Docker Compose (plugin) detected: {}", version.trim());
+            return true;
         }
 
         // Try docker-compose (legacy)
-        if let Ok(output) = Command::new("docker-compose").arg("--version").output() {
-            if output.status.success() {
-                let version = String::from_utf8_lossy(&output.stdout);
-                info!(
-                    "✅ Docker Compose (standalone) detected: {}",
-                    version.trim()
-                );
-                return true;
-            }
+        if let Ok(output) = Command::new("docker-compose").arg("--version").output()
+            && output.status.success()
+        {
+            let version = String::from_utf8_lossy(&output.stdout);
+            info!(
+                "✅ Docker Compose (standalone) detected: {}",
+                version.trim()
+            );
+            return true;
         }
 
         info!("❌ Docker Compose not available");
@@ -118,45 +118,44 @@ impl MigrationHelper {
         info!("📦 Analyzing Docker containers");
 
         // Get running containers
-        if let Ok(output) = Command::new("docker").args(["ps", "-q"]).output() {
-            if output.status.success() {
-                let running_containers = String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .filter(|line| !line.trim().is_empty())
-                    .count() as u32;
-                analysis.containers_running = running_containers;
-                info!("  • Running containers: {}", running_containers);
-            }
+        if let Ok(output) = Command::new("docker").args(["ps", "-q"]).output()
+            && output.status.success()
+        {
+            let running_containers = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .count() as u32;
+            analysis.containers_running = running_containers;
+            info!("  • Running containers: {}", running_containers);
         }
 
         // Get all containers
-        if let Ok(output) = Command::new("docker").args(["ps", "-a", "-q"]).output() {
-            if output.status.success() {
-                let total_containers = String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .filter(|line| !line.trim().is_empty())
-                    .count() as u32;
-                analysis.containers_total = total_containers;
-                info!("  • Total containers: {}", total_containers);
-            }
+        if let Ok(output) = Command::new("docker").args(["ps", "-a", "-q"]).output()
+            && output.status.success()
+        {
+            let total_containers = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .count() as u32;
+            analysis.containers_total = total_containers;
+            info!("  • Total containers: {}", total_containers);
         }
 
         // Check for GPU containers
         if let Ok(output) = Command::new("docker")
             .args(["ps", "--filter", "label=gpu=true", "-q"])
             .output()
+            && output.status.success()
         {
-            if output.status.success() {
-                let gpu_containers = String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .filter(|line| !line.trim().is_empty())
-                    .count();
+            let gpu_containers = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .count();
 
-                if gpu_containers > 0 {
-                    analysis.migration_recommendations.push(
-                        format!("Found {} GPU containers - Bolt's nvbind integration will provide superior GPU performance", gpu_containers)
-                    );
-                }
+            if gpu_containers > 0 {
+                analysis.migration_recommendations.push(
+                    format!("Found {} GPU containers - Bolt's nvbind integration will provide superior GPU performance", gpu_containers)
+                );
             }
         }
 
@@ -167,20 +166,20 @@ impl MigrationHelper {
     async fn analyze_images(&self, analysis: &mut DockerEnvironmentAnalysis) -> Result<()> {
         info!("🖼️ Analyzing Docker images");
 
-        if let Ok(output) = Command::new("docker").args(["images", "-q"]).output() {
-            if output.status.success() {
-                let image_count = String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .filter(|line| !line.trim().is_empty())
-                    .count() as u32;
-                analysis.images_total = image_count;
-                info!("  • Total images: {}", image_count);
+        if let Ok(output) = Command::new("docker").args(["images", "-q"]).output()
+            && output.status.success()
+        {
+            let image_count = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .count() as u32;
+            analysis.images_total = image_count;
+            info!("  • Total images: {}", image_count);
 
-                if image_count > 50 {
-                    analysis.migration_recommendations.push(
-                        "Large number of images detected - consider using Bolt's improved image deduplication".to_string()
-                    );
-                }
+            if image_count > 50 {
+                analysis.migration_recommendations.push(
+                    "Large number of images detected - consider using Bolt's improved image deduplication".to_string()
+                );
             }
         }
 
@@ -188,18 +187,17 @@ impl MigrationHelper {
         if let Ok(output) = Command::new("docker")
             .args(["images", "--format", "{{.Repository}}"])
             .output()
+            && output.status.success()
         {
-            if output.status.success() {
-                let images_output = String::from_utf8_lossy(&output.stdout);
-                let gaming_keywords = ["steam", "wine", "gaming", "lutris", "nvidia", "cuda"];
+            let images_output = String::from_utf8_lossy(&output.stdout);
+            let gaming_keywords = ["steam", "wine", "gaming", "lutris", "nvidia", "cuda"];
 
-                for keyword in gaming_keywords {
-                    if images_output.to_lowercase().contains(keyword) {
-                        analysis.migration_recommendations.push(
-                            "Gaming-related images detected - Bolt provides optimized gaming container runtime with QUIC networking".to_string()
-                        );
-                        break;
-                    }
+            for keyword in gaming_keywords {
+                if images_output.to_lowercase().contains(keyword) {
+                    analysis.migration_recommendations.push(
+                        "Gaming-related images detected - Bolt provides optimized gaming container runtime with QUIC networking".to_string()
+                    );
+                    break;
                 }
             }
         }
@@ -211,20 +209,21 @@ impl MigrationHelper {
     async fn analyze_volumes(&self, analysis: &mut DockerEnvironmentAnalysis) -> Result<()> {
         info!("💾 Analyzing Docker volumes");
 
-        if let Ok(output) = Command::new("docker").args(["volume", "ls", "-q"]).output() {
-            if output.status.success() {
-                let volume_count = String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .filter(|line| !line.trim().is_empty())
-                    .count() as u32;
-                analysis.volumes_total = volume_count;
-                info!("  • Total volumes: {}", volume_count);
+        if let Ok(output) = Command::new("docker").args(["volume", "ls", "-q"]).output()
+            && output.status.success()
+        {
+            let volume_count = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .count() as u32;
+            analysis.volumes_total = volume_count;
+            info!("  • Total volumes: {}", volume_count);
 
-                if volume_count > 0 {
-                    analysis.migration_recommendations.push(
-                        format!("Found {} volumes - use 'bolt volume import' to migrate to Bolt volume system", volume_count)
-                    );
-                }
+            if volume_count > 0 {
+                analysis.migration_recommendations.push(format!(
+                    "Found {} volumes - use 'bolt volume import' to migrate to Bolt volume system",
+                    volume_count
+                ));
             }
         }
 
@@ -238,21 +237,20 @@ impl MigrationHelper {
         if let Ok(output) = Command::new("docker")
             .args(["network", "ls", "-q"])
             .output()
+            && output.status.success()
         {
-            if output.status.success() {
-                let network_count = String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .filter(|line| !line.trim().is_empty())
-                    .count() as u32;
-                analysis.networks_total = network_count;
-                info!("  • Total networks: {}", network_count);
+            let network_count = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .count() as u32;
+            analysis.networks_total = network_count;
+            info!("  • Total networks: {}", network_count);
 
-                if network_count > 3 {
-                    // Default Docker networks are bridge, host, none
-                    analysis.migration_recommendations.push(
-                        "Custom networks detected - Bolt's QUIC networking will provide better performance".to_string()
-                    );
-                }
+            if network_count > 3 {
+                // Default Docker networks are bridge, host, none
+                analysis.migration_recommendations.push(
+                    "Custom networks detected - Bolt's QUIC networking will provide better performance".to_string()
+                );
             }
         }
 
@@ -305,7 +303,7 @@ impl MigrationHelper {
         // General recommendations
         if analysis.containers_total > 0 {
             analysis.migration_recommendations.push(
-                "Bolt provides 100x faster container startup and superior resource management"
+                "Bolt provides native orchestration, GPU support, and resource management"
                     .to_string(),
             );
         }
@@ -411,10 +409,10 @@ impl MigrationHelper {
         // Migration Benefits
         report.push_str("## Bolt Migration Benefits\n\n");
         report.push_str("### Performance Improvements\n");
-        report.push_str("- **100x faster GPU passthrough** with nvbind integration\n");
-        report.push_str("- **Sub-millisecond networking** with QUIC protocol\n");
-        report.push_str("- **Zero-copy I/O** with eBPF acceleration\n");
-        report.push_str("- **< 2 second container startup** with optimized runtime\n\n");
+        report.push_str("- **Native GPU passthrough** with built-in nvbind support\n");
+        report.push_str("- **Encrypted low-latency networking** with QUIC protocol\n");
+        report.push_str("- **eBPF acceleration hooks** for supported network paths\n");
+        report.push_str("- **Optimized runtime path** for Bolt-managed containers\n\n");
 
         report.push_str("### Gaming Optimizations\n");
         report.push_str("- **Real-time scheduling** for gaming containers\n");

@@ -84,7 +84,7 @@ async fn test_container_operations() -> Result<()> {
 async fn test_container_with_gpu() -> Result<()> {
     use bolt::BoltRuntime;
 
-    let runtime = BoltRuntime::new()?;
+    let _runtime = BoltRuntime::new()?;
 
     println!("   Testing GPU container configuration...");
 
@@ -125,7 +125,7 @@ async fn test_container_networking() -> Result<()> {
         .create_network("test-container-net", "bolt", Some("172.31.0.0/16"))
         .await;
 
-    if let Ok(_) = network_result {
+    if network_result.is_ok() {
         println!("   Created test network for container");
 
         // List networks to verify
@@ -188,7 +188,7 @@ async fn test_container_environment_variables() -> Result<()> {
     println!("   Testing environment variable configuration...");
 
     // Test that environment variables can be configured for containers
-    let env_vars = vec![
+    let env_vars = [
         ("TEST_VAR".to_string(), "test_value".to_string()),
         ("NODE_ENV".to_string(), "production".to_string()),
         ("GPU_MEMORY".to_string(), "8192".to_string()),
@@ -205,7 +205,7 @@ async fn test_container_port_mapping() -> Result<()> {
     println!("   Testing port mapping configuration...");
 
     // Test port mapping configurations
-    let port_mappings = vec![
+    let port_mappings = [
         "8080:80".to_string(),
         "8443:443".to_string(),
         "3000:3000".to_string(),
@@ -241,8 +241,8 @@ async fn test_container_health_checks() -> Result<()> {
     };
 
     println!(
-        "   Health check configured: {} second interval",
-        health_check.interval
+        "   Health check configured: {:?}, every {}s, timeout {}s, retries {}",
+        health_check.command, health_check.interval, health_check.timeout, health_check.retries
     );
 
     println!("✅ Container health checks test passed");
@@ -277,7 +277,7 @@ async fn test_multiple_container_orchestration() -> Result<()> {
         .create_network("test-multi-net", "bolt", Some("172.32.0.0/16"))
         .await;
 
-    if let Ok(_) = network_result {
+    if network_result.is_ok() {
         println!("   Created orchestration network");
 
         // Simulate multi-container setup
@@ -338,8 +338,8 @@ async fn test_container_security() -> Result<()> {
     };
 
     println!(
-        "   Security: no_new_privileges={}",
-        security.no_new_privileges
+        "   Security: read_only={}, no_new_privileges={}, seccomp={:?}",
+        security.read_only, security.no_new_privileges, security.seccomp_profile
     );
     println!("   Dropped {} capabilities", security.cap_drop.len());
     println!("   Added {} capabilities", security.cap_add.len());

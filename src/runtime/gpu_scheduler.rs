@@ -128,6 +128,23 @@ impl GpuScheduler {
         })
     }
 
+    /// Create a GPU scheduler with an explicit allocation strategy.
+    pub async fn with_strategy(strategy: SchedulingStrategy) -> Result<Self> {
+        let mut scheduler = Self::new().await?;
+        scheduler.strategy = strategy;
+        Ok(scheduler)
+    }
+
+    /// List detected GPUs.
+    pub async fn list_gpus(&self) -> Vec<GpuState> {
+        self.gpus.read().await.values().cloned().collect()
+    }
+
+    /// List current GPU allocations.
+    pub async fn list_allocations(&self) -> HashMap<String, Vec<String>> {
+        self.allocations.read().await.clone()
+    }
+
     /// Allocate GPUs for a container
     pub async fn allocate(&self, container_id: &str, config: GpuConfig) -> Result<Vec<String>> {
         let mut gpus = self.gpus.write().await;
@@ -331,7 +348,7 @@ impl GpuScheduler {
             SchedulingStrategy::MostMemory => {
                 // Sort by free memory (highest first)
                 let mut sorted = available;
-                sorted.sort_by(|a, b| b.1.free_memory_mb.cmp(&a.1.free_memory_mb));
+                sorted.sort_by_key(|entry| std::cmp::Reverse(entry.1.free_memory_mb));
                 sorted
                     .into_iter()
                     .take(count)

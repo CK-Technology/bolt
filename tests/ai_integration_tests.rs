@@ -6,21 +6,19 @@
 //! - Model cache management
 //! - Multi-GPU workload scheduling
 
-use anyhow::Result;
-
 #[cfg(feature = "ai-ml")]
 mod ai_tests {
-    use super::*;
+    use anyhow::Result;
     use bolt::ai::model_cache::ModelCache;
     use bolt::ai::model_serving::{ModelServer, ServeConfig, ServingBackend};
     use bolt::runtime::gpu_scheduler::{GpuConfig, GpuRequest, GpuScheduler, SchedulingStrategy};
 
     #[tokio::test]
     async fn test_gpu_scheduler_initialization() -> Result<()> {
-        let scheduler = GpuScheduler::new(SchedulingStrategy::RoundRobin).await?;
+        let scheduler = GpuScheduler::with_strategy(SchedulingStrategy::RoundRobin).await?;
 
         // Scheduler should initialize even without GPUs
-        assert!(scheduler.list_gpus().await.is_ok());
+        let _gpus = scheduler.list_gpus().await;
 
         println!("✅ GPU scheduler initialization test passed");
         Ok(())
@@ -36,11 +34,12 @@ mod ai_tests {
         ];
 
         for strategy in strategies {
-            let scheduler = GpuScheduler::new(strategy.clone()).await?;
+            let scheduler = GpuScheduler::with_strategy(strategy.clone()).await?;
 
             let config = GpuConfig {
                 request: GpuRequest::Count(1),
-                memory_limit: Some(8192), // 8GB
+                memory_limit_mb: Some(8192), // 8GB
+                priority: 50,
                 exclusive: false,
             };
 
@@ -66,17 +65,19 @@ mod ai_tests {
 
     #[tokio::test]
     async fn test_gpu_vram_limits() -> Result<()> {
-        let scheduler = GpuScheduler::new(SchedulingStrategy::RoundRobin).await?;
+        let scheduler = GpuScheduler::with_strategy(SchedulingStrategy::RoundRobin).await?;
 
         let config_8gb = GpuConfig {
             request: GpuRequest::Count(1),
-            memory_limit: Some(8192),
+            memory_limit_mb: Some(8192),
+            priority: 50,
             exclusive: false,
         };
 
         let config_16gb = GpuConfig {
             request: GpuRequest::Count(1),
-            memory_limit: Some(16384),
+            memory_limit_mb: Some(16384),
+            priority: 50,
             exclusive: false,
         };
 
@@ -97,11 +98,12 @@ mod ai_tests {
 
     #[tokio::test]
     async fn test_multi_container_gpu_allocation() -> Result<()> {
-        let scheduler = GpuScheduler::new(SchedulingStrategy::LeastUtilized).await?;
+        let scheduler = GpuScheduler::with_strategy(SchedulingStrategy::LeastUtilized).await?;
 
         let config = GpuConfig {
             request: GpuRequest::Count(1),
-            memory_limit: Some(4096),
+            memory_limit_mb: Some(4096),
+            priority: 50,
             exclusive: false,
         };
 
@@ -144,7 +146,7 @@ mod ai_tests {
 
     #[tokio::test]
     async fn test_model_cache_operations() -> Result<()> {
-        let mut cache = ModelCache::new().await?;
+        let cache = ModelCache::new().await?;
 
         // Test model path retrieval (should be None for non-existent model)
         let path = cache.get_model_path("non-existent-model");
@@ -175,7 +177,7 @@ mod ai_tests {
             auto_restart: false,
         };
 
-        let server = ModelServer::new(config);
+        let _server = ModelServer::new(config);
 
         // Server should be created successfully (not started)
         println!("   Model server created successfully");
@@ -223,7 +225,7 @@ mod ai_tests {
 
     #[tokio::test]
     async fn test_gpu_scheduler_metrics() -> Result<()> {
-        let scheduler = GpuScheduler::new(SchedulingStrategy::RoundRobin).await?;
+        let scheduler = GpuScheduler::with_strategy(SchedulingStrategy::RoundRobin).await?;
 
         // Update metrics (should not fail even without GPUs)
         let update_result = scheduler.update_metrics().await;
@@ -234,7 +236,7 @@ mod ai_tests {
         }
 
         // List allocations
-        let allocations = scheduler.list_allocations().await?;
+        let allocations = scheduler.list_allocations().await;
         println!("   Current allocations: {}", allocations.len());
 
         println!("✅ GPU scheduler metrics test passed");
@@ -243,11 +245,12 @@ mod ai_tests {
 
     #[tokio::test]
     async fn test_exclusive_gpu_allocation() -> Result<()> {
-        let scheduler = GpuScheduler::new(SchedulingStrategy::Exclusive).await?;
+        let scheduler = GpuScheduler::with_strategy(SchedulingStrategy::Exclusive).await?;
 
         let config = GpuConfig {
             request: GpuRequest::Count(1),
-            memory_limit: None,
+            memory_limit_mb: None,
+            priority: 50,
             exclusive: true,
         };
 
@@ -275,13 +278,14 @@ mod ai_tests {
 
     #[tokio::test]
     async fn test_mig_allocation() -> Result<()> {
-        let scheduler = GpuScheduler::new(SchedulingStrategy::RoundRobin).await?;
+        let scheduler = GpuScheduler::with_strategy(SchedulingStrategy::RoundRobin).await?;
 
         let config = GpuConfig {
             request: GpuRequest::Mig {
                 profile: "1g.5gb".to_string(),
             },
-            memory_limit: None,
+            memory_limit_mb: None,
+            priority: 50,
             exclusive: false,
         };
 

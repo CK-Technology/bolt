@@ -23,7 +23,7 @@ pub enum ServingBackend {
     },
     /// ONNX Runtime
     ONNX {
-        execution_provider: String,  // "CUDA", "TensorRT", "ROCm"
+        execution_provider: String, // "CUDA", "TensorRT", "ROCm"
     },
 }
 
@@ -124,7 +124,10 @@ impl ModelServer {
             ]
         });
 
-        debug!("vLLM container config: {}", serde_json::to_string_pretty(&container_config)?);
+        debug!(
+            "vLLM container config: {}",
+            serde_json::to_string_pretty(&container_config)?
+        );
 
         // Create and start container via Bolt runtime
         self.container_id = Some(self.create_container(container_config).await?);
@@ -135,7 +138,10 @@ impl ModelServer {
         }
 
         info!("✅ vLLM server started successfully");
-        info!("   API endpoint: http://{}:{}/v1", self.config.host, self.config.port);
+        info!(
+            "   API endpoint: http://{}:{}/v1",
+            self.config.host, self.config.port
+        );
         info!("   OpenAI compatible API ready");
 
         Ok(())
@@ -145,7 +151,10 @@ impl ModelServer {
         debug!("Starting TensorRT server");
 
         let backend = match &self.config.backend {
-            ServingBackend::TensorRT { engine_path, precision } => (engine_path, precision),
+            ServingBackend::TensorRT {
+                engine_path,
+                precision,
+            } => (engine_path, precision),
             _ => unreachable!(),
         };
 
@@ -202,20 +211,32 @@ impl ModelServer {
 
     async fn create_container(&self, config: serde_json::Value) -> Result<String> {
         // Extract container config from JSON
-        let image = config["image"].as_str().unwrap_or("vllm/vllm-openai:latest");
+        let image = config["image"]
+            .as_str()
+            .unwrap_or("vllm/vllm-openai:latest");
         let name = config["name"].as_str();
         let ports: Vec<String> = config["ports"]
             .as_array()
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
         let env: Vec<String> = config["env"]
             .as_array()
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
 
         if let Some(runtime) = &self.runtime {
             // Use actual Bolt runtime to create container
-            runtime.run_container(image, name, &ports, &env, &[], true).await?;
+            runtime
+                .run_container(image, name, &ports, &env, &[], true)
+                .await?;
 
             // Generate container ID (in production, would get from runtime)
             let container_id = format!("model-{}", name.unwrap_or("server"));
@@ -244,7 +265,10 @@ impl ModelServer {
             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
         }
 
-        Err(anyhow!("Model server failed to become ready within {}s", timeout_secs))
+        Err(anyhow!(
+            "Model server failed to become ready within {}s",
+            timeout_secs
+        ))
     }
 
     async fn check_health(&self) -> Result<()> {
@@ -283,16 +307,15 @@ impl ModelServer {
             let is_running = if let Some(runtime) = &self.runtime {
                 // Get actual container status from runtime
                 match runtime.list_containers(true).await {
-                    Ok(containers) => {
-                        containers.iter()
-                            .find(|c| c.id == *container_id || c.name == *container_id)
-                            .map(|c| c.status.contains("running"))
-                            .unwrap_or(false)
-                    }
+                    Ok(containers) => containers
+                        .iter()
+                        .find(|c| c.id == *container_id || c.name == *container_id)
+                        .map(|c| c.status.contains("running"))
+                        .unwrap_or(false),
                     Err(_) => false,
                 }
             } else {
-                true  // Mock status
+                true // Mock status
             };
 
             Ok(ServerStatus {

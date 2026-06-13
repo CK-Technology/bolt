@@ -9,14 +9,14 @@ use tokio::sync::RwLock;
 use tokio_stream::Stream;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 use crate::config::BoltConfig;
 use crate::grpc::generated::orchestration::*;
 
 /// Orchestration service implementation
 pub struct OrchestrationServiceImpl {
-    config: Arc<RwLock<BoltConfig>>,
+    _config: Arc<RwLock<BoltConfig>>,
 }
 
 impl OrchestrationServiceImpl {
@@ -24,7 +24,7 @@ impl OrchestrationServiceImpl {
     pub fn new(config: BoltConfig) -> Self {
         info!("🎯 Initializing OrchestrationService gRPC handler");
         Self {
-            config: Arc::new(RwLock::new(config)),
+            _config: Arc::new(RwLock::new(config)),
         }
     }
 }
@@ -318,7 +318,7 @@ impl orchestration_service_server::OrchestrationService for OrchestrationService
         // Spawn update task
         tokio::spawn(async move {
             for service in services {
-                let containers = vec!["container-1", "container-2", "container-3"];
+                let containers = ["container-1", "container-2", "container-3"];
 
                 // Send update started
                 let _ = tx

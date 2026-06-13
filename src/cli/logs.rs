@@ -44,7 +44,7 @@ impl LogsCommand {
         let log_path = self.get_log_path(&self.container).await?;
 
         if !log_path.exists() {
-            return Err(anyhow!("No logs found for container: {}", self.container).into());
+            return Err(anyhow!("No logs found for container: {}", self.container));
         }
 
         if self.follow {

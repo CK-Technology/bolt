@@ -188,16 +188,16 @@ impl DisplayTechManager {
             displays.extend(wayland_displays);
         }
 
-        if displays.is_empty() {
-            if let Ok(x11_displays) = Self::detect_x11_displays().await {
-                displays.extend(x11_displays);
-            }
+        if displays.is_empty()
+            && let Ok(x11_displays) = Self::detect_x11_displays().await
+        {
+            displays.extend(x11_displays);
         }
 
-        if displays.is_empty() {
-            if let Ok(drm_displays) = Self::detect_drm_displays().await {
-                displays.extend(drm_displays);
-            }
+        if displays.is_empty()
+            && let Ok(drm_displays) = Self::detect_drm_displays().await
+        {
+            displays.extend(drm_displays);
         }
 
         if displays.is_empty() {
@@ -375,35 +375,35 @@ impl DisplayTechManager {
                 if let (Ok(status), Ok(enabled)) = (
                     std::fs::read_to_string(&status_path),
                     std::fs::read_to_string(&enabled_path),
-                ) {
-                    if status.trim() == "connected" && enabled.trim() == "enabled" {
-                        let mut display = DisplayDevice {
-                            name: name_str.to_string(),
-                            connector: name_str.to_string(),
-                            resolution: (1920, 1080), // Default
-                            refresh_rate: 60,         // Default
-                            vrr_supported: false,
-                            vrr_range: None,
-                            hdr_supported: false,
-                            hdr_formats: Vec::new(),
-                            color_depth: 8,
-                            is_gaming_monitor: false,
-                            manufacturer: "Unknown".to_string(),
-                            model: "Unknown".to_string(),
-                        };
+                ) && status.trim() == "connected"
+                    && enabled.trim() == "enabled"
+                {
+                    let mut display = DisplayDevice {
+                        name: name_str.to_string(),
+                        connector: name_str.to_string(),
+                        resolution: (1920, 1080), // Default
+                        refresh_rate: 60,         // Default
+                        vrr_supported: false,
+                        vrr_range: None,
+                        hdr_supported: false,
+                        hdr_formats: Vec::new(),
+                        color_depth: 8,
+                        is_gaming_monitor: false,
+                        manufacturer: "Unknown".to_string(),
+                        model: "Unknown".to_string(),
+                    };
 
-                        // Check for VRR support
-                        let vrr_capable_path = entry.path().join("vrr_capable");
-                        if let Ok(vrr_capable) = std::fs::read_to_string(&vrr_capable_path) {
-                            display.vrr_supported = vrr_capable.trim() == "1";
-                        }
-
-                        // Check for HDR support
-                        let hdr_path = entry.path().join("hdr_output_metadata");
-                        display.hdr_supported = hdr_path.exists();
-
-                        displays.push(display);
+                    // Check for VRR support
+                    let vrr_capable_path = entry.path().join("vrr_capable");
+                    if let Ok(vrr_capable) = std::fs::read_to_string(&vrr_capable_path) {
+                        display.vrr_supported = vrr_capable.trim() == "1";
                     }
+
+                    // Check for HDR support
+                    let hdr_path = entry.path().join("hdr_output_metadata");
+                    display.hdr_supported = hdr_path.exists();
+
+                    displays.push(display);
                 }
             }
         }
@@ -415,10 +415,10 @@ impl DisplayTechManager {
         // Parse "1920x1080@144.000000Hz" or similar
         if let Some((res_part, rate_part)) = mode_str.split_once('@') {
             // Parse resolution
-            if let Some((width_str, height_str)) = res_part.split_once('x') {
-                if let (Ok(width), Ok(height)) = (width_str.parse(), height_str.parse()) {
-                    display.resolution = (width, height);
-                }
+            if let Some((width_str, height_str)) = res_part.split_once('x')
+                && let (Ok(width), Ok(height)) = (width_str.parse(), height_str.parse())
+            {
+                display.resolution = (width, height);
             }
             // Parse refresh rate
             let rate_str = rate_part.trim_end_matches("Hz");
@@ -430,13 +430,13 @@ impl DisplayTechManager {
 
     fn parse_vrr_range(line: &str) -> Option<(u32, u32)> {
         // Try to extract VRR range from line like "VRR: 48-144Hz"
-        if let Some(range_part) = line.split(':').nth(1) {
-            if let Some((min_str, max_str)) = range_part.trim().split_once('-') {
-                let min_str = min_str.trim();
-                let max_str = max_str.trim_end_matches("Hz").trim();
-                if let (Ok(min), Ok(max)) = (min_str.parse(), max_str.parse()) {
-                    return Some((min, max));
-                }
+        if let Some(range_part) = line.split(':').nth(1)
+            && let Some((min_str, max_str)) = range_part.trim().split_once('-')
+        {
+            let min_str = min_str.trim();
+            let max_str = max_str.trim_end_matches("Hz").trim();
+            if let (Ok(min), Ok(max)) = (min_str.parse(), max_str.parse()) {
+                return Some((min, max));
             }
         }
         None

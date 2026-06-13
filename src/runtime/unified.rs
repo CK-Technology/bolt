@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
+use super::gpu_integration::GpuConfig;
 use super::native::{BoltNativeRuntime, NativeContainerConfig, NativeContainerInfo};
 
 /// Unified runtime interface that can switch between native and delegation modes
@@ -59,6 +60,22 @@ impl UnifiedRuntime {
         volumes: &[String],
         detach: bool,
     ) -> Result<String> {
+        self.run_container_with_gpu(image, name, ports, env, volumes, detach, None)
+            .await
+    }
+
+    /// Run a container with GPU configuration
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_container_with_gpu(
+        &self,
+        image: &str,
+        name: Option<&str>,
+        ports: &[String],
+        env: &[String],
+        volumes: &[String],
+        detach: bool,
+        gpu_config: Option<GpuConfig>,
+    ) -> Result<String> {
         match &self.mode {
             RuntimeMode::Native => {
                 let config = NativeContainerConfig {
@@ -71,7 +88,7 @@ impl UnifiedRuntime {
                     command: None,
                     working_dir: None,
                     user: None,
-                    gpu_config: None,
+                    gpu_config,
                     cpu_affinity: None,
                     workload_hint: None,
                 };
@@ -81,6 +98,12 @@ impl UnifiedRuntime {
             }
             RuntimeMode::Delegate(runtime) => {
                 // Fall back to old delegation method
+                // Note: GPU passthrough not supported in delegation mode
+                if gpu_config.is_some() {
+                    warn!(
+                        "⚠️  GPU passthrough not supported in delegation mode, using runtime's GPU flags"
+                    );
+                }
                 super::run_oci_container_delegate(runtime, image, name, ports, env, volumes, detach)
                     .await
             }

@@ -165,17 +165,17 @@ impl OptimizationManager {
         for condition in &profile.conditions {
             match condition {
                 OptimizationCondition::GameTitle(title) => {
-                    if let Some(game) = &context.game_title {
-                        if !game.to_lowercase().contains(&title.to_lowercase()) {
-                            return false;
-                        }
+                    if let Some(game) = &context.game_title
+                        && !game.to_lowercase().contains(&title.to_lowercase())
+                    {
+                        return false;
                     }
                 }
                 OptimizationCondition::GpuVendor(vendor) => {
-                    if let Some(ctx_vendor) = &context.gpu_vendor {
-                        if std::mem::discriminant(ctx_vendor) != std::mem::discriminant(vendor) {
-                            return false;
-                        }
+                    if let Some(ctx_vendor) = &context.gpu_vendor
+                        && std::mem::discriminant(ctx_vendor) != std::mem::discriminant(vendor)
+                    {
+                        return false;
                     }
                 }
                 OptimizationCondition::CpuCores(min_cores) => {

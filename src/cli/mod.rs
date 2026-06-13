@@ -1,9 +1,13 @@
 use clap::{Parser, Subcommand};
 
+pub mod amd;
+pub mod arc;
 pub mod compat;
 pub mod exec;
 pub mod gpu;
 pub mod logs;
+pub mod nv;
+pub mod tools;
 
 #[derive(Parser)]
 #[command(
@@ -26,6 +30,7 @@ pub struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 pub enum Commands {
     /// Run a single container/capsule
     Run {
@@ -63,6 +68,10 @@ pub enum Commands {
         /// GPU devices to use - Docker --gpus syntax (all, device=0,1, etc)
         #[arg(long)]
         gpus: Option<String>,
+
+        /// GPU profile for optimized workloads (gaming, ai, training, or profile name)
+        #[arg(long)]
+        gpu_profile: Option<String>,
 
         /// Interactive mode (keep STDIN open)
         #[arg(short, long)]
@@ -208,6 +217,24 @@ pub enum Commands {
         command: gpu::GpuSubcommand,
     },
 
+    /// NVIDIA GPU management (native, no nvidia-container-toolkit required)
+    Nv {
+        #[command(subcommand)]
+        command: nv::NvCommands,
+    },
+
+    /// AMD GPU management (ROCm integration - planned)
+    Amd {
+        #[command(subcommand)]
+        command: amd::AmdCommands,
+    },
+
+    /// Intel Arc GPU management (oneAPI integration - planned)
+    Arc {
+        #[command(subcommand)]
+        command: arc::ArcCommands,
+    },
+
     /// Network management
     Network {
         #[command(subcommand)]
@@ -238,130 +265,17 @@ pub enum Commands {
         command: compat::CompatCommands,
     },
 
+    /// Native Bolt service tools
+    Tools {
+        #[command(subcommand)]
+        command: tools::ToolCommands,
+    },
+
     /// Start metrics and monitoring dashboard
     Dashboard {
         /// Port to run dashboard on
         #[arg(short, long, default_value = "3000")]
         port: u16,
-    },
-
-    /// MCP (Model Context Protocol) server commands
-    #[cfg(feature = "mcp")]
-    Mcp {
-        #[command(subcommand)]
-        command: McpCommands,
-    },
-}
-
-#[cfg(feature = "mcp")]
-#[derive(Subcommand)]
-pub enum McpCommands {
-    /// Start MCP server
-    Serve {
-        /// Transport type (stdio, websocket, http)
-        #[arg(long, default_value = "websocket")]
-        transport: String,
-
-        /// Address to bind to (for websocket/http)
-        #[arg(long, default_value = "0.0.0.0")]
-        address: String,
-
-        /// Port to bind to (for websocket/http)
-        #[arg(long, default_value = "7331")]
-        port: u16,
-
-        /// Container name to expose tools for (optional)
-        #[arg(long)]
-        container: Option<String>,
-    },
-
-    /// Run MCP gateway (centralized management)
-    Gateway {
-        /// Transport type (stdio, websocket, http)
-        #[arg(long, default_value = "websocket")]
-        transport: String,
-
-        /// Address to bind to
-        #[arg(long, default_value = "0.0.0.0")]
-        address: String,
-
-        /// Port to bind to
-        #[arg(long, default_value = "7331")]
-        port: u16,
-
-        /// Path to catalog file
-        #[arg(long)]
-        catalog: Option<std::path::PathBuf>,
-
-        /// Enabled servers (comma-separated)
-        #[arg(long, value_delimiter = ',')]
-        servers: Vec<String>,
-
-        /// Enabled tools (format: server:tool)
-        #[arg(long, value_delimiter = ',')]
-        tools: Vec<String>,
-
-        /// Watch for config changes
-        #[arg(long)]
-        watch: bool,
-    },
-
-    /// OMEN AI router commands (Phase 3)
-    #[cfg(feature = "omen")]
-    Omen {
-        #[command(subcommand)]
-        command: OmenCommands,
-    },
-}
-
-#[cfg(feature = "omen")]
-#[derive(Subcommand)]
-pub enum OmenCommands {
-    /// Start OMEN AI router server
-    Serve {
-        /// Address to bind to
-        #[arg(long, default_value = "0.0.0.0")]
-        address: String,
-
-        /// Port to bind to
-        #[arg(long, default_value = "8080")]
-        port: u16,
-
-        /// OMEN configuration file
-        #[arg(long)]
-        config: Option<std::path::PathBuf>,
-
-        /// Enable specific providers (comma-separated)
-        #[arg(long, value_delimiter = ',')]
-        providers: Vec<String>,
-    },
-
-    /// List available AI providers
-    Providers {
-        /// Show detailed provider information
-        #[arg(short, long)]
-        verbose: bool,
-
-        /// Output format (text, json)
-        #[arg(short, long, default_value = "text")]
-        format: String,
-    },
-
-    /// Test AI provider connectivity
-    Test {
-        /// Provider to test (or 'all')
-        provider: String,
-
-        /// Test prompt
-        #[arg(long, default_value = "Hello, this is a test message")]
-        prompt: String,
-    },
-
-    /// Show provider health and scores
-    Health {
-        /// Output format (text, json)
-        #[arg(short, long, default_value = "text")]
-        format: String,
     },
 }
 

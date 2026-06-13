@@ -18,7 +18,7 @@ async fn test_bolt_startup_time() {
 #[tokio::test]
 #[ignore] // Requires write permissions to /var/lib/bolt/volumes
 async fn test_volume_creation_performance() {
-    let start = Instant::now();
+    let _start = Instant::now();
 
     let mut volume_manager = bolt::volume::VolumeManager::new().unwrap();
     let volume_name = format!("perf-test-{}", uuid::Uuid::new_v4());

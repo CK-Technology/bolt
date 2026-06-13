@@ -922,16 +922,15 @@ impl StorageManager {
                         )
                     })?;
 
-                if let Some(store) = &self.object_store {
-                    if let Err(err) = store
+                if let Some(store) = &self.object_store
+                    && let Err(err) = store
                         .upload_layer(&resolved.repository, &layer.digest, &destination)
                         .await
-                    {
-                        warn!(
-                            "Failed to upload layer {} to object store: {}",
-                            layer.digest, err
-                        );
-                    }
+                {
+                    warn!(
+                        "Failed to upload layer {} to object store: {}",
+                        layer.digest, err
+                    );
                 }
             }
 
@@ -1096,11 +1095,11 @@ impl StorageManager {
 
         // Create final image metadata with Bolt-specific config
         let mut exposed_ports = std::collections::HashMap::new();
-        if let Some(runtime) = &config.runtime {
-            if let Some(ports) = &runtime.expose {
-                for port in ports {
-                    exposed_ports.insert(port.to_string(), serde_json::json!({}));
-                }
+        if let Some(runtime) = &config.runtime
+            && let Some(ports) = &runtime.expose
+        {
+            for port in ports {
+                exposed_ports.insert(port.to_string(), serde_json::json!({}));
             }
         }
 
@@ -1710,22 +1709,22 @@ impl StorageManager {
             None
         };
 
-        if manifest_bytes.is_none() {
-            if let Some(store) = &self.object_store {
-                match store.fetch_manifest(&metadata.name, &metadata.tag).await {
-                    Ok(Some(bytes)) => {
-                        fs::write(&manifest_path, &bytes).await.with_context(|| {
-                            format!("Failed to write manifest at {}", manifest_path.display())
-                        })?;
-                        manifest_bytes = Some(bytes);
-                    }
-                    Ok(None) => {}
-                    Err(err) => {
-                        warn!(
-                            "Object store manifest fetch failed for {}@{}: {}",
-                            metadata.name, metadata.tag, err
-                        );
-                    }
+        if manifest_bytes.is_none()
+            && let Some(store) = &self.object_store
+        {
+            match store.fetch_manifest(&metadata.name, &metadata.tag).await {
+                Ok(Some(bytes)) => {
+                    fs::write(&manifest_path, &bytes).await.with_context(|| {
+                        format!("Failed to write manifest at {}", manifest_path.display())
+                    })?;
+                    manifest_bytes = Some(bytes);
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    warn!(
+                        "Object store manifest fetch failed for {}@{}: {}",
+                        metadata.name, metadata.tag, err
+                    );
                 }
             }
         }
@@ -1878,12 +1877,11 @@ impl StorageManager {
                             needs_persist = true;
                         }
 
-                        if needs_persist {
-                            if let Err(err) =
+                        if needs_persist
+                            && let Err(err) =
                                 self.persist_image_metadata(&reference, &metadata).await
-                            {
-                                warn!("Failed to refresh metadata file for {}: {}", reference, err);
-                            }
+                        {
+                            warn!("Failed to refresh metadata file for {}: {}", reference, err);
                         }
 
                         self.images.insert(reference, metadata);

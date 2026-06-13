@@ -567,14 +567,14 @@ impl HealthChecker {
 
         if let Ok(entries) = fs::read_dir("/proc") {
             for entry in entries.flatten() {
-                if let Ok(name) = entry.file_name().into_string() {
-                    if name.chars().all(char::is_numeric) {
-                        let stat_path = format!("/proc/{}/stat", name);
-                        if let Ok(stat) = fs::read_to_string(stat_path) {
-                            let parts: Vec<&str> = stat.split_whitespace().collect();
-                            if parts.len() > 2 && parts[2] == "Z" {
-                                zombie_count += 1;
-                            }
+                if let Ok(name) = entry.file_name().into_string()
+                    && name.chars().all(char::is_numeric)
+                {
+                    let stat_path = format!("/proc/{}/stat", name);
+                    if let Ok(stat) = fs::read_to_string(stat_path) {
+                        let parts: Vec<&str> = stat.split_whitespace().collect();
+                        if parts.len() > 2 && parts[2] == "Z" {
+                            zombie_count += 1;
                         }
                     }
                 }
@@ -635,28 +635,26 @@ impl HealthChecker {
                     // Check temperature
                     if let Ok(temp) = device
                         .temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu)
+                        && temp > 90
                     {
-                        if temp > 90 {
-                            return Err(anyhow::anyhow!(
-                                "GPU {} temperature critical: {}°C",
-                                i,
-                                temp
-                            ));
-                        }
+                        return Err(anyhow::anyhow!(
+                            "GPU {} temperature critical: {}°C",
+                            i,
+                            temp
+                        ));
                     }
 
                     // Check memory errors (uncorrected ECC errors)
                     if let Ok(memory_error_count) = device.total_ecc_errors(
                         nvml_wrapper::enum_wrappers::device::MemoryError::Uncorrected,
                         nvml_wrapper::enum_wrappers::device::EccCounter::Volatile,
-                    ) {
-                        if memory_error_count > 0 {
-                            return Err(anyhow::anyhow!(
-                                "GPU {} has uncorrected memory errors: {}",
-                                i,
-                                memory_error_count
-                            ));
-                        }
+                    ) && memory_error_count > 0
+                    {
+                        return Err(anyhow::anyhow!(
+                            "GPU {} has uncorrected memory errors: {}",
+                            i,
+                            memory_error_count
+                        ));
                     }
                 }
 
@@ -674,26 +672,26 @@ impl HealthChecker {
         // Check for AMD GPU sysfs entries
         for i in 0..8 {
             let device_path = format!("/sys/class/drm/card{}/device", i);
-            if let Ok(vendor) = fs::read_to_string(format!("{}/vendor", device_path)) {
-                if vendor.trim() == "0x1002" {
-                    // AMD vendor ID
-                    gpu_count += 1;
+            if let Ok(vendor) = fs::read_to_string(format!("{}/vendor", device_path))
+                && vendor.trim() == "0x1002"
+            {
+                // AMD vendor ID
+                gpu_count += 1;
 
-                    // Check for thermal issues
-                    if let Ok(temp_files) = fs::read_dir(format!("{}/hwmon", device_path)) {
-                        for temp_file in temp_files.flatten() {
-                            let temp_path = temp_file.path().join("temp1_input");
-                            if let Ok(temp_str) = fs::read_to_string(temp_path) {
-                                if let Ok(temp) = temp_str.trim().parse::<u32>() {
-                                    let temp_celsius = temp / 1000;
-                                    if temp_celsius > 90 {
-                                        return Err(anyhow::anyhow!(
-                                            "AMD GPU {} temperature critical: {}°C",
-                                            i,
-                                            temp_celsius
-                                        ));
-                                    }
-                                }
+                // Check for thermal issues
+                if let Ok(temp_files) = fs::read_dir(format!("{}/hwmon", device_path)) {
+                    for temp_file in temp_files.flatten() {
+                        let temp_path = temp_file.path().join("temp1_input");
+                        if let Ok(temp_str) = fs::read_to_string(temp_path)
+                            && let Ok(temp) = temp_str.trim().parse::<u32>()
+                        {
+                            let temp_celsius = temp / 1000;
+                            if temp_celsius > 90 {
+                                return Err(anyhow::anyhow!(
+                                    "AMD GPU {} temperature critical: {}°C",
+                                    i,
+                                    temp_celsius
+                                ));
                             }
                         }
                     }

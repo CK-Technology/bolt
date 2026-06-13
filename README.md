@@ -22,10 +22,10 @@
 
 ## Overview
 
-**Bolt** is a **next-generation container runtime** designed for gaming, development, and enterprise workloads.
+**Bolt** is a container runtime designed for gaming, development, and enterprise workloads.
 It unifies:
 
-- **Container Runtime** - OCI compatibility with sub-microsecond GPU passthrough via **nvbind**
+- **Container Runtime** - OCI compatibility with built-in **nvbind** GPU passthrough
 - **Orchestration** - Surge orchestration with **TOML Boltfiles**
 - **Snapshots** - BTRFS/ZFS snapshot automation with retention policies
 - **Gaming** - First-class GPU support, Wine/Proton integration, ultra-low latency
@@ -33,10 +33,10 @@ It unifies:
 - **Declarative Config** - Reproducible environments with comprehensive validation
 
 **Key innovations:**
-- 🚀 **nvbind integration** - 100x faster GPU passthrough than Docker
+- 🚀 **Native nvbind path** - NVIDIA passthrough built into Bolt, with no external nvbind crate
 - 📸 **Snapshot automation** - Time, change, and operation-based triggers
 - 🎮 **Gaming-first design** - DLSS, Ray Tracing, Wine optimization
-- ⚡ **QUIC networking** - Sub-microsecond container communication
+- ⚡ **QUIC networking** - Encrypted, low-latency container communication
 - 🔧 **Modern CLI** - Docker-compatible commands with enhanced output  
 
 ---
@@ -44,7 +44,7 @@ It unifies:
 ## Install
 
 ```bash
-curl -fsSL https://bolt.cktech.org | bash
+curl -fsSL https://bolt.cktech.sh | bash
 ```
 
 ---
@@ -53,8 +53,8 @@ curl -fsSL https://bolt.cktech.org | bash
 
 ### Container Management
 ```bash
-# Run containers with nvbind GPU runtime
-bolt run --runtime nvbind --gpu all ubuntu:latest
+# Run containers with native GPU passthrough
+bolt run --gpu all nvidia/cuda:12.0-base nvidia-smi
 bolt run --name web --ports 8080:80 nginx:latest
 
 # List containers with modern output
@@ -69,7 +69,7 @@ bolt rm web --force
 
 ### GPU & Gaming
 ```bash
-# Configure nvbind GPU runtime
+# Configure GPU runtime
 bolt gaming gpu nvbind --devices all --performance ultra --wsl2
 bolt gaming gpu check
 bolt gaming gpu list
@@ -155,13 +155,13 @@ Bolt uses **TOML Boltfiles** for comprehensive project configuration including s
 ```toml
 project = "gaming-setup"
 
-# Gaming service with nvbind GPU runtime
+# Gaming service with native GPU passthrough
 [services.steam]
 image = "ghcr.io/games-on-whales/steam:latest"
 ports = ["8080:8080"]
 
 [services.steam.gaming.gpu]
-runtime = "nvbind"                    # 100x faster GPU passthrough
+runtime = "nvbind"                    # Built-in NVIDIA passthrough path
 isolation_level = "exclusive"         # Dedicated GPU access
 memory_limit = "8GB"
 
@@ -219,47 +219,6 @@ Launch your stack:
 bolt surge up
 ```
 --- 
-## Roadmap
-
-### Phase 1 – Core Runtime ✅ **COMPLETE**
-- [x] OCI image support (pull, build, run)
-- [x] Bolt **Capsules** (LXC-like isolation)
-- [x] Rootless namespaces & cgroups integration
-- [x] Container lifecycle management (run, stop, restart, rm)
-- [x] Enhanced container listing with modern output formatting
-
-### Phase 2 – GPU & Gaming Runtime ✅ **COMPLETE**
-- [x] **nvbind GPU runtime integration** - Sub-microsecond GPU passthrough
-- [x] Docker compatibility layer with enhanced performance
-- [x] Gaming-optimized container configurations
-- [x] GPU device selection and isolation
-- [x] Wine/Proton container integration
-- [x] Real-time gaming optimizations
-
-### Phase 3 – Snapshot Automation ✅ **COMPLETE**
-- [x] **BTRFS/ZFS snapshot automation** with snapper-like functionality
-- [x] Time-based triggers (hourly, daily, weekly, monthly)
-- [x] Operation-based triggers (before builds, surge operations)
-- [x] Change-based triggers with file monitoring
-- [x] Retention policies with automatic cleanup
-- [x] Named snapshots for specific configurations
-
-### Phase 4 – Surge Orchestration ✅ **COMPLETE**
-- [x] **Surge orchestration** - Docker Compose-like multi-service stacks
-- [x] Boltfile (TOML) parser & schema validation
-- [x] Multi-service orchestration (`bolt surge up`)
-- [x] Service dependencies and health checks
-- [x] Networking & DNS resolution
-- [x] Persistent storage & volume support
-
-### Phase 5 – Advanced Platform ✅ **COMPLETE**
-- [x] Secure service authentication
-- [x] QUIC networking for distributed services
-- [x] Declarative builds (Nix-like reproducibility)
-- [x] Web UI (Proxmox-style for capsules & clusters)
-- [x] Remote orchestration across multiple nodes  
-
----
 
 ## Comparisons
 
@@ -267,7 +226,7 @@ bolt surge up
 |----------------------|------------------|------------|-------|-------------|------------------|
 | Runtime              | ✅               | ✅         | ❌    | ✅          | ✅ (OCI + Capsules) |
 | Orchestration        | ✅ (basic)       | ✅ (complex)| ❌    | ❌          | ✅ (Surge built-in) |
-| GPU Runtime          | ❌ (slow)        | Limited    | ❌    | ❌          | ✅ (nvbind - 100x faster) |
+| GPU Runtime          | Toolkit-based    | Limited    | ❌    | ❌          | Native nvbind path |
 | Snapshots            | ❌               | ❌         | ✅    | ✅ (manual) | ✅ (automated BTRFS/ZFS) |
 | Gaming Support       | ❌               | ❌         | Limited| ❌         | ✅ (DLSS, RT, Wine optimized) |
 | Config Format        | YAML             | YAML/JSON  | Nix   | Conf files  | TOML (clean) |
@@ -280,7 +239,7 @@ bolt surge up
 
 ## Requirements
 
-- **Rust 1.85+** (Required for latest async/await optimizations and performance improvements)
+- **Rust 1.91+** (Required by this crate's `rust-version`)
 - **Linux Kernel 5.4+** (For container namespaces and cgroups v2 support)
 - **Tokio 1.0+** (Async runtime integration)
 
@@ -288,7 +247,7 @@ bolt surge up
 
 ## 🚀 Rust API Integration
 
-Bolt provides a **production-ready Rust API** for programmatic container management:
+Bolt provides a Rust API for programmatic container management:
 
 ### **Quick Start**
 
@@ -363,19 +322,21 @@ bolt = { git = "https://github.com/CK-Technology/bolt", features = ["gaming", "q
 
 ---
 
-## 📚 Documentation
+## Documentation
 
-Comprehensive documentation is available in the [`docs/`](docs/) directory:
+Full documentation is available in [`docs/`](docs/):
 
-- **[Planning & Roadmap](docs/planning/)** - Development priorities and wishlist
-- **[Architecture](docs/architecture/)** - System design and integration patterns
-- **[Features](docs/features/)** - GPU support, gaming, and networking
-- **[Integrations](docs/integrations/)** - MCP, GhostForge, and ecosystem tools
-- **[nvbind](docs/nvbind/)** - GPU passthrough integration details
-- **[API Reference](docs/api/)** - Complete API documentation
-- **[MCP Integration](docs/mcp/)** - Model Context Protocol guides
-
-See [docs/README.md](docs/README.md) for the complete documentation index.
+| Document | Description |
+|----------|-------------|
+| [Quickstart](docs/getting-started/quickstart.md) | Installation and first container |
+| [CLI Reference](docs/reference/cli.md) | Commands and options |
+| [Rust API](docs/reference/rust-api.md) | Programmatic container management |
+| [GPU Overview](docs/gpu/overview.md) | Native NVIDIA passthrough; AMD/Intel detection (experimental) |
+| [Gaming Workloads](docs/workloads/gaming.md) | Gaming profiles and optimization |
+| [AI/ML Workloads](docs/workloads/ai-ml.md) | Ollama, training, and inference |
+| [Surge Orchestration](docs/operations/orchestration.md) | Multi-service Boltfile stacks |
+| [Networking](docs/operations/networking.md) | QUIC networks, DNS, and ports |
+| [Snapshots](docs/operations/snapshots.md) | BTRFS/ZFS automation |
 
 ---
 
@@ -407,4 +368,3 @@ Bolt is **the next step in container infrastructure**.
 ⚡ *Bolt your infrastructure together. Surge your services into life.* ⚡
 
 </div>
-

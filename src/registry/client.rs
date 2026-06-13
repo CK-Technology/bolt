@@ -273,10 +273,10 @@ impl DriftClient {
     async fn get(&self, url: &str) -> Result<Response> {
         let mut request = self.client.get(url);
 
-        if let Some(auth) = &self.auth {
-            if let Some(token) = &auth.token {
-                request = request.header("Authorization", format!("Bearer {}", token));
-            }
+        if let Some(auth) = &self.auth
+            && let Some(token) = &auth.token
+        {
+            request = request.header("Authorization", format!("Bearer {}", token));
         }
 
         Ok(request.send().await?)

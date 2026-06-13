@@ -23,7 +23,6 @@
 //! │  - Container        │
 //! │  - Network          │
 //! │  - Orchestration    │
-//! │  - MCP (AI Agents)  │
 //! └─────────────────────┘
 //! ```
 //!
@@ -36,7 +35,6 @@
 //! - **Connection migration**: Seamless migration across network changes
 
 pub mod container_service;
-pub mod mcp_service;
 pub mod network_service;
 pub mod orchestration_service;
 pub mod quic_transport;
@@ -62,11 +60,6 @@ pub mod generated {
     pub mod orchestration {
         tonic::include_proto!("bolt.orchestration");
     }
-
-    // MCP service
-    pub mod mcp {
-        tonic::include_proto!("bolt.mcp");
-    }
 }
 
 // Re-export commonly used types
@@ -91,29 +84,16 @@ pub use generated::orchestration::{
     orchestration_service_server::{OrchestrationService, OrchestrationServiceServer},
 };
 
-pub use generated::mcp::{
-    CallToolRequest, CallToolResponse, GetCapabilitiesRequest, GetCapabilitiesResponse,
-    ListToolsRequest, ListToolsResponse, McpCapabilities, McpTool,
-    mcp_config_service_client::McpConfigServiceClient,
-    mcp_config_service_server::{McpConfigService, McpConfigServiceServer},
-    mcp_resource_service_client::McpResourceServiceClient,
-    mcp_resource_service_server::{McpResourceService, McpResourceServiceServer},
-    mcp_tool_service_client::McpToolServiceClient,
-    mcp_tool_service_server::{McpToolService, McpToolServiceServer},
-};
-
 pub use quic_transport::{QuicGrpcClient, QuicGrpcServer, QuicGrpcStats, QuicStream};
 
 use anyhow::Result;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use tracing::info;
 
 use crate::networking::quic_real::RealQUICServer;
 
 /// Main entry point for starting Bolt's gRPC-over-QUIC server
 ///
-/// This starts all gRPC services (Container, Network, Orchestration, MCP)
+/// This starts all gRPC services (Container, Network, Orchestration)
 /// over a single QUIC transport.
 pub async fn start_grpc_server(
     quic_server: RealQUICServer,
@@ -142,45 +122,17 @@ pub async fn start_grpc_server(
         orchestration_service::OrchestrationServiceImpl::new(config.clone());
     info!("  ✓ Orchestration service initialized");
 
-    // Initialize MCP services
-    let mcp_tool_service = mcp_service::McpToolServiceImpl::new().await?;
-    info!("  ✓ MCP Tool service initialized");
-
-    let mcp_resource_service = mcp_service::McpResourceServiceImpl::new().await?;
-    info!("  ✓ MCP Resource service initialized");
-
-    let mcp_config_service = mcp_service::McpConfigServiceImpl::new(config.mcp.unwrap_or_default());
-    info!("  ✓ MCP Config service initialized");
-
     // Create unified gRPC router with all services
-    // For now, we'll start with the container service
-    // In a full implementation, we would use tonic's Router to combine all services
     let _container_server = ContainerServiceServer::new(container_service);
-    let _mcp_tool_server = McpToolServiceServer::new(mcp_tool_service);
-    let _mcp_resource_server = McpResourceServiceServer::new(mcp_resource_service);
-    let _mcp_config_server = McpConfigServiceServer::new(mcp_config_service);
 
     info!("🚀 Starting gRPC-over-QUIC server with all services...");
     info!("  • Container Service: Container lifecycle management");
     info!("  • Network Service: QUIC networking and stats");
     info!("  • Orchestration Service: Multi-container orchestration");
-    info!("  • MCP Tool Service: AI agent tool execution");
-    info!("  • MCP Resource Service: Resource access for AI agents");
-    info!("  • MCP Config Service: MCP configuration management");
     info!("  • Bind address: {}:{}", bind_address, port);
-
-    // Note: In a production implementation, you would:
-    // 1. Use tonic::transport::Server::builder()
-    // 2. Add all services with .add_service()
-    // 3. Create a custom transport adapter for QUIC
-    //
-    // For this implementation, the QuicGrpcServer already handles
-    // the low-level QUIC transport and gRPC framing.
-    // The service integration is simplified for demonstration.
 
     info!("✅ Bolt gRPC-over-QUIC server started successfully");
     info!("📡 Ready to accept gRPC calls over QUIC transport");
-    info!("🤖 MCP services enabled for AI agent integration");
 
     // Keep the server running
     // In a real implementation, this would call grpc_server.serve()

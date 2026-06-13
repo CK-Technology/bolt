@@ -435,16 +435,15 @@ impl NvbindRuntime {
         };
 
         // Check for NVIDIA requirements
-        if let Some(ref gpu_config) = container_config.gpu {
-            if let Some(ref nvidia) = gpu_config.nvidia {
-                if let Some(dlss_required) = nvidia.dlss {
-                    if dlss_required && !self.has_dlss_support() {
-                        report
-                            .warnings
-                            .push("DLSS requested but no compatible GPU found".to_string());
-                    }
-                }
-            }
+        if let Some(ref gpu_config) = container_config.gpu
+            && let Some(ref nvidia) = gpu_config.nvidia
+            && let Some(dlss_required) = nvidia.dlss
+            && dlss_required
+            && !self.has_dlss_support()
+        {
+            report
+                .warnings
+                .push("DLSS requested but no compatible GPU found".to_string());
         }
 
         // Check driver compatibility
@@ -688,7 +687,7 @@ impl GpuScheduler {
     pub async fn new(available_gpus: &[GpuInfo]) -> Result<Self> {
         let mut gpu_contexts = HashMap::new();
 
-        // Initialize GPU contexts for sub-microsecond switching
+        // Initialize GPU contexts for low-latency scheduling
         for gpu in available_gpus {
             let context = GpuContext {
                 gpu_id: gpu.id.clone(),
@@ -758,23 +757,23 @@ impl GpuScheduler {
             }
             GpuRequest::Specific(gpu_ids) => {
                 for gpu_id in gpu_ids {
-                    if let Some(context) = contexts.get_mut(gpu_id) {
-                        if self.can_allocate_context(context, gpu_request).await? {
-                            self.configure_ultra_low_latency_context(
-                                context,
-                                container_id,
-                                gpu_request,
-                            )
-                            .await?;
-                            allocated_gpus.push(gpu_id.clone());
-                        }
+                    if let Some(context) = contexts.get_mut(gpu_id)
+                        && self.can_allocate_context(context, gpu_request).await?
+                    {
+                        self.configure_ultra_low_latency_context(
+                            context,
+                            container_id,
+                            gpu_request,
+                        )
+                        .await?;
+                        allocated_gpus.push(gpu_id.clone());
                     }
                 }
             }
         }
 
         info!(
-            "✅ Allocated {} GPU(s) with sub-microsecond context switching",
+            "✅ Allocated {} GPU(s) with low-latency context scheduling",
             allocated_gpus.len()
         );
         Ok(allocated_gpus)
@@ -897,7 +896,7 @@ impl GpuPerformanceMonitor {
 
         for (gpu_id, metric) in metrics_guard.iter_mut() {
             // Try to get real GPU metrics via NVML/nvidia-ml
-            #[cfg(feature = "nvbind-support")]
+            #[cfg(feature = "nvidia-support")]
             {
                 if let Ok(real_metrics) = Self::fetch_real_gpu_metrics(gpu_id).await {
                     metric.utilization_percent = real_metrics.utilization_percent;
@@ -912,10 +911,10 @@ impl GpuPerformanceMonitor {
             }
 
             // Fallback: Use basic system queries or keep metrics stable
-            #[cfg(not(feature = "nvbind-support"))]
+            #[cfg(not(feature = "nvidia-support"))]
             {
                 debug!(
-                    "nvbind-support not enabled, keeping metrics at baseline for {}",
+                    "nvidia-support not enabled, keeping metrics at baseline for {}",
                     gpu_id
                 );
                 // Keep metrics at reasonable baseline values
@@ -931,9 +930,12 @@ impl GpuPerformanceMonitor {
         Ok(())
     }
 
-    #[cfg(feature = "nvbind-support")]
+    #[cfg(feature = "nvidia-support")]
     async fn fetch_real_gpu_metrics(gpu_id: &str) -> Result<GpuMetrics> {
         use std::process::Command as StdCommand;
+
+        let gpu_id = gpu_id.to_string();
+        let query_gpu_id = gpu_id.clone();
 
         // Use nvidia-smi to get real metrics
         let output = tokio::task::spawn_blocking(move || {
@@ -942,7 +944,7 @@ impl GpuPerformanceMonitor {
                     "--query-gpu=utilization.gpu,memory.used,temperature.gpu,power.draw",
                     "--format=csv,noheader,nounits",
                     "-i",
-                    gpu_id,
+                    &query_gpu_id,
                 ])
                 .output()
         })

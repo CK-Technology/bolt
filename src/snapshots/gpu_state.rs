@@ -1,7 +1,6 @@
 //! GPU State Snapshot Support
 //!
-//! Integrates nvbind's GPU snapshot functionality with Bolt's snapshot system
-//! to capture and restore GPU configuration state across snapshots.
+//! Captures GPU configuration state alongside Bolt snapshots.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -62,8 +61,6 @@ pub struct MemoryAllocations {
 #[derive(Debug)]
 pub struct GpuSnapshotManager {
     snapshot_root: std::path::PathBuf,
-    #[cfg(feature = "nvbind-support")]
-    nvbind_manager: Option<nvbind::snapshot::GpuSnapshotManager>,
 }
 
 impl GpuSnapshotManager {
@@ -71,116 +68,14 @@ impl GpuSnapshotManager {
     pub fn new(snapshot_root: impl AsRef<Path>) -> Result<Self> {
         let snapshot_root = snapshot_root.as_ref().to_path_buf();
 
-        #[cfg(feature = "nvbind-support")]
-        let nvbind_manager = {
-            match nvbind::snapshot::GpuSnapshotManager::new(&snapshot_root) {
-                Ok(manager) => {
-                    info!("✅ nvbind GPU snapshot manager initialized");
-                    Some(manager)
-                }
-                Err(e) => {
-                    warn!("⚠️ Failed to initialize nvbind snapshot manager: {}", e);
-                    warn!("   GPU state snapshots will use fallback mode");
-                    None
-                }
-            }
-        };
-
-        Ok(Self {
-            snapshot_root,
-            #[cfg(feature = "nvbind-support")]
-            nvbind_manager,
-        })
+        Ok(Self { snapshot_root })
     }
 
     /// Capture current GPU state for snapshot
     pub async fn capture_gpu_state(&self, snapshot_id: &str) -> Result<GpuSnapshotState> {
         info!("📸 Capturing GPU state for snapshot: {}", snapshot_id);
 
-        #[cfg(feature = "nvbind-support")]
-        {
-            if let Some(ref manager) = self.nvbind_manager {
-                return self.capture_with_nvbind(manager, snapshot_id).await;
-            }
-        }
-
-        // Fallback: capture basic GPU state via nvidia-smi
         self.capture_fallback(snapshot_id).await
-    }
-
-    #[cfg(feature = "nvbind-support")]
-    async fn capture_with_nvbind(
-        &self,
-        manager: &nvbind::snapshot::GpuSnapshotManager,
-        snapshot_id: &str,
-    ) -> Result<GpuSnapshotState> {
-        debug!("Using nvbind to capture GPU state");
-
-        // Create nvbind snapshot
-        let nvbind_snapshot = manager
-            .create_snapshot(snapshot_id)
-            .await
-            .context("Failed to create nvbind GPU snapshot")?;
-
-        // Convert nvbind snapshot to our format
-        let device_states = nvbind_snapshot
-            .device_states
-            .iter()
-            .map(|device| GpuDeviceState {
-                device_id: device.device_id.clone(),
-                device_name: device.device_name.clone(),
-                gpu_clock_mhz: device.gpu_clock_mhz,
-                memory_clock_mhz: device.memory_clock_mhz,
-                temperature_c: device.temperature_c,
-                power_draw_w: device.power_draw_w,
-                power_limit_w: device.power_limit_w,
-                fan_speed_percent: device.fan_speed_percent,
-                performance_mode: device.performance_mode.clone(),
-            })
-            .collect();
-
-        let driver_info = nvbind_snapshot
-            .driver_state
-            .as_ref()
-            .map(|driver| DriverInfo {
-                driver_version: driver.version.clone(),
-                cuda_version: driver.cuda_version.clone(),
-                driver_type: driver.driver_type.clone(),
-            });
-
-        let performance_settings =
-            nvbind_snapshot
-                .performance_settings
-                .as_ref()
-                .map(|perf| PerformanceSettings {
-                    power_profile: perf.power_profile.clone(),
-                    clock_offset_mhz: perf.clock_offset_mhz,
-                    memory_offset_mhz: perf.memory_offset_mhz,
-                    persistence_mode: perf.persistence_mode,
-                });
-
-        let memory_allocations =
-            nvbind_snapshot
-                .memory_state
-                .as_ref()
-                .map(|mem| MemoryAllocations {
-                    total_vram_mb: mem.total_vram_mb,
-                    allocated_vram_mb: mem.allocated_vram_mb,
-                    free_vram_mb: mem.free_vram_mb,
-                });
-
-        info!(
-            "✅ Captured GPU state with {} device(s)",
-            device_states.len()
-        );
-
-        Ok(GpuSnapshotState {
-            captured_at: chrono::Utc::now(),
-            device_states,
-            driver_info,
-            performance_settings,
-            memory_allocations,
-        })
     }
 
     async fn capture_fallback(&self, _snapshot_id: &str) -> Result<GpuSnapshotState> {
@@ -272,35 +167,11 @@ impl GpuSnapshotManager {
     ) -> Result<()> {
         info!("🔄 Restoring GPU state from snapshot: {}", snapshot_id);
 
-        #[cfg(feature = "nvbind-support")]
-        {
-            if let Some(ref manager) = self.nvbind_manager {
-                return self
-                    .restore_with_nvbind(manager, snapshot_id)
-                    .await
-                    .context("Failed to restore GPU state with nvbind");
-            }
-        }
-
-        // Fallback: restore what we can via nvidia-smi
+        debug!(
+            "Recording requested GPU restore for snapshot: {}",
+            snapshot_id
+        );
         self.restore_fallback(gpu_state).await
-    }
-
-    #[cfg(feature = "nvbind-support")]
-    async fn restore_with_nvbind(
-        &self,
-        manager: &nvbind::snapshot::GpuSnapshotManager,
-        snapshot_id: &str,
-    ) -> Result<()> {
-        debug!("Using nvbind to restore GPU state");
-
-        manager
-            .restore_snapshot(snapshot_id)
-            .await
-            .context("nvbind GPU state restore failed")?;
-
-        info!("✅ GPU state restored successfully via nvbind");
-        Ok(())
     }
 
     async fn restore_fallback(&self, gpu_state: &GpuSnapshotState) -> Result<()> {
@@ -320,7 +191,7 @@ impl GpuSnapshotManager {
         }
 
         warn!("⚠️  Fallback mode: GPU state restore is informational only");
-        warn!("   For full GPU state restoration, enable nvbind-support feature");
+        warn!("   Full GPU state restoration needs native snapshot support");
 
         Ok(())
     }

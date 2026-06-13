@@ -1,67 +1,55 @@
 # Bolt Documentation
 
-Welcome to the Bolt container runtime documentation! This directory contains comprehensive documentation organized by category.
+## Quick Links
 
-## 📚 Documentation Structure
+| Document | Description |
+|----------|-------------|
+| [Quickstart](getting-started/quickstart.md) | Installation and first container |
+| [CLI Reference](reference/cli.md) | Commands and options |
+| [Rust API](reference/rust-api.md) | Programmatic container management |
+| [Native Service Tools](reference/native-tools.md) | Built-in docker-mcp-like service tooling |
+| [GPU Overview](gpu/overview.md) | Native NVIDIA, AMD, and Intel GPU passthrough |
+| [Gaming Workloads](workloads/gaming.md) | Gaming profiles and optimization |
+| [AI/ML Workloads](workloads/ai-ml.md) | Ollama, training, and inference |
+| [Surge Orchestration](operations/orchestration.md) | Multi-service Boltfile stacks |
+| [Networking](operations/networking.md) | QUIC networks, DNS, and ports |
+| [Snapshots](operations/snapshots.md) | BTRFS/ZFS automation |
 
-### 📋 Planning & Roadmap
-- **[TODO.md](planning/TODO.md)** - Development roadmap and priorities
-- **[BOLT_WISHLIST.md](planning/BOLT_WISHLIST.md)** - Feature wishlist and future ideas
+## Overview
 
-### 🏗️ Architecture
-- **[ECOSYSTEM_ARCHITECTURE.md](architecture/ECOSYSTEM_ARCHITECTURE.md)** - Overall ecosystem design
-- **[INTEGRATION.md](architecture/INTEGRATION.md)** - Integration patterns and approaches
-- **[POSITIONING.md](architecture/POSITIONING.md)** - Market positioning and differentiation
+Bolt is a container runtime with native GPU support. The NVIDIA nvbind path is built into Bolt, so it does not require the external nvbind crate or nvidia-container-toolkit.
 
-### ⚡ Features
-- **[GPU_SUPPORT.md](features/GPU_SUPPORT.md)** - GPU passthrough and management
-- **[GAMING.md](features/GAMING.md)** - Gaming-specific optimizations
-- **[NETWORKING_IDEA.md](features/NETWORKING_IDEA.md)** - QUIC networking implementation
+**Core features:**
+- Multi-vendor GPU passthrough (NVIDIA, AMD, Intel)
+- CDI v0.6.0 specification generation
+- Gaming and AI/ML profile system
+- Surge orchestration (docker-compose alternative)
+- BTRFS/ZFS snapshot automation
+- QUIC networking
+- Docker-compatible CLI
 
-### 🔌 Integrations
-- **[BOLT_MCP.md](integrations/BOLT_MCP.md)** - Model Context Protocol integration
-- **[BOLT_INTEGRATION.md](integrations/BOLT_INTEGRATION.md)** - General integration guide
-- **[GHOSTFORGE.md](integrations/GHOSTFORGE.md)** - GhostForge integration
-- **[GHOST_INTEGRATIONS.md](integrations/GHOST_INTEGRATIONS.md)** - Ghost ecosystem integrations
+## Architecture
 
-### 🎮 nvbind Integration
-- **[NVBIND_NEW.md](nvbind/NVBIND_NEW.md)** - nvbind integration overview
-- **[NVBIND_INTEGRATION_SUMMARY.md](nvbind/NVBIND_INTEGRATION_SUMMARY.md)** - Integration status
-- **[NVBIND_DEV_RESPONSE.md](nvbind/NVBIND_DEV_RESPONSE.md)** - Developer responses
-- **[NVCONTROL.md](nvbind/NVCONTROL.md)** - NVIDIA control integration
+```
+bolt
+├── Runtime        # OCI container execution
+├── GPU Manager    # Multi-vendor GPU detection
+│   ├── NVIDIA     # Built-in nvbind support
+│   ├── AMD        # ROCm integration
+│   └── Intel      # oneAPI/Level Zero
+├── Profiles       # Gaming & AI optimizations
+├── CDI            # Container Device Interface
+├── Surge          # Orchestration (Boltfile.toml)
+└── Snapshots      # BTRFS/ZFS automation
+```
 
-### 🔧 API Reference
-- **[API.md](api/API.md)** - Complete API documentation
+## Structure
 
-### 🎯 MCP Integration
-- **[ARCHITECTURE.md](mcp/ARCHITECTURE.md)** - MCP architecture design
-- **[BOLTFILE_SPEC.md](mcp/BOLTFILE_SPEC.md)** - Boltfile specification
-- **[EXAMPLES.md](mcp/EXAMPLES.md)** - MCP usage examples
-- **[GETTING_STARTED.md](mcp/GETTING_STARTED.md)** - Quick start guide
-- **[RESOURCES.md](mcp/RESOURCES.md)** - Resource management
-- **[TESTING.md](mcp/TESTING.md)** - Testing guide
-- **[TOOLS.md](mcp/TOOLS.md)** - Available tools
-
-## 📦 Archive
-
-Historical documentation and old plans are available in [`../archive/`](../archive/):
-- **old-plans/** - Completed integration plans and summaries
-- **old-roadmaps/** - Previous roadmap versions
-
-## 🚀 Quick Links
-
-- [Main README](../README.md) - Project overview
-- [CHANGELOG](../CHANGELOG.md) - Version history
-- [Current Roadmap](planning/TODO.md) - What's next
-
-## 📝 Contributing to Documentation
-
-When adding new documentation:
-1. Place it in the appropriate category directory
-2. Update this README with a link
-3. Use clear, descriptive filenames
-4. Include a brief summary in the link
-
----
-
-*Last Updated: 2025-10-18*
+```
+docs/
+├── getting-started/
+├── gpu/
+├── operations/
+├── reference/
+└── workloads/
+```

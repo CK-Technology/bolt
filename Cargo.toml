@@ -1,9 +1,9 @@
 [workspace]
-members = [".", "mcp"]
+members = ["."]
 
 [package]
 name = "bolt"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Performance-first Rust container runtime with revolutionary networking, GPU optimization, and intelligent resource management"
 license = "MIT"
@@ -14,7 +14,7 @@ documentation = "https://github.com/CK-Technology/bolt#api"
 readme = "README.md"
 keywords = ["containers", "performance", "gpu", "quic", "networking", "optimization"]
 categories = ["virtualization", "development-tools", "network-programming"]
-rust-version = "1.85"
+rust-version = "1.91"
 
 [lib]
 name = "bolt"
@@ -84,7 +84,7 @@ sha2 = "0.10"
 blake3 = "1.5"
 # Compression
 zstd = "0.13"
-tar = "0.4"
+tar = "0.4.45"
 flate2 = "1.0"
 # Build isolation
 # sandbox = "0.2"  # May not be available
@@ -151,23 +151,18 @@ hex = "0.4"
 # Async trait support for plugins
 async-trait = "0.1"
 # Bytes manipulation
-bytes = "1.5"
-# nvbind integration for sub-microsecond GPU passthrough
-nvbind = { git = "https://github.com/ghostkellz/nvbind", features = ["bolt"], optional = true, default-features = false }
+bytes = "1.11"
+# GPU passthrough support (native implementation)
 # Monitoring and observability
 warp = "0.3"
 hostname = "0.4"
+axum = { version = "0.7", features = ["ws"], optional = true }
+tower-http = { version = "0.5", features = ["cors"], optional = true }
 # Tracing and logging
 tracing-appender = "0.2"
 # Metrics and monitoring
 # opentelemetry = { version = "0.20", features = ["rt-tokio"] }
 # opentelemetry-jaeger = { version = "0.19", features = ["rt-tokio"] }
-
-# MCP (Model Context Protocol) integration via Glyph
-glyph = { git = "https://github.com/ghostkellz/glyph", features = ["server", "websocket", "metrics"], optional = true }
-
-# OMEN AI Router (Phase 3)
-omen = { git = "https://github.com/ghostkellz/omen", optional = true }
 
 # gRPC framework (for gRPC-over-QUIC)
 tonic = { version = "0.11", optional = true }
@@ -187,7 +182,7 @@ tokio-test = "0.4"
 test-case = "3.1"
 pretty_assertions = "1.4"
 mockall = "0.12"
-bytes = "1.5"
+bytes = "1.11"
 serde_yaml = "0.9"
 num_cpus = "1.16"
 
@@ -215,12 +210,12 @@ oci-runtime = ["oci-spec", "nix"]
 # Optional GPU support
 nvidia-support = ["nvml-wrapper"]  # Enable NVIDIA ML management
 amd-support = []     # Enable with ROCm support
-nvbind-support = ["nvbind"]  # Enable nvbind runtime for sub-microsecond GPU passthrough
+intel-support = []   # Enable with Intel Arc support (future)
+ai-ml = []           # Enable AI/ML integration tests
+snapshots = []       # Enable snapshot integration tests
 
-# MCP integration
-mcp = ["glyph"]  # Enable Model Context Protocol support
-omen = ["dep:omen", "mcp"]  # Enable OMEN AI router integration (requires MCP)
-websocket = []  # Enable WebSocket support for real-time metrics streaming
+# WebSocket support
+websocket = ["axum", "tower-http"]  # Enable WebSocket support for real-time metrics streaming
 
 # gRPC integration (hyper is always included via hyperlocal dependency)
 grpc = ["tonic", "prost", "tower", "hyper-util", "http", "http-body-util"]  # Enable gRPC-over-QUIC support

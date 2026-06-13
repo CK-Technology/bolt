@@ -209,20 +209,19 @@ impl HotReloadManager {
                     watchers.get(&env_id).cloned()
                 };
 
-                if let Some(mut watcher) = watcher {
-                    if let Ok(changes) = Self::detect_file_changes(&mut watcher).await {
-                        if !changes.is_empty() {
-                            let mut queue = reload_queue.lock().await;
-                            for change in changes {
-                                queue.push(ReloadTask {
-                                    env_id: env_id.clone(),
-                                    file_path: change.0,
-                                    change_type: change.1,
-                                    timestamp: Instant::now(),
-                                    language: change.2,
-                                });
-                            }
-                        }
+                if let Some(mut watcher) = watcher
+                    && let Ok(changes) = Self::detect_file_changes(&mut watcher).await
+                    && !changes.is_empty()
+                {
+                    let mut queue = reload_queue.lock().await;
+                    for change in changes {
+                        queue.push(ReloadTask {
+                            env_id: env_id.clone(),
+                            file_path: change.0,
+                            change_type: change.1,
+                            timestamp: Instant::now(),
+                            language: change.2,
+                        });
                     }
                 }
             }

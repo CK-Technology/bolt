@@ -737,24 +737,24 @@ impl QUICSocketProxy {
             let rules_snapshot = rules.read().await.clone();
 
             for (name, rule) in rules_snapshot {
-                if let Some(ref health_check) = rule.health_check {
-                    if health_check.enabled {
-                        let result =
-                            Self::perform_health_check(&rule.target_address, health_check).await;
-                        match result {
-                            Ok(true) => {
-                                debug!("✅ Health check passed for {}", name);
-                            }
-                            Ok(false) => {
-                                warn!("⚠️ Health check failed for {}", name);
-                                let mut stats = stats.write().await;
-                                stats.errors_total += 1;
-                            }
-                            Err(e) => {
-                                error!("❌ Health check error for {}: {}", name, e);
-                                let mut stats = stats.write().await;
-                                stats.errors_total += 1;
-                            }
+                if let Some(ref health_check) = rule.health_check
+                    && health_check.enabled
+                {
+                    let result =
+                        Self::perform_health_check(&rule.target_address, health_check).await;
+                    match result {
+                        Ok(true) => {
+                            debug!("✅ Health check passed for {}", name);
+                        }
+                        Ok(false) => {
+                            warn!("⚠️ Health check failed for {}", name);
+                            let mut stats = stats.write().await;
+                            stats.errors_total += 1;
+                        }
+                        Err(e) => {
+                            error!("❌ Health check error for {}: {}", name, e);
+                            let mut stats = stats.write().await;
+                            stats.errors_total += 1;
                         }
                     }
                 }

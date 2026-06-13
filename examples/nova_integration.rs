@@ -5,7 +5,6 @@
 
 use bolt::api::*;
 use std::collections::HashMap;
-use tokio;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -192,7 +191,9 @@ async fn main() -> anyhow::Result<()> {
 /// Example of how Nova would integrate this into its GUI
 pub struct NovaGuiIntegration {
     runtime: BoltNovaRuntime,
+    #[allow(dead_code)]
     bridge_manager: NovaBridgeManager,
+    #[allow(dead_code)]
     service_discovery: NovaServiceDiscovery,
 }
 
@@ -206,6 +207,7 @@ impl NovaGuiIntegration {
     }
 
     /// Create a new container from Nova GUI
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_container_from_gui(
         &self,
         name: String,

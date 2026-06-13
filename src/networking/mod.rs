@@ -724,35 +724,35 @@ impl NetworkManager {
             .args(["link", "show"])
             .output();
 
-        if let Ok(result) = output {
-            if result.status.success() {
-                let output_str = String::from_utf8_lossy(&result.stdout);
+        if let Ok(result) = output
+            && result.status.success()
+        {
+            let output_str = String::from_utf8_lossy(&result.stdout);
 
-                // Parse bridge interfaces
-                for line in output_str.lines() {
-                    if line.contains("br-") && line.contains("state UP") {
-                        if let Some(name_start) = line.find("br-") {
-                            if let Some(name_end) = line[name_start..].find(':') {
-                                let bridge_name = &line[name_start..name_start + name_end];
-                                let network_name =
-                                    bridge_name.strip_prefix("br-").unwrap_or(bridge_name);
+            // Parse bridge interfaces
+            for line in output_str.lines() {
+                if line.contains("br-")
+                    && line.contains("state UP")
+                    && let Some(name_start) = line.find("br-")
+                    && let Some(name_end) = line[name_start..].find(':')
+                {
+                    let bridge_name = &line[name_start..name_start + name_end];
+                    let network_name = bridge_name.strip_prefix("br-").unwrap_or(bridge_name);
 
-                                networks.push(BoltNetworkInfo {
-                                    id: format!(
-                                        "{:x}",
-                                        bridge_name.as_bytes().iter().fold(0u64, |acc, &b| acc
-                                            .wrapping_mul(31)
-                                            .wrapping_add(b as u64))
-                                    ),
-                                    name: network_name.to_string(),
-                                    driver: "bolt".to_string(),
-                                    scope: "local".to_string(),
-                                    subnet: "172.20.0.0/16".to_string(), // Would be detected from interface
-                                    gateway: "172.20.0.1 (QUIC)".to_string(),
-                                });
-                            }
-                        }
-                    }
+                    networks.push(BoltNetworkInfo {
+                        id: format!(
+                            "{:x}",
+                            bridge_name
+                                .as_bytes()
+                                .iter()
+                                .fold(0u64, |acc, &b| acc.wrapping_mul(31).wrapping_add(b as u64))
+                        ),
+                        name: network_name.to_string(),
+                        driver: "bolt".to_string(),
+                        scope: "local".to_string(),
+                        subnet: "172.20.0.0/16".to_string(), // Would be detected from interface
+                        gateway: "172.20.0.1 (QUIC)".to_string(),
+                    });
                 }
             }
         }
@@ -845,13 +845,13 @@ impl NetworkManager {
                         if line.contains("veth") && line.contains("master") {
                             // Parse container ID from veth interface name
                             // This is a simplified implementation
-                            if let Some(start) = line.find("veth") {
-                                if let Some(colon) = line[start..].find(':') {
-                                    let interface_name = &line[start..start + colon];
-                                    // Extract container ID from interface name (simplified)
-                                    if interface_name.len() > 8 {
-                                        containers.push(interface_name[4..].to_string());
-                                    }
+                            if let Some(start) = line.find("veth")
+                                && let Some(colon) = line[start..].find(':')
+                            {
+                                let interface_name = &line[start..start + colon];
+                                // Extract container ID from interface name (simplified)
+                                if interface_name.len() > 8 {
+                                    containers.push(interface_name[4..].to_string());
                                 }
                             }
                         }

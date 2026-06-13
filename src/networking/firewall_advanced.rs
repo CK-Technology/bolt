@@ -439,11 +439,11 @@ impl AdvancedFirewallManager {
                 }
 
                 // Check for port conflicts
-                if let Some(port) = self.extract_port_from_rule(line) {
-                    if self.port_manager.allocated_ports.contains_key(&port) {
-                        warn!("⚠️ Port conflict detected: {}", port);
-                        port_conflicts.push(port);
-                    }
+                if let Some(port) = self.extract_port_from_rule(line)
+                    && self.port_manager.allocated_ports.contains_key(&port)
+                {
+                    warn!("⚠️ Port conflict detected: {}", port);
+                    port_conflicts.push(port);
                 }
             }
         }
@@ -620,15 +620,15 @@ impl AdvancedFirewallManager {
 
         // Update iptables rules
         for rule in &mut self.iptables_engine.rules {
-            if let Some(ref mut dport) = rule.dport {
-                if dport == &old_port.to_string() {
-                    *dport = new_port.to_string();
-                }
+            if let Some(ref mut dport) = rule.dport
+                && dport == &old_port.to_string()
+            {
+                *dport = new_port.to_string();
             }
-            if let Some(ref mut sport) = rule.sport {
-                if sport == &old_port.to_string() {
-                    *sport = new_port.to_string();
-                }
+            if let Some(ref mut sport) = rule.sport
+                && sport == &old_port.to_string()
+            {
+                *sport = new_port.to_string();
             }
         }
 

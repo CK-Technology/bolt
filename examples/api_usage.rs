@@ -30,9 +30,11 @@ async fn main() -> Result<()> {
                 dlss: Some(true),
                 raytracing: Some(true),
                 cuda: Some(false),
+                ..Default::default()
             }),
             amd: None,
             passthrough: Some(true),
+            ..Default::default()
         }),
         audio: Some(bolt::config::AudioConfig {
             system: "pipewire".to_string(),
@@ -49,6 +51,7 @@ async fn main() -> Result<()> {
             nice_level: Some(-10),
             rt_priority: Some(50),
         }),
+        ..Default::default()
     };
 
     // Example 3: Building Boltfiles programmatically

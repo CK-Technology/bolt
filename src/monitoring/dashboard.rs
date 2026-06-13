@@ -93,13 +93,12 @@ impl MetricsDashboard {
 
     fn get_system_cpu_percent() -> f64 {
         // Simple CPU usage estimation from load average
-        if let Ok(loadavg) = std::fs::read_to_string("/proc/loadavg") {
-            if let Some(load) = loadavg.split_whitespace().next() {
-                if let Ok(load_val) = load.parse::<f64>() {
-                    let num_cpus = num_cpus::get() as f64;
-                    return (load_val / num_cpus * 100.0).min(100.0);
-                }
-            }
+        if let Ok(loadavg) = std::fs::read_to_string("/proc/loadavg")
+            && let Some(load) = loadavg.split_whitespace().next()
+            && let Ok(load_val) = load.parse::<f64>()
+        {
+            let num_cpus = num_cpus::get() as f64;
+            return (load_val / num_cpus * 100.0).min(100.0);
         }
         0.0
     }
@@ -111,14 +110,14 @@ impl MetricsDashboard {
             let mut available = 0u64;
 
             for line in meminfo.lines() {
-                if line.starts_with("MemTotal:") {
-                    if let Some(val) = line.split_whitespace().nth(1) {
-                        total = val.parse::<u64>().unwrap_or(0) / 1024; // Convert KB to MB
-                    }
-                } else if line.starts_with("MemAvailable:") {
-                    if let Some(val) = line.split_whitespace().nth(1) {
-                        available = val.parse::<u64>().unwrap_or(0) / 1024;
-                    }
+                if line.starts_with("MemTotal:")
+                    && let Some(val) = line.split_whitespace().nth(1)
+                {
+                    total = val.parse::<u64>().unwrap_or(0) / 1024; // Convert KB to MB
+                } else if line.starts_with("MemAvailable:")
+                    && let Some(val) = line.split_whitespace().nth(1)
+                {
+                    available = val.parse::<u64>().unwrap_or(0) / 1024;
                 }
             }
 

@@ -419,14 +419,14 @@ impl NvidiaManager {
         info!("Configuring advanced NVIDIA passthrough for VM: {}", vm_id);
 
         // Check driver requirements
-        if let Some(ref required) = config.require_driver {
-            if self.driver_version < *required {
-                return Err(anyhow::anyhow!(
-                    "Driver version {} required, but {} installed",
-                    required,
-                    self.driver_version
-                ));
-            }
+        if let Some(ref required) = config.require_driver
+            && self.driver_version < *required
+        {
+            return Err(anyhow::anyhow!(
+                "Driver version {} required, but {} installed",
+                required,
+                self.driver_version
+            ));
         }
 
         // Check CUDA requirements

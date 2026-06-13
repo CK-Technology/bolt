@@ -4,7 +4,7 @@ set -euo pipefail
 # Bolt Container Runtime Installation Script
 # Supports Linux distributions with automatic detection
 
-BOLT_VERSION="0.1.0"
+BOLT_VERSION="0.1.1"
 BOLT_REPO="https://github.com/CK-Technology/bolt"
 INSTALL_DIR="/usr/local/bin"
 SERVICE_DIR="/etc/systemd/system"
@@ -35,13 +35,44 @@ info() {
 }
 
 detect_os() {
-    if [[ -f /etc/os-release ]]; then
-        . /etc/os-release
-        OS=$ID
-        VERSION=$VERSION_ID
-    else
+    if [[ ! -f /etc/os-release ]]; then
         error "Cannot detect OS. /etc/os-release not found."
     fi
+
+    . /etc/os-release
+    OS=$ID
+    OS_LIKE=${ID_LIKE:-}
+    VERSION=${VERSION_ID:-}
+
+    # Resolve the dependency family for the detected distro, mapping common
+    # derivatives onto their upstream package manager (Arch, Debian/Ubuntu,
+    # Fedora). PKG_FAMILY drives install_dependencies.
+    case "$OS" in
+        arch|manjaro|endeavouros|cachyos|garuda|artix)
+            PKG_FAMILY="arch"
+            ;;
+        debian|ubuntu|pop|linuxmint|elementary|zorin|kali|raspbian)
+            PKG_FAMILY="debian"
+            ;;
+        fedora|rhel|centos|rocky|almalinux|nobara)
+            PKG_FAMILY="fedora"
+            ;;
+        opensuse*|sles)
+            PKG_FAMILY="suse"
+            ;;
+        *)
+            # Fall back to ID_LIKE for unlisted derivatives.
+            case " $OS_LIKE " in
+                *" arch "*)              PKG_FAMILY="arch" ;;
+                *" debian "*|*" ubuntu "*) PKG_FAMILY="debian" ;;
+                *" fedora "*|*" rhel "*|*" centos "*) PKG_FAMILY="fedora" ;;
+                *" suse "*)              PKG_FAMILY="suse" ;;
+                *)                        PKG_FAMILY="unknown" ;;
+            esac
+            ;;
+    esac
+
+    log "✓ Detected ${PRETTY_NAME:-$OS} (family: $PKG_FAMILY)"
 }
 
 check_requirements() {
@@ -78,8 +109,8 @@ check_requirements() {
 install_dependencies() {
     log "Installing system dependencies..."
 
-    case $OS in
-        ubuntu|debian)
+    case $PKG_FAMILY in
+        debian)
             apt-get update
             apt-get install -y \
                 curl \
@@ -92,7 +123,7 @@ install_dependencies() {
                 libxkbcommon-dev \
                 libxcb1-dev
             ;;
-        fedora|centos|rhel)
+        fedora)
             if command -v dnf &> /dev/null; then
                 dnf install -y \
                     curl \
@@ -123,7 +154,7 @@ install_dependencies() {
                 libxkbcommon \
                 libxcb
             ;;
-        opensuse|sles)
+        suse)
             zypper install -y \
                 curl \
                 wget \
@@ -134,7 +165,7 @@ install_dependencies() {
                 libxcb-devel
             ;;
         *)
-            warn "Unknown OS: $OS. Please install dependencies manually."
+            warn "Unknown OS: ${PRETTY_NAME:-$OS}. Please install dependencies manually."
             ;;
     esac
 

@@ -88,42 +88,42 @@ impl AmdDevice {
             }
 
             // Parse: device, ID, Name, VRAM
-            if let Some(device_str) = parts.first().and_then(|s| s.strip_prefix("card")) {
-                if let Ok(index) = device_str.parse::<u32>() {
-                    let device_id = parts.get(1).unwrap_or(&"Unknown").to_string();
-                    let name = parts.get(2).unwrap_or(&"AMD GPU").to_string();
-                    let vram_str = parts.get(3).unwrap_or(&"0");
-                    let vram_mb = vram_str
-                        .replace("MB", "")
-                        .trim()
-                        .parse::<u64>()
-                        .unwrap_or(0);
+            if let Some(device_str) = parts.first().and_then(|s| s.strip_prefix("card"))
+                && let Ok(index) = device_str.parse::<u32>()
+            {
+                let device_id = parts.get(1).unwrap_or(&"Unknown").to_string();
+                let name = parts.get(2).unwrap_or(&"AMD GPU").to_string();
+                let vram_str = parts.get(3).unwrap_or(&"0");
+                let vram_mb = vram_str
+                    .replace("MB", "")
+                    .trim()
+                    .parse::<u64>()
+                    .unwrap_or(0);
 
-                    // Get PCI bus ID
-                    let pci_output = Command::new(&rocm_smi)
-                        .arg("--showbus")
-                        .arg("--device")
-                        .arg(index.to_string())
-                        .output()
-                        .ok();
+                // Get PCI bus ID
+                let pci_output = Command::new(&rocm_smi)
+                    .arg("--showbus")
+                    .arg("--device")
+                    .arg(index.to_string())
+                    .output()
+                    .ok();
 
-                    let pci_bus = pci_output
-                        .and_then(|out| {
-                            String::from_utf8(out.stdout)
-                                .ok()
-                                .and_then(|s| s.lines().nth(1).map(|l| l.trim().to_string()))
-                        })
-                        .unwrap_or_else(|| format!("Unknown:{}", index));
+                let pci_bus = pci_output
+                    .and_then(|out| {
+                        String::from_utf8(out.stdout)
+                            .ok()
+                            .and_then(|s| s.lines().nth(1).map(|l| l.trim().to_string()))
+                    })
+                    .unwrap_or_else(|| format!("Unknown:{}", index));
 
-                    devices.push(Self {
-                        index,
-                        device_id,
-                        name,
-                        vram_mb,
-                        pci_bus,
-                        rocm_smi_path: rocm_smi.clone(),
-                    });
-                }
+                devices.push(Self {
+                    index,
+                    device_id,
+                    name,
+                    vram_mb,
+                    pci_bus,
+                    rocm_smi_path: rocm_smi.clone(),
+                });
             }
         }
 
@@ -182,40 +182,39 @@ impl AmdDevice {
             // Real implementation would match column names
             if parts.len() > 1 {
                 // GPU utilization (%)
-                if let Some(util_str) = parts.get(1) {
-                    if let Ok(util) = util_str.replace('%', "").trim().parse::<f32>() {
-                        gpu_util = util;
-                    }
+                if let Some(util_str) = parts.get(1)
+                    && let Ok(util) = util_str.replace('%', "").trim().parse::<f32>()
+                {
+                    gpu_util = util;
                 }
 
                 // Memory usage
-                if let Some(mem_str) = parts.get(2) {
-                    if let Ok(mem) = mem_str.replace("MB", "").trim().parse::<u64>() {
-                        memory_used = mem;
-                    }
+                if let Some(mem_str) = parts.get(2)
+                    && let Ok(mem) = mem_str.replace("MB", "").trim().parse::<u64>()
+                {
+                    memory_used = mem;
                 }
 
                 // Temperature
-                if let Some(temp_str) = parts.get(3) {
-                    if let Ok(temp) = temp_str.replace(['C', '°'], "").trim().parse::<f32>() {
-                        temperature = temp;
-                    }
+                if let Some(temp_str) = parts.get(3)
+                    && let Ok(temp) = temp_str.replace(['C', '°'], "").trim().parse::<f32>()
+                {
+                    temperature = temp;
                 }
 
                 // Power
-                if let Some(power_str) = parts.get(4) {
-                    if let Ok(power) = power_str.replace('W', "").trim().parse::<f32>() {
-                        power_draw = power;
-                    }
+                if let Some(power_str) = parts.get(4)
+                    && let Ok(power) = power_str.replace('W', "").trim().parse::<f32>()
+                {
+                    power_draw = power;
                 }
 
                 // Clocks
-                if parts.len() > 6 {
-                    if let Some(clock_str) = parts.get(6) {
-                        if let Ok(clock) = clock_str.replace("MHz", "").trim().parse::<u32>() {
-                            clock_gpu = clock;
-                        }
-                    }
+                if parts.len() > 6
+                    && let Some(clock_str) = parts.get(6)
+                    && let Ok(clock) = clock_str.replace("MHz", "").trim().parse::<u32>()
+                {
+                    clock_gpu = clock;
                 }
             }
         }
@@ -265,15 +264,15 @@ impl AmdDevice {
             }
 
             let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 2 {
-                if let Ok(pid) = parts[0].parse::<u32>() {
-                    let name = parts[1..].join(" ");
-                    processes.push(ComputeProcess {
-                        pid,
-                        name,
-                        memory_used_mb: 0, // Would need additional parsing
-                    });
-                }
+            if parts.len() >= 2
+                && let Ok(pid) = parts[0].parse::<u32>()
+            {
+                let name = parts[1..].join(" ");
+                processes.push(ComputeProcess {
+                    pid,
+                    name,
+                    memory_used_mb: 0, // Would need additional parsing
+                });
             }
         }
 

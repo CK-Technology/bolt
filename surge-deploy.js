@@ -2,14 +2,14 @@
 
 /**
  * Surge.sh deployment script for Bolt
- * Deploys static content to surge with bolt.cktech.org domain
+ * Deploys static content to surge with bolt.cktech.sh domain
  */
 
 const { execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
-const SURGE_DOMAIN = "bolt.cktech.org";
+const SURGE_DOMAIN = "bolt.cktech.sh";
 const BUILD_DIR = "./dist";
 const PACKAGE_DIR = "./packages";
 
@@ -100,7 +100,7 @@ function generateStaticSite() {
             <div class="bg-white p-6 rounded-lg shadow-lg">
                 <h2 class="text-2xl font-bold mb-4 text-gray-800">🚀 Quick Install</h2>
                 <div class="code-block p-4 rounded-lg font-mono text-sm">
-                    curl -sSL https://bolt.cktech.org/install.sh | sudo bash
+                    curl -sSL https://bolt.cktech.sh | sudo bash
                 </div>
                 <p class="mt-4 text-gray-600">One-line installation with automatic dependency detection</p>
             </div>
@@ -141,7 +141,7 @@ function generateStaticSite() {
                 <div>
                     <h3 class="text-lg font-semibold mb-2">1. Download the installer</h3>
                     <div class="code-block p-4 rounded-lg font-mono text-sm">
-                        wget https://bolt.cktech.org/install.sh<br>
+                        curl -fsSL https://bolt.cktech.sh -o install.sh<br>
                         chmod +x install.sh
                     </div>
                 </div>
@@ -210,7 +210,7 @@ function generateStaticSite() {
                 # Install from AUR<br>
                 yay -S bolt-bin<br><br>
                 # Or install manually<br>
-                curl -sSL https://bolt.cktech.org/install.sh | sudo bash
+                curl -sSL https://bolt.cktech.sh | sudo bash
             </div>
         </div>
         <a href="/" class="inline-block mt-4 text-blue-600 hover:underline">← Back to main page</a>
@@ -233,8 +233,8 @@ function generateStaticSite() {
             <h2 class="text-xl font-bold mb-4">Installation</h2>
             <div class="bg-gray-800 text-green-400 p-4 rounded font-mono">
                 # Add repository<br>
-                curl -fsSL https://bolt.cktech.org/packages/debian/key.gpg | sudo apt-key add -<br>
-                echo "deb https://bolt.cktech.org/packages/debian stable main" | sudo tee /etc/apt/sources.list.d/bolt.list<br><br>
+                curl -fsSL https://bolt.cktech.sh/packages/debian/key.gpg | sudo apt-key add -<br>
+                echo "deb https://bolt.cktech.sh/packages/debian stable main" | sudo tee /etc/apt/sources.list.d/bolt.list<br><br>
                 # Install package<br>
                 sudo apt update<br>
                 sudo apt install bolt

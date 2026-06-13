@@ -1,20 +1,14 @@
 archive/
-
+tasks/
 CLAUDE.md
-TODO.md
-PRIORITY.md
-PRIORITY_GP.md
-NVBIND_DEV_RESPONSE.md
 
 # Rust
-/target/
+target/
 **/*.rs.bk
 *.pdb
-Cargo.lock
 
 # Build artifacts
 debug/
-target/
 .cargo/
 *.o
 *.so

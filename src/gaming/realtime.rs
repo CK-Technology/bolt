@@ -134,10 +134,10 @@ impl RealtimeOptimizer {
         }
 
         // Save huge pages count
-        if let Ok(count) = fs::read_to_string("/proc/sys/vm/nr_hugepages") {
-            if let Ok(parsed_count) = count.trim().parse::<u32>() {
-                self.original_settings.huge_pages_count = Some(parsed_count);
-            }
+        if let Ok(count) = fs::read_to_string("/proc/sys/vm/nr_hugepages")
+            && let Ok(parsed_count) = count.trim().parse::<u32>()
+        {
+            self.original_settings.huge_pages_count = Some(parsed_count);
         }
 
         // Save NUMA balancing setting
@@ -524,10 +524,10 @@ impl RealtimeOptimizer {
         }
 
         // Restore huge pages
-        if let Some(count) = self.original_settings.huge_pages_count {
-            if let Err(e) = fs::write("/proc/sys/vm/nr_hugepages", count.to_string()) {
-                warn!("Failed to restore huge pages: {}", e);
-            }
+        if let Some(count) = self.original_settings.huge_pages_count
+            && let Err(e) = fs::write("/proc/sys/vm/nr_hugepages", count.to_string())
+        {
+            warn!("Failed to restore huge pages: {}", e);
         }
 
         // Restore NUMA balancing

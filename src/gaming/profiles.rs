@@ -477,11 +477,10 @@ impl GamingProfileManager {
         // 3. Set up Wine/Proton configuration
         // 4. Apply performance optimizations
 
-        #[cfg(feature = "nvbind-support")]
+        #[cfg(feature = "nvidia-support")]
         {
-            // Use nvbind to apply profile
-            // nvbind::apply_gaming_profile(container_id, profile).await?;
-            info!("   Using nvbind for GPU configuration");
+            // Use native GPU runtime to apply profile
+            info!("   Using native GPU runtime for configuration");
         }
 
         info!("✅ Gaming profile applied successfully");

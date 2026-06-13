@@ -97,7 +97,7 @@ pub async fn list_snapshots(config: &SnapshotConfig) -> Result<Vec<Snapshot>> {
         }
     }
 
-    snapshots.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    snapshots.sort_by_key(|snapshot| std::cmp::Reverse(snapshot.timestamp));
     Ok(snapshots)
 }
 
@@ -196,12 +196,12 @@ async fn get_snapshot_size(snapshot_path: &PathBuf) -> Result<u64> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    if let Some(line) = stdout.lines().next() {
-        if let Some(size_str) = line.split_whitespace().next() {
-            return size_str
-                .parse::<u64>()
-                .context("Failed to parse snapshot size");
-        }
+    if let Some(line) = stdout.lines().next()
+        && let Some(size_str) = line.split_whitespace().next()
+    {
+        return size_str
+            .parse::<u64>()
+            .context("Failed to parse snapshot size");
     }
 
     Err(anyhow::anyhow!("Could not determine snapshot size"))

@@ -6,15 +6,18 @@ use std::process::Command;
 use tracing::{debug, info, warn};
 
 pub mod amd;
+pub mod intel;
 pub mod nvbind;
 pub mod nvidia;
 pub mod nvml_helper;
+pub mod profiles;
 pub mod velocity;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GPUManager {
     pub nvidia: Option<nvidia::NvidiaManager>,
     pub amd: Option<amd::AmdManager>,
+    pub intel: Option<intel::IntelManager>,
     pub nvbind: Option<nvbind::NvbindManager>,
 }
 
@@ -41,6 +44,7 @@ impl GPUManager {
 
         let nvidia = nvidia::NvidiaManager::detect().ok();
         let amd = amd::AmdManager::detect().ok();
+        let intel = intel::IntelManager::detect().ok();
         let nvbind = nvbind::NvbindManager::detect().ok();
 
         if nvidia.is_some() {
@@ -49,6 +53,9 @@ impl GPUManager {
         if amd.is_some() {
             info!("✅ AMD GPU support detected");
         }
+        if intel.is_some() {
+            info!("✅ Intel GPU support detected");
+        }
         if nvbind.is_some() {
             info!("✅ nvbind GPU runtime detected");
         }
@@ -56,6 +63,7 @@ impl GPUManager {
         Ok(Self {
             nvidia,
             amd,
+            intel,
             nvbind,
         })
     }
@@ -68,18 +76,18 @@ impl GPUManager {
         info!("🚀 Setting up GPU access for container: {}", container_id);
 
         // Check if nvbind runtime is preferred
-        if let Some(ref runtime) = gpu_config.runtime {
-            if runtime == "nvbind" {
-                if let Some(ref nvbind_manager) = self.nvbind {
-                    info!("  Using nvbind GPU runtime (sub-microsecond passthrough)");
-                    return nvbind_manager
-                        .setup_container_access(container_id, gpu_config)
-                        .await;
-                } else {
-                    warn!(
-                        "⚠️ nvbind GPU runtime requested but not available, falling back to traditional methods"
-                    );
-                }
+        if let Some(ref runtime) = gpu_config.runtime
+            && runtime == "nvbind"
+        {
+            if let Some(ref nvbind_manager) = self.nvbind {
+                info!("  Using native nvbind GPU runtime");
+                return nvbind_manager
+                    .setup_container_access(container_id, gpu_config)
+                    .await;
+            } else {
+                warn!(
+                    "⚠️ nvbind GPU runtime requested but not available, falling back to traditional methods"
+                );
             }
         }
 
@@ -601,7 +609,7 @@ impl GPUManager {
                     compatibility.bolt_optimizations
                 );
                 info!("  • WSL2 mode: {}", compatibility.wsl2_mode);
-                info!("  • Performance: Sub-microsecond GPU passthrough (100x faster than Docker)");
+                info!("  • Performance: Native GPU passthrough path enabled");
             }
             Ok(Some(compatibility))
         } else {
@@ -620,6 +628,156 @@ impl GPUManager {
         } else {
             "none".to_string()
         }
+    }
+
+    // ============= Profile-Based CDI Generation =============
+
+    /// Generate CDI environment variables for a gaming profile
+    pub fn get_gaming_profile_cdi_env(&self, profile_name: &str) -> Result<Vec<String>> {
+        let profile_manager = profiles::GpuProfileManager::new();
+
+        let settings = profile_manager
+            .get_gaming_profile(profile_name)
+            .ok_or_else(|| anyhow::anyhow!("Gaming profile not found: {}", profile_name))?;
+
+        let profile = profiles::GpuProfile::Gaming(settings);
+
+        // Return vendor-specific CDI environment
+        if self.nvidia.is_some() {
+            Ok(profile_manager.get_nvidia_cdi_env(&profile))
+        } else if self.amd.is_some() {
+            Ok(profile_manager.get_amd_cdi_env(&profile))
+        } else if self.intel.is_some() {
+            Ok(profile_manager.get_intel_cdi_env(&profile))
+        } else {
+            Err(anyhow::anyhow!("No GPU available for profile"))
+        }
+    }
+
+    /// Generate CDI environment variables for an AI profile
+    pub fn get_ai_profile_cdi_env(
+        &self,
+        profile_name: &str,
+        is_training: bool,
+    ) -> Result<Vec<String>> {
+        let profile_manager = profiles::GpuProfileManager::new();
+
+        let settings = profile_manager
+            .get_ai_profile(profile_name)
+            .ok_or_else(|| anyhow::anyhow!("AI profile not found: {}", profile_name))?;
+
+        let profile = if is_training {
+            profiles::GpuProfile::AiTraining(settings)
+        } else {
+            profiles::GpuProfile::AiInference(settings)
+        };
+
+        // Return vendor-specific CDI environment
+        if self.nvidia.is_some() {
+            Ok(profile_manager.get_nvidia_cdi_env(&profile))
+        } else if self.amd.is_some() {
+            Ok(profile_manager.get_amd_cdi_env(&profile))
+        } else if self.intel.is_some() {
+            Ok(profile_manager.get_intel_cdi_env(&profile))
+        } else {
+            Err(anyhow::anyhow!("No GPU available for profile"))
+        }
+    }
+
+    /// Generate a CDI spec with gaming profile optimizations
+    pub async fn generate_gaming_cdi_spec(&self, profile_name: &str) -> Result<String> {
+        info!("Generating gaming CDI spec with profile: {}", profile_name);
+
+        let profile_manager = profiles::GpuProfileManager::new();
+        let settings = profile_manager
+            .get_gaming_profile(profile_name)
+            .ok_or_else(|| anyhow::anyhow!("Gaming profile not found: {}", profile_name))?;
+
+        let profile = profiles::GpuProfile::Gaming(settings);
+
+        // Generate vendor-specific CDI spec
+        if let Some(ref nvidia) = self.nvidia {
+            let mut spec = nvidia.generate_gaming_cdi_spec().await?;
+            // Merge profile-specific environment
+            let profile_env = profile_manager.get_nvidia_cdi_env(&profile);
+            spec.container_edits.env.extend(profile_env);
+            return Ok(serde_json::to_string_pretty(&spec)?);
+        }
+
+        if let Some(ref amd) = self.amd {
+            let mut spec = amd.generate_gaming_cdi_spec().await?;
+            let profile_env = profile_manager.get_amd_cdi_env(&profile);
+            spec.container_edits.env.extend(profile_env);
+            return Ok(serde_json::to_string_pretty(&spec)?);
+        }
+
+        if let Some(ref intel) = self.intel {
+            let mut spec = intel.generate_gaming_cdi_spec().await?;
+            let profile_env = profile_manager.get_intel_cdi_env(&profile);
+            spec.container_edits.env.extend(profile_env);
+            return Ok(serde_json::to_string_pretty(&spec)?);
+        }
+
+        Err(anyhow::anyhow!("No GPU available for CDI spec generation"))
+    }
+
+    /// Generate a CDI spec with AI profile optimizations
+    pub async fn generate_ai_cdi_spec(
+        &self,
+        profile_name: &str,
+        is_training: bool,
+    ) -> Result<String> {
+        info!(
+            "Generating AI CDI spec with profile: {} (training: {})",
+            profile_name, is_training
+        );
+
+        let profile_manager = profiles::GpuProfileManager::new();
+        let settings = profile_manager
+            .get_ai_profile(profile_name)
+            .ok_or_else(|| anyhow::anyhow!("AI profile not found: {}", profile_name))?;
+
+        let profile = if is_training {
+            profiles::GpuProfile::AiTraining(settings)
+        } else {
+            profiles::GpuProfile::AiInference(settings)
+        };
+
+        // Generate vendor-specific CDI spec
+        if let Some(ref nvidia) = self.nvidia {
+            let mut spec = nvidia.generate_aiml_cdi_spec().await?;
+            let profile_env = profile_manager.get_nvidia_cdi_env(&profile);
+            spec.container_edits.env.extend(profile_env);
+            return Ok(serde_json::to_string_pretty(&spec)?);
+        }
+
+        if let Some(ref amd) = self.amd {
+            let mut spec = amd.generate_aiml_cdi_spec().await?;
+            let profile_env = profile_manager.get_amd_cdi_env(&profile);
+            spec.container_edits.env.extend(profile_env);
+            return Ok(serde_json::to_string_pretty(&spec)?);
+        }
+
+        if let Some(ref intel) = self.intel {
+            let mut spec = intel.generate_aiml_cdi_spec().await?;
+            let profile_env = profile_manager.get_intel_cdi_env(&profile);
+            spec.container_edits.env.extend(profile_env);
+            return Ok(serde_json::to_string_pretty(&spec)?);
+        }
+
+        Err(anyhow::anyhow!("No GPU available for CDI spec generation"))
+    }
+
+    /// List available gaming profiles
+    pub fn list_gaming_profiles(&self) -> Vec<String> {
+        let profile_manager = profiles::GpuProfileManager::new();
+        profile_manager.list_gaming_profiles()
+    }
+
+    /// List available AI profiles
+    pub fn list_ai_profiles(&self) -> Vec<String> {
+        let profile_manager = profiles::GpuProfileManager::new();
+        profile_manager.list_ai_profiles()
     }
 }
 

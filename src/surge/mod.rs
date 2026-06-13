@@ -9,6 +9,59 @@ use tracing::{debug, error, info, warn};
 
 pub mod status_api;
 
+/// Path to the file tracking which services have been deployed for a project.
+fn surge_state_path(config: &BoltConfig) -> std::path::PathBuf {
+    config.data_dir.join("surge_state.json")
+}
+
+/// Record services as deployed, merging with any previously deployed services.
+fn record_deployed_services(config: &BoltConfig, services: &[String]) {
+    let mut deployed = read_deployed_services(config).unwrap_or_default();
+    for service in services {
+        if !deployed.contains(service) {
+            deployed.push(service.clone());
+        }
+    }
+
+    let path = surge_state_path(config);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match serde_json::to_string(&deployed) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&path, json) {
+                warn!("Failed to persist surge state to {:?}: {}", path, e);
+            }
+        }
+        Err(e) => warn!("Failed to serialize surge state: {}", e),
+    }
+}
+
+/// Read the list of services that have been deployed, if any state exists.
+pub(crate) fn read_deployed_services(config: &BoltConfig) -> Option<Vec<String>> {
+    let data = std::fs::read_to_string(surge_state_path(config)).ok()?;
+    serde_json::from_str(&data).ok()
+}
+
+/// Remove services from the deployed-state file. Passing an empty slice clears
+/// all tracked services.
+fn clear_deployed_services(config: &BoltConfig, services: &[String]) {
+    let path = surge_state_path(config);
+    if services.is_empty() {
+        let _ = std::fs::remove_file(&path);
+        return;
+    }
+
+    if let Some(mut deployed) = read_deployed_services(config) {
+        deployed.retain(|s| !services.contains(s));
+        if deployed.is_empty() {
+            let _ = std::fs::remove_file(&path);
+        } else if let Ok(json) = serde_json::to_string(&deployed) {
+            let _ = std::fs::write(&path, json);
+        }
+    }
+}
+
 /// Enhanced Surge with native runtime integration
 pub async fn up_with_native_runtime(
     config: &BoltConfig,
@@ -36,16 +89,16 @@ pub async fn up_with_native_runtime(
         info!("⚠️  Falling back to delegation runtime");
     }
 
-    let target_services = if services.is_empty() {
-        boltfile.services.keys().collect::<Vec<_>>()
+    let target_services: Vec<String> = if services.is_empty() {
+        boltfile.services.keys().cloned().collect()
     } else {
-        services.iter().collect::<Vec<_>>()
+        services.to_vec()
     };
 
     info!("🎯 Target services: {:?}", target_services);
     debug!("Detached: {}, Force recreate: {}", detach, force_recreate);
 
-    for service_name in target_services {
+    for service_name in &target_services {
         if let Some(service) = boltfile.services.get(service_name.as_str()) {
             info!("🔧 Starting service: {}", service_name);
 
@@ -235,6 +288,8 @@ pub async fn up_with_native_runtime(
         }
     }
 
+    record_deployed_services(config, &target_services);
+
     info!("🎉 Surge orchestration completed successfully!");
 
     Ok(())
@@ -415,6 +470,8 @@ pub async fn down(config: &BoltConfig, services: &[String], remove_volumes: bool
         info!("✅ Service {} stopped successfully", service_name);
     }
 
+    clear_deployed_services(config, services);
+
     Ok(())
 }
 
@@ -506,11 +563,11 @@ pub async fn logs(
 
                 cmd.arg(&container_name);
 
-                if let Ok(output) = cmd.output().await {
-                    if output.status.success() {
-                        let stdout = String::from_utf8_lossy(&output.stdout);
-                        println!("{}", stdout);
-                    }
+                if let Ok(output) = cmd.output().await
+                    && output.status.success()
+                {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    println!("{}", stdout);
                 }
                 println!();
             }

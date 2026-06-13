@@ -22,34 +22,34 @@ pub fn validate_profile(profile: &OptimizationProfile) -> Result<()> {
 
     // Validate GPU optimizations
     if let Some(gpu_opts) = &profile.gpu_optimizations.nvidia {
-        if let Some(power_limit) = gpu_opts.power_limit {
-            if power_limit > 150 {
-                return Err(anyhow::anyhow!("NVIDIA power limit too high (max 150%)"));
-            }
+        if let Some(power_limit) = gpu_opts.power_limit
+            && power_limit > 150
+        {
+            return Err(anyhow::anyhow!("NVIDIA power limit too high (max 150%)"));
         }
 
-        if let Some(memory_offset) = gpu_opts.memory_clock_offset {
-            if memory_offset.abs() > 2000 {
-                return Err(anyhow::anyhow!(
-                    "NVIDIA memory clock offset too extreme (max ±2000 MHz)"
-                ));
-            }
+        if let Some(memory_offset) = gpu_opts.memory_clock_offset
+            && memory_offset.abs() > 2000
+        {
+            return Err(anyhow::anyhow!(
+                "NVIDIA memory clock offset too extreme (max ±2000 MHz)"
+            ));
         }
 
-        if let Some(core_offset) = gpu_opts.core_clock_offset {
-            if core_offset.abs() > 1000 {
-                return Err(anyhow::anyhow!(
-                    "NVIDIA core clock offset too extreme (max ±1000 MHz)"
-                ));
-            }
+        if let Some(core_offset) = gpu_opts.core_clock_offset
+            && core_offset.abs() > 1000
+        {
+            return Err(anyhow::anyhow!(
+                "NVIDIA core clock offset too extreme (max ±1000 MHz)"
+            ));
         }
     }
 
     // Validate CPU optimizations
-    if let Some(priority) = profile.cpu_optimizations.priority {
-        if !(-20..=19).contains(&priority) {
-            return Err(anyhow::anyhow!("CPU priority out of range (-20 to 19)"));
-        }
+    if let Some(priority) = profile.cpu_optimizations.priority
+        && !(-20..=19).contains(&priority)
+    {
+        return Err(anyhow::anyhow!("CPU priority out of range (-20 to 19)"));
     }
 
     Ok(())
@@ -58,24 +58,24 @@ pub fn validate_profile(profile: &OptimizationProfile) -> Result<()> {
 pub fn check_system_requirements(requirements: &SystemRequirements) -> Result<()> {
     let system_info = get_system_info()?;
 
-    if let Some(min_cores) = requirements.min_cpu_cores {
-        if system_info.cpu_cores < min_cores {
-            return Err(anyhow::anyhow!(
-                "Insufficient CPU cores: required {}, available {}",
-                min_cores,
-                system_info.cpu_cores
-            ));
-        }
+    if let Some(min_cores) = requirements.min_cpu_cores
+        && system_info.cpu_cores < min_cores
+    {
+        return Err(anyhow::anyhow!(
+            "Insufficient CPU cores: required {}, available {}",
+            min_cores,
+            system_info.cpu_cores
+        ));
     }
 
-    if let Some(min_memory) = requirements.min_memory_gb {
-        if system_info.memory_gb < min_memory {
-            return Err(anyhow::anyhow!(
-                "Insufficient memory: required {} GB, available {} GB",
-                min_memory,
-                system_info.memory_gb
-            ));
-        }
+    if let Some(min_memory) = requirements.min_memory_gb
+        && system_info.memory_gb < min_memory
+    {
+        return Err(anyhow::anyhow!(
+            "Insufficient memory: required {} GB, available {} GB",
+            min_memory,
+            system_info.memory_gb
+        ));
     }
 
     if let Some(required_vendor) = &requirements.required_gpu_vendor {

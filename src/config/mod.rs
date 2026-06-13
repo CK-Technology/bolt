@@ -62,7 +62,8 @@ pub struct Service {
     pub healthcheck: Option<HealthcheckConfig>,
     pub cpu_limit: Option<String>,
     pub memory_limit: Option<String>,
-    pub mcp: Option<ServiceMcpConfig>,
+    #[serde(alias = "mcp")]
+    pub tools: Option<ServiceToolsConfig>,
 }
 
 pub type NetworkConfig = Network;
@@ -118,7 +119,7 @@ pub struct Auth {
     pub password: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct GamingConfig {
     pub enabled: bool,
     pub gpu_passthrough: bool,
@@ -159,7 +160,7 @@ pub struct HealthcheckConfig {
     pub disable: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct GpuConfig {
     pub runtime: Option<String>, // "nvbind", "docker", "nvidia", "amd"
     pub nvidia: Option<NvidiaConfig>,
@@ -172,7 +173,7 @@ pub struct GpuConfig {
     pub aiml: Option<GpuAiMlConfig>,     // nvbind AI/ML optimizations
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct NvidiaConfig {
     pub device: Option<u32>,
     pub dlss: Option<bool>,
@@ -184,13 +185,13 @@ pub struct NvidiaConfig {
     pub core_clock_offset: Option<i32>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct AmdConfig {
     pub device: Option<u32>,
     pub rocm: Option<bool>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct NvbindConfig {
     pub driver: Option<String>, // "auto", "nvidia-open", "proprietary", "nouveau"
     pub devices: Option<Vec<String>>, // e.g., ["gpu:0"], ["gpu:all"]
@@ -199,7 +200,7 @@ pub struct NvbindConfig {
     pub preload_libraries: Option<bool>, // Preload GPU libraries
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct GpuGamingConfig {
     pub profile: Option<String>, // "ultra-low-latency", "performance", "balanced"
     pub dlss_enabled: Option<bool>,
@@ -209,7 +210,7 @@ pub struct GpuGamingConfig {
     pub performance_profile: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct GpuAiMlConfig {
     pub profile: Option<String>,   // "training", "inference", "development"
     pub mig_enabled: Option<bool>, // Multi-Instance GPU
@@ -219,69 +220,53 @@ pub struct GpuAiMlConfig {
     pub memory_pool_size: Option<String>, // e.g., "16GB"
 }
 
-// MCP (Model Context Protocol) Configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ServiceMcpConfig {
-    /// Enable MCP for this service
+pub struct ServiceToolsConfig {
+    /// Enable native Bolt service tools for this service.
     #[serde(default)]
     pub enabled: bool,
 
-    /// Enabled tools (e.g., ["filesystem:read", "shell:exec", "gpu:stats"])
+    /// Enabled tools, e.g. ["fs.read", "shell.exec", "gpu.stats"].
     #[serde(default)]
-    pub tools: Vec<String>,
+    pub allow: Vec<String>,
 
-    /// Tool-specific permissions
+    /// Tool-specific permissions.
     #[serde(default)]
-    pub permissions: Option<McpPermissions>,
-
-    /// Omen AI Router configuration (optional)
-    #[cfg(feature = "omen")]
-    #[serde(default)]
-    pub omen: Option<McpOmenConfig>,
+    pub permissions: Option<ToolPermissions>,
 }
 
-impl ServiceMcpConfig {
-    /// Valid MCP tool names
-    const VALID_TOOLS: &'static [&'static str] = &[
-        "filesystem:read",
-        "filesystem:write",
-        "filesystem:list",
-        "filesystem:watch",
-        "shell:exec",
-        "gpu:stats",
-        "gpu:info",
-        "process:list",
-        "process:kill",
-        "network:stats",
-        "network:connections",
+impl ServiceToolsConfig {
+    pub const VALID_TOOLS: &'static [&'static str] = &[
+        "fs.read",
+        "fs.write",
+        "fs.list",
+        "fs.watch",
+        "shell.exec",
+        "gpu.stats",
+        "gpu.info",
+        "process.list",
+        "process.kill",
+        "network.stats",
+        "network.connections",
     ];
 
-    /// Validate the MCP configuration
     pub fn validate(&self) -> Result<()> {
         if !self.enabled {
-            return Ok(()); // No validation needed if MCP is disabled
+            return Ok(());
         }
 
-        // Validate tool names
-        for tool in &self.tools {
+        for tool in &self.allow {
             if !Self::VALID_TOOLS.contains(&tool.as_str()) {
-                return Err(anyhow::anyhow!(
-                    "Invalid MCP tool '{}'. Valid tools: {:?}",
+                return Err(anyhow!(
+                    "Invalid built-in tool '{}'. Valid tools: {:?}",
                     tool,
                     Self::VALID_TOOLS
                 ));
             }
         }
 
-        // Validate permissions if specified
-        if let Some(ref perms) = self.permissions {
-            perms.validate()?;
-        }
-
-        // Validate Omen config if specified
-        #[cfg(feature = "omen")]
-        if let Some(ref omen) = self.omen {
-            omen.validate()?;
+        if let Some(ref permissions) = self.permissions {
+            permissions.validate()?;
         }
 
         Ok(())
@@ -289,183 +274,69 @@ impl ServiceMcpConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct McpPermissions {
-    /// Allowed filesystem paths for filesystem tools
+pub struct ToolPermissions {
     #[serde(default)]
-    pub filesystem_paths: Vec<String>,
+    pub filesystem_roots: Vec<String>,
 
-    /// Allowed shell commands for shell execution
     #[serde(default)]
     pub shell_commands: Vec<String>,
 
-    /// GPU access level: "read_only", "read_write", "full"
     #[serde(default)]
     pub gpu_access: Option<String>,
 
-    /// Network access level: "none", "read_only", "full"
     #[serde(default)]
     pub network_access: Option<String>,
 
-    /// Process access level: "read_only", "read_write", "full"
     #[serde(default)]
     pub process_access: Option<String>,
 }
 
-impl McpPermissions {
-    /// Valid access levels
+impl ToolPermissions {
     const VALID_ACCESS_LEVELS: &'static [&'static str] =
         &["none", "read_only", "read_write", "full"];
 
-    /// Validate permissions configuration
     pub fn validate(&self) -> Result<()> {
-        // Validate filesystem paths
-        for path in &self.filesystem_paths {
+        for path in &self.filesystem_roots {
             if path.is_empty() {
-                return Err(anyhow::anyhow!("Filesystem path cannot be empty"));
+                return Err(anyhow!("Filesystem root cannot be empty"));
             }
-            // Ensure paths are absolute or relative
             if !path.starts_with('/') && !path.starts_with("./") && !path.starts_with("../") {
-                return Err(anyhow::anyhow!(
-                    "Filesystem path '{}' must be absolute or relative (start with /, ./, or ../)",
+                return Err(anyhow!(
+                    "Filesystem root '{}' must be absolute or relative (start with /, ./, or ../)",
                     path
                 ));
             }
         }
 
-        // Validate shell commands
-        for cmd in &self.shell_commands {
-            if cmd.is_empty() {
-                return Err(anyhow::anyhow!("Shell command cannot be empty"));
+        for command in &self.shell_commands {
+            if command.is_empty() {
+                return Err(anyhow!("Shell command cannot be empty"));
             }
-            if cmd.contains("..") || cmd.contains("&&") || cmd.contains(";") {
-                return Err(anyhow::anyhow!(
+            if command.contains("..") || command.contains("&&") || command.contains(';') {
+                return Err(anyhow!(
                     "Shell command '{}' contains potentially unsafe characters",
-                    cmd
+                    command
                 ));
             }
         }
 
-        // Validate access levels
-        if let Some(ref level) = self.gpu_access {
-            if !Self::VALID_ACCESS_LEVELS.contains(&level.as_str()) {
-                return Err(anyhow::anyhow!(
-                    "Invalid GPU access level '{}'. Valid levels: {:?}",
-                    level,
-                    Self::VALID_ACCESS_LEVELS
-                ));
-            }
-        }
-
-        if let Some(ref level) = self.network_access {
-            if !Self::VALID_ACCESS_LEVELS.contains(&level.as_str()) {
-                return Err(anyhow::anyhow!(
-                    "Invalid network access level '{}'. Valid levels: {:?}",
-                    level,
-                    Self::VALID_ACCESS_LEVELS
-                ));
-            }
-        }
-
-        if let Some(ref level) = self.process_access {
-            if !Self::VALID_ACCESS_LEVELS.contains(&level.as_str()) {
-                return Err(anyhow::anyhow!(
-                    "Invalid process access level '{}'. Valid levels: {:?}",
-                    level,
-                    Self::VALID_ACCESS_LEVELS
-                ));
-            }
-        }
+        Self::validate_access_level("GPU", self.gpu_access.as_deref())?;
+        Self::validate_access_level("network", self.network_access.as_deref())?;
+        Self::validate_access_level("process", self.process_access.as_deref())?;
 
         Ok(())
     }
-}
 
-#[cfg(feature = "omen")]
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct McpOmenConfig {
-    /// Enable Omen AI routing for this service
-    #[serde(default)]
-    pub enabled: bool,
-
-    /// Routing strategy: "cost_optimized", "latency_optimized", "balanced", "quality_optimized"
-    #[serde(default)]
-    pub strategy: String,
-
-    /// Maximum cost per hour in USD
-    #[serde(default)]
-    pub max_cost_per_hour: Option<f64>,
-
-    /// Preferred providers (e.g., ["ollama", "anthropic"])
-    #[serde(default)]
-    pub providers: Vec<String>,
-
-    /// Provider-specific configuration
-    #[serde(default)]
-    pub provider_config: HashMap<String, String>,
-}
-
-#[cfg(feature = "omen")]
-impl McpOmenConfig {
-    /// Valid routing strategies
-    const VALID_STRATEGIES: &'static [&'static str] = &[
-        "cost_optimized",
-        "latency_optimized",
-        "balanced",
-        "quality_optimized",
-    ];
-
-    /// Valid AI providers
-    const VALID_PROVIDERS: &'static [&'static str] = &[
-        "ollama",
-        "anthropic",
-        "openai",
-        "google",
-        "xai",
-        "azure",
-        "bedrock",
-        "vertexai",
-    ];
-
-    /// Validate Omen configuration
-    pub fn validate(&self) -> Result<()> {
-        if !self.enabled {
-            return Ok(()); // No validation needed if Omen is disabled
-        }
-
-        // Validate routing strategy
-        if !self.strategy.is_empty() && !Self::VALID_STRATEGIES.contains(&self.strategy.as_str()) {
-            return Err(anyhow::anyhow!(
-                "Invalid Omen routing strategy '{}'. Valid strategies: {:?}",
-                self.strategy,
-                Self::VALID_STRATEGIES
+    fn validate_access_level(label: &str, level: Option<&str>) -> Result<()> {
+        if let Some(level) = level
+            && !Self::VALID_ACCESS_LEVELS.contains(&level)
+        {
+            return Err(anyhow!(
+                "Invalid {} access level '{}'. Valid levels: {:?}",
+                label,
+                level,
+                Self::VALID_ACCESS_LEVELS
             ));
-        }
-
-        // Validate max_cost_per_hour
-        if let Some(cost) = self.max_cost_per_hour {
-            if cost < 0.0 {
-                return Err(anyhow::anyhow!(
-                    "max_cost_per_hour must be >= 0, got: {}",
-                    cost
-                ));
-            }
-            if cost > 1000.0 {
-                return Err(anyhow::anyhow!(
-                    "max_cost_per_hour seems unreasonably high: {}. Please check your configuration.",
-                    cost
-                ));
-            }
-        }
-
-        // Validate providers
-        for provider in &self.providers {
-            if !Self::VALID_PROVIDERS.contains(&provider.as_str()) {
-                return Err(anyhow::anyhow!(
-                    "Invalid Omen provider '{}'. Valid providers: {:?}",
-                    provider,
-                    Self::VALID_PROVIDERS
-                ));
-            }
         }
 
         Ok(())
@@ -534,13 +405,13 @@ pub struct NamedSnapshot {
     pub keep_forever: Option<bool>,  // Exclude from retention cleanup
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct AudioConfig {
     pub system: String, // pipewire, pulseaudio
     pub latency: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WineConfig {
     pub version: Option<String>,
     pub proton: Option<String>,
@@ -548,7 +419,7 @@ pub struct WineConfig {
     pub prefix: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct PerformanceConfig {
     pub cpu_governor: Option<String>,
     pub nice_level: Option<i32>,
@@ -730,11 +601,14 @@ impl BoltFile {
                 self.validate_storage_config(name, storage)?;
             }
 
-            // Validate MCP configuration
-            if let Some(ref mcp) = service.mcp {
-                debug!("Validating MCP configuration for service: {}", name);
-                mcp.validate()
-                    .with_context(|| format!("Invalid MCP configuration for service '{}'", name))?;
+            if let Some(ref tools) = service.tools {
+                debug!(
+                    "Validating built-in tool configuration for service: {}",
+                    name
+                );
+                tools.validate().with_context(|| {
+                    format!("Invalid built-in tool configuration for service '{}'", name)
+                })?;
             }
 
             // Validate ports
@@ -793,10 +667,10 @@ impl BoltFile {
         visited.insert(service.to_string());
 
         for dep in deps {
-            if let Some(dep_service) = self.services.get(dep) {
-                if let Some(ref dep_deps) = dep_service.depends_on {
-                    self.check_circular_dependencies(dep, dep_deps, visited)?;
-                }
+            if let Some(dep_service) = self.services.get(dep)
+                && let Some(ref dep_deps) = dep_service.depends_on
+            {
+                self.check_circular_dependencies(dep, dep_deps, visited)?;
             }
         }
 
@@ -938,55 +812,57 @@ impl BoltFile {
 
         if let Some(ref gpu) = gaming.gpu {
             if let Some(ref nvidia) = gpu.nvidia {
-                if nvidia.device.is_some() && nvidia.device.unwrap() > 7 {
+                if let Some(device) = nvidia.device
+                    && device > 7
+                {
                     warn!(
                         "Service '{}': NVIDIA device ID {} is unusually high",
-                        service_name,
-                        nvidia.device.unwrap()
+                        service_name, device
                     );
                 }
 
                 // Validate power limit
-                if let Some(power_limit) = nvidia.power_limit {
-                    if power_limit > 150 {
-                        return Err(anyhow!(
-                            "Service '{}': NVIDIA power limit {}% exceeds maximum (150%)",
-                            service_name,
-                            power_limit
-                        ));
-                    }
+                if let Some(power_limit) = nvidia.power_limit
+                    && power_limit > 150
+                {
+                    return Err(anyhow!(
+                        "Service '{}': NVIDIA power limit {}% exceeds maximum (150%)",
+                        service_name,
+                        power_limit
+                    ));
                 }
 
                 // Validate clock offsets
-                if let Some(memory_offset) = nvidia.memory_clock_offset {
-                    if memory_offset.abs() > 2000 {
-                        return Err(anyhow!(
-                            "Service '{}': NVIDIA memory clock offset {} MHz is too extreme (max ±2000 MHz)",
-                            service_name,
-                            memory_offset
-                        ));
-                    }
+                if let Some(memory_offset) = nvidia.memory_clock_offset
+                    && memory_offset.abs() > 2000
+                {
+                    return Err(anyhow!(
+                        "Service '{}': NVIDIA memory clock offset {} MHz is too extreme (max ±2000 MHz)",
+                        service_name,
+                        memory_offset
+                    ));
                 }
 
-                if let Some(core_offset) = nvidia.core_clock_offset {
-                    if core_offset.abs() > 1000 {
-                        return Err(anyhow!(
-                            "Service '{}': NVIDIA core clock offset {} MHz is too extreme (max ±1000 MHz)",
-                            service_name,
-                            core_offset
-                        ));
-                    }
+                if let Some(core_offset) = nvidia.core_clock_offset
+                    && core_offset.abs() > 1000
+                {
+                    return Err(anyhow!(
+                        "Service '{}': NVIDIA core clock offset {} MHz is too extreme (max ±1000 MHz)",
+                        service_name,
+                        core_offset
+                    ));
                 }
             }
 
-            if let Some(ref amd) = gpu.amd {
-                if amd.device.is_some() && amd.device.unwrap() > 7 {
-                    warn!(
-                        "Service '{}': AMD device ID {} is unusually high",
-                        service_name,
-                        amd.device.unwrap()
-                    );
-                }
+            if let Some(ref amd) = gpu.amd
+                && amd.device.is_some()
+                && amd.device.unwrap() > 7
+            {
+                warn!(
+                    "Service '{}': AMD device ID {} is unusually high",
+                    service_name,
+                    amd.device.unwrap()
+                );
             }
         }
 
@@ -1003,26 +879,26 @@ impl BoltFile {
             }
         }
 
-        if let Some(ref perf) = gaming.performance {
-            if let Some(nice) = perf.nice_level {
-                if !(-20..=19).contains(&nice) {
-                    return Err(anyhow!(
-                        "Service '{}': nice level {} out of range (-20 to 19)",
-                        service_name,
-                        nice
-                    ));
-                }
-            }
+        if let Some(ref perf) = gaming.performance
+            && let Some(nice) = perf.nice_level
+            && !(-20..=19).contains(&nice)
+        {
+            return Err(anyhow!(
+                "Service '{}': nice level {} out of range (-20 to 19)",
+                service_name,
+                nice
+            ));
+        }
 
-            if let Some(rt_prio) = perf.rt_priority {
-                if rt_prio > 99 {
-                    return Err(anyhow!(
-                        "Service '{}': RT priority {} out of range (0 to 99)",
-                        service_name,
-                        rt_prio
-                    ));
-                }
-            }
+        if let Some(ref perf) = gaming.performance
+            && let Some(rt_prio) = perf.rt_priority
+            && rt_prio > 99
+        {
+            return Err(anyhow!(
+                "Service '{}': RT priority {} out of range (0 to 99)",
+                service_name,
+                rt_prio
+            ));
         }
 
         Ok(())
@@ -1061,18 +937,18 @@ impl BoltFile {
         debug!("Validating network definitions");
 
         for (name, network) in networks {
-            if let Some(ref ipam) = network.ipam {
-                if let Some(ref configs) = ipam.config {
-                    for config in configs {
-                        if let Some(ref subnet) = config.subnet {
-                            if !subnet.contains('/') {
-                                return Err(anyhow!(
-                                    "Network '{}': IPAM subnet '{}' must be in CIDR notation",
-                                    name,
-                                    subnet
-                                ));
-                            }
-                        }
+            if let Some(ref ipam) = network.ipam
+                && let Some(ref configs) = ipam.config
+            {
+                for config in configs {
+                    if let Some(ref subnet) = config.subnet
+                        && !subnet.contains('/')
+                    {
+                        return Err(anyhow!(
+                            "Network '{}': IPAM subnet '{}' must be in CIDR notation",
+                            name,
+                            subnet
+                        ));
                     }
                 }
             }
@@ -1105,10 +981,10 @@ impl BoltFile {
         // Check for common optimization opportunities
         for (name, service) in &self.services {
             // Suggest using Bolt-native images
-            if let Some(ref image) = service.image {
-                if image.starts_with("docker.io/") {
-                    suggestions.push(format!("Service '{}': Consider using Bolt-native image 'bolt://{}' for better performance", name, image.strip_prefix("docker.io/").unwrap_or(image)));
-                }
+            if let Some(ref image) = service.image
+                && image.starts_with("docker.io/")
+            {
+                suggestions.push(format!("Service '{}': Consider using Bolt-native image 'bolt://{}' for better performance", name, image.strip_prefix("docker.io/").unwrap_or(image)));
             }
 
             // Suggest restart policies
@@ -1142,8 +1018,7 @@ impl BoltFile {
             }
 
             // Security suggestions
-            if service.volumes.is_some() {
-                let volumes = service.volumes.as_ref().unwrap();
+            if let Some(volumes) = service.volumes.as_ref() {
                 for volume in volumes {
                     if !volume.contains(":ro") && !volume.contains(":rw") {
                         suggestions.push(format!("Service '{}': Consider explicitly specifying read-only (:ro) or read-write (:rw) for volume '{}'", name, volume));
@@ -1220,28 +1095,22 @@ cpu_governor = "performance"     # CPU governor (optional)
 nice_level = -10                 # Process nice level -20 to 19 (optional)
 rt_priority = 50                 # Real-time priority 0 to 99 (optional)
 
-[services.<name>.mcp]            # Optional MCP (Model Context Protocol) configuration
-enabled = true                   # Enable MCP for this service
-tools = [                        # Enabled MCP tools (optional)
-  "filesystem:read",
-  "filesystem:write",
-  "shell:exec",
-  "gpu:stats",
-  "process:list",
+[services.<name>.tools]          # Optional native Bolt service tools
+enabled = true                   # Enable built-in tooling for this service
+allow = [                        # Built-in tools allowed for this service
+  "fs.read",
+  "fs.write",
+  "shell.exec",
+  "gpu.stats",
+  "process.list",
 ]
 
-[services.<name>.mcp.permissions] # Tool-specific permissions (optional)
-filesystem_paths = ["/workspace", "/src"]  # Allowed filesystem paths
-shell_commands = ["npm", "cargo", "zig"]    # Allowed shell commands
-gpu_access = "read_only"         # GPU access level: read_only, read_write, full
-network_access = "read_only"     # Network access level: none, read_only, full
-process_access = "read_only"     # Process access level: read_only, read_write, full
-
-[services.<name>.mcp.omen]       # Omen AI Router configuration (optional, requires omen feature)
-enabled = true                   # Enable Omen routing
-strategy = "balanced"            # Routing strategy: cost_optimized, latency_optimized, balanced, quality_optimized
-max_cost_per_hour = 5.00        # Maximum cost per hour in USD
-providers = ["ollama", "anthropic"]  # Preferred providers
+[services.<name>.tools.permissions]
+filesystem_roots = ["/workspace", "/src"] # Allowed filesystem roots
+shell_commands = ["cargo", "git", "npm"]  # Allowed shell commands
+gpu_access = "read_only"         # GPU access: none, read_only, read_write, full
+network_access = "read_only"     # Network access: none, read_only, read_write, full
+process_access = "read_only"     # Process access: none, read_only, read_write, full
 
 [networks.<name>]                # Optional custom networks
 driver = "bolt"                  # Network driver: bolt, bridge, host (optional)
@@ -1262,8 +1131,6 @@ pub struct BoltConfig {
     pub data_dir: PathBuf,
     pub boltfile_path: PathBuf,
     pub verbose: bool,
-    #[cfg(feature = "mcp")]
-    pub mcp: Option<crate::mcp::McpConfig>,
 }
 
 impl Default for BoltConfig {
@@ -1273,8 +1140,6 @@ impl Default for BoltConfig {
             data_dir: PathBuf::new(),
             boltfile_path: PathBuf::new(),
             verbose: false,
-            #[cfg(feature = "mcp")]
-            mcp: None,
         }
     }
 }
@@ -1299,8 +1164,6 @@ impl BoltConfig {
             data_dir,
             boltfile_path,
             verbose: false,
-            #[cfg(feature = "mcp")]
-            mcp: None,
         })
     }
 
@@ -1367,7 +1230,7 @@ pub fn create_example_boltfile() -> BoltFile {
         },
     );
 
-    // AI development service example with MCP
+    // AI development service example
     services.insert(
         "ai-dev".to_string(),
         Service {
@@ -1425,17 +1288,17 @@ pub fn create_example_boltfile() -> BoltFile {
             healthcheck: None,
             cpu_limit: Some("2".to_string()),
             memory_limit: Some("4Gi".to_string()),
-            mcp: Some(ServiceMcpConfig {
+            tools: Some(ServiceToolsConfig {
                 enabled: true,
-                tools: vec![
-                    "filesystem:read".to_string(),
-                    "filesystem:write".to_string(),
-                    "shell:exec".to_string(),
-                    "gpu:stats".to_string(),
-                    "process:list".to_string(),
+                allow: vec![
+                    "fs.read".to_string(),
+                    "fs.write".to_string(),
+                    "shell.exec".to_string(),
+                    "gpu.stats".to_string(),
+                    "process.list".to_string(),
                 ],
-                permissions: Some(McpPermissions {
-                    filesystem_paths: vec![
+                permissions: Some(ToolPermissions {
+                    filesystem_roots: vec![
                         "/workspace".to_string(),
                         "/src".to_string(),
                         "/tmp".to_string(),
@@ -1445,27 +1308,10 @@ pub fn create_example_boltfile() -> BoltFile {
                         "rustc".to_string(),
                         "git".to_string(),
                         "npm".to_string(),
-                        "ls".to_string(),
-                        "cat".to_string(),
                     ],
                     gpu_access: Some("read_only".to_string()),
                     network_access: Some("read_only".to_string()),
                     process_access: Some("read_only".to_string()),
-                }),
-                #[cfg(feature = "omen")]
-                omen: Some(McpOmenConfig {
-                    enabled: true,
-                    strategy: "balanced".to_string(),
-                    max_cost_per_hour: Some(5.0),
-                    providers: vec!["ollama".to_string(), "anthropic".to_string()],
-                    provider_config: {
-                        let mut config = HashMap::new();
-                        config.insert(
-                            "ollama_endpoint".to_string(),
-                            "http://localhost:11434".to_string(),
-                        );
-                        config
-                    },
                 }),
             }),
         },
@@ -1656,143 +1502,68 @@ pub fn create_example_boltfile() -> BoltFile {
 }
 
 #[cfg(test)]
-mod mcp_validation_tests {
+mod service_tools_tests {
     use super::*;
 
     #[test]
-    fn test_valid_mcp_config() {
-        let mcp = ServiceMcpConfig {
+    fn valid_service_tools_config_passes() {
+        let tools = ServiceToolsConfig {
             enabled: true,
-            tools: vec![
-                "filesystem:read".to_string(),
-                "shell:exec".to_string(),
-                "gpu:stats".to_string(),
+            allow: vec![
+                "fs.read".to_string(),
+                "shell.exec".to_string(),
+                "gpu.stats".to_string(),
             ],
-            permissions: Some(McpPermissions {
-                filesystem_paths: vec!["/workspace".to_string()],
+            permissions: Some(ToolPermissions {
+                filesystem_roots: vec!["/workspace".to_string()],
                 shell_commands: vec!["cargo".to_string()],
                 gpu_access: Some("read_only".to_string()),
                 network_access: Some("none".to_string()),
                 process_access: Some("read_only".to_string()),
             }),
-            #[cfg(feature = "omen")]
-            omen: None,
         };
 
-        assert!(mcp.validate().is_ok());
+        assert!(tools.validate().is_ok());
     }
 
     #[test]
-    fn test_invalid_tool_name() {
-        let mcp = ServiceMcpConfig {
+    fn invalid_tool_name_fails() {
+        let tools = ServiceToolsConfig {
             enabled: true,
-            tools: vec!["invalid:tool".to_string()],
+            allow: vec!["docker.mcp.external".to_string()],
             permissions: None,
-            #[cfg(feature = "omen")]
-            omen: None,
         };
 
-        assert!(mcp.validate().is_err());
+        assert!(tools.validate().is_err());
     }
 
     #[test]
-    fn test_invalid_access_level() {
-        let mcp = ServiceMcpConfig {
+    fn invalid_access_level_fails() {
+        let tools = ServiceToolsConfig {
             enabled: true,
-            tools: vec!["gpu:stats".to_string()],
-            permissions: Some(McpPermissions {
-                filesystem_paths: vec![],
+            allow: vec!["gpu.stats".to_string()],
+            permissions: Some(ToolPermissions {
+                filesystem_roots: vec![],
                 shell_commands: vec![],
-                gpu_access: Some("invalid_level".to_string()),
+                gpu_access: Some("god_mode".to_string()),
                 network_access: None,
                 process_access: None,
             }),
-            #[cfg(feature = "omen")]
-            omen: None,
         };
 
-        assert!(mcp.validate().is_err());
+        assert!(tools.validate().is_err());
     }
 
     #[test]
-    fn test_invalid_filesystem_path() {
-        let perms = McpPermissions {
-            filesystem_paths: vec!["not-absolute".to_string()],
-            shell_commands: vec![],
-            gpu_access: None,
-            network_access: None,
-            process_access: None,
-        };
-
-        assert!(perms.validate().is_err());
-    }
-
-    #[test]
-    fn test_unsafe_shell_command() {
-        let perms = McpPermissions {
-            filesystem_paths: vec![],
+    fn unsafe_shell_command_fails() {
+        let permissions = ToolPermissions {
+            filesystem_roots: vec![],
             shell_commands: vec!["rm && rm -rf /".to_string()],
             gpu_access: None,
             network_access: None,
             process_access: None,
         };
 
-        assert!(perms.validate().is_err());
-    }
-
-    #[cfg(feature = "omen")]
-    #[test]
-    fn test_valid_omen_config() {
-        let omen = McpOmenConfig {
-            enabled: true,
-            strategy: "balanced".to_string(),
-            max_cost_per_hour: Some(5.0),
-            providers: vec!["ollama".to_string(), "anthropic".to_string()],
-            provider_config: HashMap::new(),
-        };
-
-        assert!(omen.validate().is_ok());
-    }
-
-    #[cfg(feature = "omen")]
-    #[test]
-    fn test_invalid_omen_strategy() {
-        let omen = McpOmenConfig {
-            enabled: true,
-            strategy: "invalid_strategy".to_string(),
-            max_cost_per_hour: None,
-            providers: vec![],
-            provider_config: HashMap::new(),
-        };
-
-        assert!(omen.validate().is_err());
-    }
-
-    #[cfg(feature = "omen")]
-    #[test]
-    fn test_invalid_omen_provider() {
-        let omen = McpOmenConfig {
-            enabled: true,
-            strategy: "balanced".to_string(),
-            max_cost_per_hour: None,
-            providers: vec!["invalid_provider".to_string()],
-            provider_config: HashMap::new(),
-        };
-
-        assert!(omen.validate().is_err());
-    }
-
-    #[cfg(feature = "omen")]
-    #[test]
-    fn test_negative_max_cost() {
-        let omen = McpOmenConfig {
-            enabled: true,
-            strategy: "cost_optimized".to_string(),
-            max_cost_per_hour: Some(-5.0),
-            providers: vec!["ollama".to_string()],
-            provider_config: HashMap::new(),
-        };
-
-        assert!(omen.validate().is_err());
+        assert!(permissions.validate().is_err());
     }
 }

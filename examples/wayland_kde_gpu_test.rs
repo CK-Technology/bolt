@@ -271,9 +271,11 @@ async fn test_full_gaming_workflow() -> Result<()> {
             dlss: Some(true),
             raytracing: Some(true),
             cuda: Some(false), // Gaming doesn't typically need CUDA
+            ..Default::default()
         }),
         amd: None,
         passthrough: Some(false), // Use integrated approach for Wayland
+        ..Default::default()
     };
 
     info!("  🎯 Testing GPU configuration with runtime preferences...");

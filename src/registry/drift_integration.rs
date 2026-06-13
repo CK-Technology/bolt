@@ -525,16 +525,15 @@ impl DriftRegistryClient {
             .await
             .context("Failed to read manifest body from registry")?;
 
-        if let Some(ref object_store) = self.object_store {
-            if let Err(err) = object_store
+        if let Some(ref object_store) = self.object_store
+            && let Err(err) = object_store
                 .store_manifest(&repository, &reference, &bytes)
                 .await
-            {
-                warn!(
-                    "Failed to persist manifest {}@{} to object store: {}",
-                    repository, reference, err
-                );
-            }
+        {
+            warn!(
+                "Failed to persist manifest {}@{} to object store: {}",
+                repository, reference, err
+            );
         }
 
         // Check if this is a manifest list (multi-arch)
@@ -646,16 +645,17 @@ impl DriftRegistryClient {
         drop(file);
 
         let computed_digest = format!("sha256:{:x}", hasher.finalize());
-        if let Some((algo, _)) = digest.split_once(':') {
-            if algo.eq_ignore_ascii_case("sha256") && computed_digest != digest {
-                fs::remove_file(&temp_path).await.ok();
-                return Err(anyhow::anyhow!(
-                    "Digest mismatch for {} (expected {}, got {})",
-                    destination.display(),
-                    digest,
-                    computed_digest
-                ));
-            }
+        if let Some((algo, _)) = digest.split_once(':')
+            && algo.eq_ignore_ascii_case("sha256")
+            && computed_digest != digest
+        {
+            fs::remove_file(&temp_path).await.ok();
+            return Err(anyhow::anyhow!(
+                "Digest mismatch for {} (expected {}, got {})",
+                destination.display(),
+                digest,
+                computed_digest
+            ));
         }
 
         fs::rename(&temp_path, destination)
@@ -706,16 +706,15 @@ impl DriftRegistryClient {
         self.download_blob_to(repository, digest, destination)
             .await?;
 
-        if let Some(ref object_store) = self.object_store {
-            if let Err(err) = object_store
+        if let Some(ref object_store) = self.object_store
+            && let Err(err) = object_store
                 .upload_config(repository, digest, destination)
                 .await
-            {
-                warn!(
-                    "Failed to upload config {} for {} to object store: {}",
-                    digest, repository, err
-                );
-            }
+        {
+            warn!(
+                "Failed to upload config {} for {} to object store: {}",
+                digest, repository, err
+            );
         }
 
         Ok(())

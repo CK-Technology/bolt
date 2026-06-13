@@ -373,12 +373,11 @@ impl OllamaManager {
         if let Ok(output) = Command::new("nvidia-smi")
             .args(["--query-gpu=memory.total", "--format=csv,noheader,nounits"])
             .output()
+            && output.status.success()
         {
-            if output.status.success() {
-                let memory_str = String::from_utf8_lossy(&output.stdout);
-                if let Ok(memory_mb) = memory_str.trim().parse::<u32>() {
-                    return Ok(memory_mb / 1024); // Convert MB to GB
-                }
+            let memory_str = String::from_utf8_lossy(&output.stdout);
+            if let Ok(memory_mb) = memory_str.trim().parse::<u32>() {
+                return Ok(memory_mb / 1024); // Convert MB to GB
             }
         }
 

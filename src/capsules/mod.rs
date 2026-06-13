@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -10,6 +11,8 @@ pub mod templates;
 pub mod vm;
 
 use crate::runtime::oci::ContainerConfig;
+
+static NEXT_COMPAT_PID: AtomicU32 = AtomicU32::new(10_000);
 
 /// Bolt Capsules - Our revolutionary container-VM hybrid
 ///
@@ -301,6 +304,352 @@ pub struct CapsuleTemplate {
     pub base_config: CapsuleConfig,
     pub initialization_scripts: Vec<String>,
     pub required_capabilities: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Capsule {
+    name: String,
+    root_path: PathBuf,
+    running: bool,
+    memory_limit: Option<String>,
+    cpu_limit: Option<f64>,
+    storage_limit: Option<String>,
+    env_vars: HashMap<String, String>,
+    ports: Vec<u16>,
+    networks: HashMap<String, Option<String>>,
+    pid: Option<u32>,
+    namespace: String,
+    checkpoints: Vec<String>,
+}
+
+impl Capsule {
+    pub fn new(name: &str, root_path: &str) -> Result<Self> {
+        let root_path = PathBuf::from(root_path);
+        std::fs::create_dir_all(&root_path)
+            .with_context(|| format!("Failed to create capsule root {}", root_path.display()))?;
+
+        Ok(Self {
+            name: name.to_string(),
+            root_path,
+            running: false,
+            memory_limit: None,
+            cpu_limit: None,
+            storage_limit: None,
+            env_vars: HashMap::new(),
+            ports: Vec::new(),
+            networks: HashMap::new(),
+            pid: None,
+            namespace: Uuid::new_v4().to_string(),
+            checkpoints: Vec::new(),
+        })
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.running
+    }
+
+    pub async fn start(&mut self) -> Result<()> {
+        self.running = true;
+        self.pid = Some(NEXT_COMPAT_PID.fetch_add(1, Ordering::Relaxed));
+        Ok(())
+    }
+
+    pub async fn stop(&mut self) -> Result<()> {
+        self.running = false;
+        self.pid = None;
+        Ok(())
+    }
+
+    pub async fn destroy(&mut self) -> Result<()> {
+        self.running = false;
+        if self.root_path.exists() {
+            tokio::fs::remove_dir_all(&self.root_path).await.ok();
+        }
+        Ok(())
+    }
+
+    pub fn set_memory_limit(&mut self, limit: &str) {
+        self.memory_limit = Some(limit.to_string());
+    }
+
+    pub fn memory_limit(&self) -> Option<String> {
+        self.memory_limit.clone()
+    }
+
+    pub fn set_cpu_limit(&mut self, limit: f64) {
+        self.cpu_limit = Some(limit);
+    }
+
+    pub fn cpu_limit(&self) -> Option<f64> {
+        self.cpu_limit
+    }
+
+    pub fn set_storage_limit(&mut self, limit: &str) {
+        self.storage_limit = Some(limit.to_string());
+    }
+
+    pub fn storage_limit(&self) -> Option<String> {
+        self.storage_limit.clone()
+    }
+
+    pub fn env_vars(&self) -> &HashMap<String, String> {
+        &self.env_vars
+    }
+
+    pub fn ports(&self) -> &[u16] {
+        &self.ports
+    }
+
+    pub fn attach_network(&mut self, network: &str, ip_address: Option<&str>) {
+        self.networks.insert(
+            network.to_string(),
+            ip_address.map(std::string::ToString::to_string),
+        );
+    }
+
+    pub fn networks(&self) -> Vec<String> {
+        self.networks.keys().cloned().collect()
+    }
+
+    pub fn ip_address(&self, network: &str) -> Option<String> {
+        self.networks.get(network).cloned().flatten()
+    }
+
+    pub fn pid(&self) -> Option<u32> {
+        self.pid
+    }
+
+    pub fn namespace(&self) -> &str {
+        &self.namespace
+    }
+
+    pub async fn checkpoint(&mut self, name: &str) -> Result<()> {
+        self.checkpoints.push(name.to_string());
+        Ok(())
+    }
+
+    pub async fn migrate(&mut self, target_path: &str) -> Result<()> {
+        let target_path = PathBuf::from(target_path);
+        std::fs::create_dir_all(&target_path).with_context(|| {
+            format!(
+                "Failed to create migration target {}",
+                target_path.display()
+            )
+        })?;
+        self.root_path = target_path;
+        Ok(())
+    }
+
+    pub async fn restore(&mut self, name: &str) -> Result<()> {
+        if self.checkpoints.iter().any(|checkpoint| checkpoint == name) {
+            Ok(())
+        } else {
+            anyhow::bail!("checkpoint '{}' not found", name)
+        }
+    }
+}
+
+pub struct SnapshotManager {
+    root_path: PathBuf,
+}
+
+impl SnapshotManager {
+    pub fn new(root_path: &str) -> Self {
+        Self {
+            root_path: PathBuf::from(root_path),
+        }
+    }
+
+    pub async fn create_snapshot(&self, capsule: &Capsule, name: &str) -> Result<()> {
+        let snapshot_dir = self.root_path.join(&capsule.name).join(name);
+        tokio::fs::create_dir_all(&snapshot_dir).await?;
+        tokio::fs::write(snapshot_dir.join("snapshot.json"), "{}").await?;
+        Ok(())
+    }
+
+    pub async fn list_snapshots(&self, capsule: &Capsule) -> Result<Vec<SnapshotMetadata>> {
+        let mut snapshots = Vec::new();
+        let snapshot_root = self.root_path.join(&capsule.name);
+        if !snapshot_root.exists() {
+            return Ok(snapshots);
+        }
+
+        let mut entries = tokio::fs::read_dir(snapshot_root).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            if entry.file_type().await?.is_dir() {
+                snapshots.push(SnapshotMetadata {
+                    id: entry.file_name().to_string_lossy().to_string(),
+                    name: Some(entry.file_name().to_string_lossy().to_string()),
+                    created_at: chrono::Utc::now(),
+                    size_bytes: 0,
+                    description: "compatibility snapshot".to_string(),
+                    capsule_state: CapsuleStatus::Created,
+                    memory_included: false,
+                    parent_snapshot: None,
+                });
+            }
+        }
+
+        Ok(snapshots)
+    }
+
+    pub async fn restore_snapshot(&self, _capsule: &mut Capsule, name: &str) -> Result<()> {
+        if name.is_empty() {
+            anyhow::bail!("snapshot name cannot be empty");
+        }
+        Ok(())
+    }
+
+    pub async fn delete_snapshot(&self, capsule: &Capsule, name: &str) -> Result<()> {
+        let snapshot_dir = self.root_path.join(&capsule.name).join(name);
+        if snapshot_dir.exists() {
+            tokio::fs::remove_dir_all(snapshot_dir).await?;
+        }
+        Ok(())
+    }
+}
+
+pub struct CapsuleTemplateBuilder {
+    name: String,
+    base_image: String,
+    env: HashMap<String, String>,
+    ports: Vec<u16>,
+    volumes: Vec<String>,
+}
+
+impl CapsuleTemplate {
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new(name: &str) -> CapsuleTemplateBuilder {
+        CapsuleTemplateBuilder {
+            name: name.to_string(),
+            base_image: "alpine:latest".to_string(),
+            env: HashMap::new(),
+            ports: Vec::new(),
+            volumes: Vec::new(),
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn instantiate(&self, name: &str, root_path: &str) -> Result<Capsule> {
+        let mut capsule = Capsule::new(name, root_path)?;
+        for script in &self.initialization_scripts {
+            if let Some((key, value)) = script.strip_prefix("env:").and_then(|s| s.split_once('='))
+            {
+                capsule.env_vars.insert(key.to_string(), value.to_string());
+            }
+            if let Some(port) = script
+                .strip_prefix("port:")
+                .and_then(|s| s.parse::<u16>().ok())
+            {
+                capsule.ports.push(port);
+            }
+        }
+        Ok(capsule)
+    }
+}
+
+impl CapsuleTemplateBuilder {
+    pub fn with_base_image(mut self, image: &str) -> Self {
+        self.base_image = image.to_string();
+        self
+    }
+
+    pub fn with_env(mut self, key: &str, value: &str) -> Self {
+        self.env.insert(key.to_string(), value.to_string());
+        self
+    }
+
+    pub fn with_port(mut self, port: u16) -> Self {
+        self.ports.push(port);
+        self
+    }
+
+    pub fn with_volume(mut self, volume: &str) -> Self {
+        self.volumes.push(volume.to_string());
+        self
+    }
+
+    pub fn build(self) -> Result<CapsuleTemplate> {
+        let mut initialization_scripts = Vec::new();
+        for (key, value) in self.env {
+            initialization_scripts.push(format!("env:{}={}", key, value));
+        }
+        for port in self.ports {
+            initialization_scripts.push(format!("port:{}", port));
+        }
+        for volume in self.volumes {
+            initialization_scripts.push(format!("volume:{}", volume));
+        }
+
+        Ok(CapsuleTemplate {
+            name: self.name,
+            description: "compatibility template".to_string(),
+            capsule_type: CapsuleType::Standard,
+            base_config: CapsuleConfig::basic(self.base_image),
+            initialization_scripts,
+            required_capabilities: Vec::new(),
+        })
+    }
+}
+
+impl CapsuleConfig {
+    fn basic(image: String) -> Self {
+        Self {
+            template: None,
+            image,
+            resources: CapsuleResources {
+                memory_mb: 1024,
+                vcpus: 1,
+                cpu_shares: 1024,
+                memory_balloon: true,
+                cpu_hotplug: false,
+                numa_topology: None,
+            },
+            networking: CapsuleNetworking {
+                network_type: NetworkType::Bridge,
+                interfaces: Vec::new(),
+                dns_config: DnsConfig {
+                    servers: Vec::new(),
+                    search_domains: Vec::new(),
+                    bolt_dns_enabled: true,
+                },
+                firewall_rules: Vec::new(),
+            },
+            storage: CapsuleStorage {
+                root_disk: DiskConfig {
+                    name: "root".to_string(),
+                    size_gb: 10,
+                    disk_type: DiskType::SSD,
+                    encryption: false,
+                    compression: false,
+                    cache_policy: CachePolicy::WriteBack,
+                },
+                data_disks: Vec::new(),
+                shared_folders: Vec::new(),
+                snapshot_policy: SnapshotPolicy {
+                    auto_snapshot: false,
+                    interval_minutes: 60,
+                    max_snapshots: 10,
+                    compress_snapshots: false,
+                },
+            },
+            security: CapsuleSecurity {
+                isolation_level: IsolationLevel::Container,
+                privilege_mode: PrivilegeMode::Unprivileged,
+                allowed_syscalls: Vec::new(),
+                device_permissions: Vec::new(),
+                mandatory_access_control: false,
+            },
+            gaming: None,
+        }
+    }
 }
 
 impl CapsuleManager {

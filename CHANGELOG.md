@@ -7,84 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-13
+
 ### Added
-- **nvbind GPU Runtime Integration** - Sub-microsecond GPU passthrough (100x faster than Docker)
-  - Added nvbind dependency with feature flag `nvbind-support`
-  - Created `NvbindManager` for GPU runtime management
-  - Support for gaming, AI/ML, and compute workloads with nvbind optimizations
-  - GPU device selection and isolation with exclusive/shared modes
-  - Gaming-specific GPU configurations (DLSS, Ray Tracing, Wine optimizations)
+- **Native GPU Support via built-in nvbind** - No external GPU tooling crate
+  - NVIDIA: detection, driver info, architecture detection (Maxwell through Blackwell),
+    CUDA version detection, device-node passthrough, and CDI v0.6.0 spec generation
+  - AMD (experimental): ROCm detection, AMDGPU driver support, architecture detection
+    (GCN, RDNA, CDNA) — detection and environment setup only
+  - Intel (experimental): Arc GPU detection, i915/Xe drivers, oneAPI/Level Zero
+    detection — detection and environment setup only
 
-- **BTRFS/ZFS Snapshot Automation** - Snapper-like functionality with comprehensive automation
-  - Time-based triggers (hourly, daily, weekly, monthly)
-  - Operation-based triggers (before builds, surge operations, system updates)
-  - Change-based triggers with file monitoring and thresholds
-  - Retention policies with automatic cleanup
-  - Named snapshots for specific configurations
-  - Support for both BTRFS and ZFS with auto-detection
+- **GPU Profile System** - Pre-configured profiles for gaming and AI/ML
+  - Gaming profiles: cyberpunk 2077, doom eternal, hogwarts legacy, fortnite, etc.
+  - AI/ML profiles: ollama-small/medium/large, training-single/multi, inference-batch
+  - `bolt nv profile list/show/apply` commands
+  - `--gpu-profile` flag on `bolt run` command
 
-- **Enhanced Container Management**
-  - `bolt restart` command with configurable timeout
-  - Enhanced `bolt ps` output with modern Docker-like formatting
-  - Command aliases: `rm`/`remove`, `ls`/`list`
-  - Container lifecycle management improvements
-  - Enhanced container information display (command, created time, runtime)
+- **Vendor-Specific CLI Commands**
+  - `bolt nv info/doctor/driver/arch/cdi/profile` - NVIDIA GPU management
+  - `bolt amd info/doctor/rocm/cdi` - AMD GPU management
+  - `bolt arc info/doctor/oneapi/cdi` - Intel Arc GPU management
 
-- **Gaming & GPU CLI Commands**
-  - `bolt gaming gpu nvbind` - Configure nvbind GPU runtime
-  - `bolt gaming gpu check` - Check GPU runtime compatibility
-  - `bolt gaming gpu list` - List available GPUs
-  - `bolt gaming launch` - Launch gaming workloads
-  - `bolt gaming wayland` - Start Wayland gaming session
-
-- **Volume Management**
-  - `bolt volume create` - Create volumes with size specification
-  - `bolt volume ls` - List volumes
-  - `bolt volume rm` - Remove volumes with force option
-  - `bolt volume inspect` - Inspect volume details
-  - `bolt volume prune` - Clean up unused volumes
-
-- **Snapshot Management CLI**
-  - `bolt snapshot create` - Create manual snapshots with names and descriptions
-  - `bolt snapshot list` - List snapshots with filtering options
-  - `bolt snapshot rollback` - Rollback to specific snapshots
-  - `bolt snapshot delete` - Remove snapshots
-  - `bolt snapshot cleanup` - Apply retention policies
-  - `bolt snapshot config` - Show snapshot configuration
-  - `bolt snapshot auto` - Enable/disable automatic snapshots
-
-- **Comprehensive Boltfile Configuration**
-  - Gaming and GPU configuration with nvbind settings
-  - Snapshot configuration with retention policies and triggers
-  - Named snapshots for specific setups
-  - File monitoring and change detection settings
-  - Network configuration for QUIC networking
-
-### Enhanced
-- **Surge Orchestration** - Docker Compose-like multi-service stacks
-  - Enhanced service orchestration with snapshot integration
-  - Improved dependency management and health checks
-  - Better error handling and rollback capabilities
-
-- **CLI User Experience**
-  - Modern output formatting across all commands
-  - Better error messages and user feedback
-  - Consistent command structure and aliases
-  - Enhanced help and documentation
+- **Documentation Overhaul**
+  - Reorganized docs/ with flat structure
+  - New: orchestration.md, gaming.md, ai.md, networking.md, snapshots.md, api.md
+  - Added CONTRIBUTING.md
 
 ### Changed
-- Restructured GPU runtime architecture to support multiple backends
-- Enhanced configuration schema to support snapshot and gaming settings
-- Improved container information tracking and display
-- Updated project roadmap to reflect completed features
+- Merged nvbind GPU runtime directly into bolt (no external dependency)
+- Consolidated GPU code from src/runtime/gpu/ into unified architecture
+- Removed dead dependencies (glyph, omen, MCP modules)
 
-### Technical
-- Added comprehensive snapshot management system in `src/snapshots/`
-- Created BTRFS-specific operations in `src/snapshots/btrfs.rs`
-- Enhanced GPU management in `src/runtime/gpu/`
-- Extended CLI structure in `src/cli/mod.rs`
-- Updated configuration structures in `src/config/mod.rs`
-- Added comprehensive examples in `examples/Boltfile-with-snapshots.toml`
+### Fixed
+- Integration tests updated for current API
+- `surge status` now reports only the services from the last deployment instead
+  of every service defined in the Boltfile (selective `surge up` is respected)
 
 ## [0.1.0] - Initial Release
 

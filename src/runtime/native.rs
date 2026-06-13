@@ -300,15 +300,14 @@ impl BoltNativeRuntime {
                     applied_cdi = Some(cdi_artifacts);
                 }
                 Err(err) => {
-                    if network_attached {
-                        if let Err(clean_err) =
+                    if network_attached
+                        && let Err(clean_err) =
                             self.teardown_container_networking(&container_id).await
-                        {
-                            warn!(
-                                "Failed to clean up networking after GPU setup error for {}: {}",
-                                container_id, clean_err
-                            );
-                        }
+                    {
+                        warn!(
+                            "Failed to clean up networking after GPU setup error for {}: {}",
+                            container_id, clean_err
+                        );
                     }
                     return Err(err);
                 }
@@ -343,29 +342,27 @@ impl BoltNativeRuntime {
         let pid = match oci::execute_container(&container_state, &spec).await {
             Ok(pid) => pid,
             Err(err) => {
-                if network_attached {
-                    if let Err(clean_err) = self.teardown_container_networking(&container_id).await
-                    {
-                        warn!(
-                            "Failed to clean up networking after execution error for {}: {}",
-                            container_id, clean_err
-                        );
-                    }
+                if network_attached
+                    && let Err(clean_err) = self.teardown_container_networking(&container_id).await
+                {
+                    warn!(
+                        "Failed to clean up networking after execution error for {}: {}",
+                        container_id, clean_err
+                    );
                 }
                 return Err(err);
             }
         };
 
-        if pid > 0 {
-            if let Err(err) = self
+        if pid > 0
+            && let Err(err) = self
                 .finalize_container_networking(&container_id, pid as i32)
                 .await
-            {
-                warn!(
-                    "Failed to finalize networking for container {}: {}",
-                    container_id, err
-                );
-            }
+        {
+            warn!(
+                "Failed to finalize networking for container {}: {}",
+                container_id, err
+            );
         }
 
         // Update container state
@@ -605,18 +602,18 @@ impl BoltNativeRuntime {
 
         // Determine command/entrypoint behavior
         let mut command = Vec::new();
-        if let Some(ref metadata) = image_metadata {
-            if let Some(ref entrypoint) = metadata.config.entrypoint {
-                command.extend(entrypoint.clone());
-            }
+        if let Some(ref metadata) = image_metadata
+            && let Some(ref entrypoint) = metadata.config.entrypoint
+        {
+            command.extend(entrypoint.clone());
         }
 
         if let Some(custom_cmd) = config.command.clone() {
             command.extend(custom_cmd);
-        } else if let Some(ref metadata) = image_metadata {
-            if let Some(ref default_cmd) = metadata.config.cmd {
-                command.extend(default_cmd.clone());
-            }
+        } else if let Some(ref metadata) = image_metadata
+            && let Some(ref default_cmd) = metadata.config.cmd
+        {
+            command.extend(default_cmd.clone());
         }
 
         if command.is_empty() {
@@ -1270,17 +1267,16 @@ impl BoltNativeRuntime {
             return Ok(());
         }
 
-        if let Some(network_id) = self.container_networks.get(container_id).cloned() {
-            if let Err(err) = self
+        if let Some(network_id) = self.container_networks.get(container_id).cloned()
+            && let Err(err) = self
                 .network_manager
                 .disconnect_container(&network_id, container_id)
                 .await
-            {
-                warn!(
-                    "Failed to disconnect container {} from network {}: {}",
-                    container_id, network_id, err
-                );
-            }
+        {
+            warn!(
+                "Failed to disconnect container {} from network {}: {}",
+                container_id, network_id, err
+            );
         }
 
         if let Err(err) = oci::cleanup_network_namespace(container_id).await {
@@ -1310,16 +1306,15 @@ impl BoltNativeRuntime {
             if let Ok(security_metrics) = security_manager
                 .monitor_container_security(&container_id)
                 .await
-            {
-                if matches!(
+                && matches!(
                     security_metrics.threat_level,
                     super::security::ThreatLevel::High | super::security::ThreatLevel::Critical
-                ) {
-                    warn!(
-                        "🚨 High threat level detected for container: {}",
-                        container_id
-                    );
-                }
+                )
+            {
+                warn!(
+                    "🚨 High threat level detected for container: {}",
+                    container_id
+                );
             }
 
             // Monitor performance

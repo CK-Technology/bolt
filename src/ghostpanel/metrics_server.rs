@@ -9,10 +9,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{RwLock, broadcast};
 use tokio::time;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 #[cfg(feature = "websocket")]
 use {
+    anyhow::Context,
     axum::{
         Json, Router,
         extract::{
@@ -22,7 +23,8 @@ use {
         response::IntoResponse,
         routing::{get, post},
     },
-    futures_util::StreamExt,
+    futures_util::{SinkExt, StreamExt},
+    std::net::SocketAddr,
     tower_http::cors::{Any, CorsLayer},
     tracing::error,
 };
@@ -199,10 +201,10 @@ impl GhostPanelMetricsServer {
         // 2. Use frame capture for FPS/frame time
         // 3. Query container runtime for process stats
 
-        #[cfg(feature = "nvbind-support")]
+        #[cfg(feature = "nvidia-support")]
         {
-            // Use nvbind to get real metrics
-            // let metrics = nvbind::get_container_metrics(container_id).await;
+            // Use native GPU runtime to get real metrics
+            // let metrics = gpu::get_container_metrics(container_id).await;
         }
 
         // For now, return updated timestamp with current values
@@ -307,7 +309,7 @@ impl GhostPanelMetricsServer {
     #[cfg(feature = "websocket")]
     async fn update_gpu_profile_handler(
         AxumPath(container_id): AxumPath<String>,
-        Json(config): Json<GpuConfigUpdate>,
+        Json(_config): Json<GpuConfigUpdate>,
     ) -> Json<ApiResponse> {
         info!(
             "🔧 Hot-reloading GPU config for container: {}",
@@ -315,7 +317,7 @@ impl GhostPanelMetricsServer {
         );
 
         // In production, apply GPU config via nvbind
-        #[cfg(feature = "nvbind-support")]
+        #[cfg(feature = "nvidia-support")]
         {
             // nvbind::apply_gpu_config(&container_id, &config).await;
         }
@@ -406,8 +408,8 @@ pub struct ApiResponse {
 #[cfg(not(feature = "websocket"))]
 impl GhostPanelMetricsServer {
     pub async fn start_server(&self, _port: u16) -> Result<()> {
-        warn!("⚠️  WebSocket feature not enabled, metrics server disabled");
-        warn!("   Enable with: cargo build --features websocket");
+        tracing::warn!("⚠️  WebSocket feature not enabled, metrics server disabled");
+        tracing::warn!("   Enable with: cargo build --features websocket");
         Ok(())
     }
 }

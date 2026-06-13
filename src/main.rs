@@ -1,14 +1,12 @@
 mod cli;
 
 use anyhow::Result;
+use bolt::runtime::gpu_integration::{GpuConfig, GpuIsolationLevel, GpuWorkloadType};
 use bolt::{BoltConfig, BoltRuntime, gaming, surge};
 use clap::Parser;
 use cli::{Cli, Commands, GamingCommands, NetworkCommands, SurgeCommands, VolumeCommands, compat};
 use std::path::PathBuf;
 use tracing::info;
-
-#[cfg(feature = "mcp")]
-use cli::McpCommands;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -42,6 +40,7 @@ async fn main() -> Result<()> {
             runtime: gpu_runtime,
             gpu,
             gpus,
+            gpu_profile,
             interactive,
             tty,
             rm: _rm,
@@ -60,12 +59,33 @@ async fn main() -> Result<()> {
 
             // Handle GPU flags (both --gpu and --gpus for Docker compatibility)
             let gpu_spec = gpus.or(gpu);
-            if let Some(ref runtime_type) = gpu_runtime {
-                info!("  GPU runtime: {}", runtime_type);
+
+            // Handle GPU profile
+            if let Some(ref profile) = gpu_profile {
+                info!("  • GPU Profile: {}", profile);
             }
-            if let Some(ref gpu_devices) = gpu_spec {
-                info!("  GPU devices: {}", gpu_devices);
-            }
+
+            // Build GPU configuration if GPU requested
+            let gpu_config = if gpu_spec.is_some() || gpu_runtime.is_some() {
+                let devices = gpu_spec.clone().unwrap_or_else(|| "all".to_string());
+                info!("🎮 GPU passthrough enabled:");
+                info!("  • Devices: {}", devices);
+
+                if let Some(ref rt) = gpu_runtime {
+                    info!("  • Runtime hint: {}", rt);
+                }
+
+                Some(GpuConfig {
+                    enabled: true,
+                    workload_type: GpuWorkloadType::General,
+                    isolation_level: GpuIsolationLevel::Shared,
+                    memory_limit: None,
+                    snapshot_support: false,
+                    quick_sync: None,
+                })
+            } else {
+                None
+            };
 
             // Handle interactive/TTY flags
             if interactive || tty {
@@ -73,7 +93,15 @@ async fn main() -> Result<()> {
             }
 
             runtime
-                .run_container(&image, name.as_deref(), &ports, &env, &volumes, detach)
+                .run_container_with_gpu(
+                    &image,
+                    name.as_deref(),
+                    &ports,
+                    &env,
+                    &volumes,
+                    detach,
+                    gpu_config,
+                )
                 .await?;
         }
 
@@ -654,10 +682,10 @@ async fn main() -> Result<()> {
                         }
 
                         // Show size if possible
-                        if let Ok(metadata) = tokio::fs::metadata(&snap.path).await {
-                            if metadata.is_dir() {
-                                println!("Status:      Ready");
-                            }
+                        if let Ok(metadata) = tokio::fs::metadata(&snap.path).await
+                            && metadata.is_dir()
+                        {
+                            println!("Status:      Ready");
                         }
                     } else {
                         println!("❌ Snapshot '{}' not found", snapshot);
@@ -1097,8 +1125,24 @@ keep_monthly = 3
             println!("For now, use: bolt run --gpus all <image>");
         }
 
+        Commands::Nv { command } => {
+            cli::nv::execute(&command).await?;
+        }
+
+        Commands::Amd { command } => {
+            cli::amd::execute(&command).await?;
+        }
+
+        Commands::Arc { command } => {
+            cli::arc::execute(&command).await?;
+        }
+
         Commands::Compat { command } => {
             compat::handle_compat_command(compat::CompatArgs { command }, runtime).await?;
+        }
+
+        Commands::Tools { command } => {
+            cli::tools::execute(&command, &bolt_config.boltfile_path).await?;
         }
 
         Commands::Dashboard { port } => {
@@ -1119,120 +1163,6 @@ keep_monthly = 3
             println!("\n   Press Ctrl+C to stop\n");
 
             dashboard.start(port).await?;
-        }
-
-        #[cfg(feature = "mcp")]
-        Commands::Mcp { command } => {
-            use bolt::mcp::{BoltMcpServer, McpConfig};
-
-            match command {
-                McpCommands::Gateway {
-                    transport,
-                    address,
-                    port,
-                    catalog,
-                    servers,
-                    tools,
-                    watch,
-                } => {
-                    info!("🌐 Starting Bolt MCP Gateway");
-
-                    // Note: Gateway functionality requires the bolt-mcp crate
-                    // For now, provide instructions to use the standalone binary
-                    println!("\n⚠️  MCP Gateway Mode");
-                    println!("   To run the full gateway, use the standalone binary:");
-                    println!("   cargo run --package bolt-mcp --bin bolt-mcp-gateway");
-                    println!("\n   Or use 'bolt mcp serve' for single-server mode\n");
-
-                    info!("Gateway configuration:");
-                    info!("  Transport: {}", transport);
-                    info!("  Address: {}:{}", address, port);
-                    if let Some(ref cat) = catalog {
-                        info!("  Catalog: {:?}", cat);
-                    }
-                    if !servers.is_empty() {
-                        info!("  Enabled servers: {:?}", servers);
-                    }
-                    if !tools.is_empty() {
-                        info!("  Enabled tools: {:?}", tools);
-                    }
-                    info!("  Watch: {}", watch);
-                }
-
-                McpCommands::Serve {
-                    transport,
-                    address,
-                    port,
-                    container,
-                } => {
-                    info!("🤖 Starting Bolt MCP server");
-                    info!("   Transport: {}", transport);
-
-                    if let Some(ref container_name) = container {
-                        info!("   Container: {}", container_name);
-                    }
-
-                    let mut config = McpConfig::default();
-                    config.enabled = true;
-                    config.transport = transport.clone();
-                    config.address = address.clone();
-                    config.port = port;
-
-                    match transport.as_str() {
-                        "stdio" => {
-                            info!("   📡 Listening on stdio (for Claude Desktop)");
-                            println!("\n💡 Add this to your Claude Desktop config:");
-                            println!(
-                                r#"{{
-  "mcpServers": {{
-    "bolt": {{
-      "command": "bolt",
-      "args": ["mcp", "serve", "--transport", "stdio"]
-    }}
-  }}
-}}
-"#
-                            );
-                        }
-                        "websocket" => {
-                            info!("   📡 WebSocket server: ws://{}:{}", address, port);
-                            println!("\n💡 Connect via WebSocket:");
-                            println!("   ws://{}:{}", address, port);
-                        }
-                        "http" => {
-                            info!("   📡 HTTP server: http://{}:{}", address, port);
-                            println!("\n💡 Connect via HTTP:");
-                            println!("   http://{}:{}", address, port);
-                        }
-                        _ => {
-                            eprintln!("❌ Unsupported transport: {}", transport);
-                            std::process::exit(1);
-                        }
-                    }
-
-                    println!("\n🛠️  Available tools:");
-                    if config.tools.gpu_stats.enabled {
-                        println!("   • bolt_gpu_stats - GPU metrics and monitoring");
-                    }
-                    if config.tools.filesystem.enabled {
-                        println!("   • bolt_filesystem - Container filesystem access");
-                    }
-                    if config.tools.shell.enabled {
-                        println!("   • bolt_shell_exec - Execute shell commands");
-                    }
-                    if config.tools.process.enabled {
-                        println!("   • bolt_process - Process management");
-                    }
-                    if config.tools.network.enabled {
-                        println!("   • bolt_network_stats - Network statistics");
-                    }
-
-                    println!("\n   Press Ctrl+C to stop\n");
-
-                    let server = BoltMcpServer::new(config);
-                    server.run().await?;
-                }
-            }
         }
     }
 

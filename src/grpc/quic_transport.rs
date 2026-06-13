@@ -286,9 +286,7 @@ impl AsyncWrite for QuicStream {
     ) -> Poll<Result<usize, std::io::Error>> {
         match Pin::new(&mut self.send).poll_write(cx, buf) {
             Poll::Ready(Ok(n)) => Poll::Ready(Ok(n)),
-            Poll::Ready(Err(e)) => {
-                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e)))
-            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(std::io::Error::other(e))),
             Poll::Pending => Poll::Pending,
         }
     }
@@ -299,21 +297,19 @@ impl AsyncWrite for QuicStream {
     ) -> Poll<Result<(), std::io::Error>> {
         match Pin::new(&mut self.send).poll_flush(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(e)) => {
-                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e)))
-            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(std::io::Error::other(e))),
             Poll::Pending => Poll::Pending,
         }
     }
 
     fn poll_shutdown(
         mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
+        _cx: &mut Context<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
         // Quinn's SendStream::finish() is not async, so we call it directly
         match self.send.finish() {
             Ok(()) => Poll::Ready(Ok(())),
-            Err(e) => Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e))),
+            Err(e) => Poll::Ready(Err(std::io::Error::other(e))),
         }
     }
 }
@@ -568,8 +564,6 @@ impl Default for QuicGrpcStats {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[tokio::test]
     async fn test_quic_stream_wrapper() {
         // Test that QuicStream properly implements AsyncRead/AsyncWrite

@@ -7,8 +7,18 @@ use std::process::Command;
 pub async fn status_info(config: &BoltConfig) -> Result<SurgeStatus> {
     let boltfile = config.load_boltfile()?;
 
+    // When a deployment has been recorded, report only those services. Otherwise
+    // fall back to every service defined in the Boltfile.
+    let deployed = super::read_deployed_services(config);
+
     let mut services = Vec::new();
     for (name, _service_config) in boltfile.services.iter() {
+        if let Some(ref deployed) = deployed
+            && !deployed.contains(name)
+        {
+            continue;
+        }
+
         // Check if container is running by looking for container with this service name
         let status = check_container_status(name);
 

@@ -193,7 +193,7 @@ async fn test_container_networking() -> Result<()> {
     let interfaces = network_manager.get_active_interfaces().await;
     info!("  📊 Active Network Interfaces: {}", interfaces.len());
 
-    for (container_id, interface) in interfaces {
+    for (container_id, _interface) in interfaces {
         if let Some(metrics) = network_manager.get_container_metrics(&container_id).await {
             info!(
                 "    • {}: {:.2}ms latency, {:.2}Mbps throughput",

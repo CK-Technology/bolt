@@ -193,18 +193,18 @@ impl UltraLowLatencyInputHandler {
             let filename = path.file_name().unwrap().to_string_lossy();
 
             // Only process event devices
-            if filename.starts_with("event") {
-                if let Ok(device) = self.analyze_input_device(&path).await {
-                    info!("   Found: {} ({})", device.name, device.path);
-                    debug!("     Type: {:?}", device.device_type);
-                    debug!(
-                        "     Vendor: 0x{:04x}, Product: 0x{:04x}",
-                        device.vendor_id, device.product_id
-                    );
+            if filename.starts_with("event")
+                && let Ok(device) = self.analyze_input_device(&path).await
+            {
+                info!("   Found: {} ({})", device.name, device.path);
+                debug!("     Type: {:?}", device.device_type);
+                debug!(
+                    "     Vendor: 0x{:04x}, Product: 0x{:04x}",
+                    device.vendor_id, device.product_id
+                );
 
-                    devices.insert(device.path.clone(), device);
-                    device_count += 1;
-                }
+                devices.insert(device.path.clone(), device);
+                device_count += 1;
             }
         }
 
@@ -251,10 +251,10 @@ impl UltraLowLatencyInputHandler {
                         if let Ok(vendor) = u16::from_str_radix(vendor_str, 16) {
                             device.vendor_id = vendor;
                         }
-                    } else if let Some(product_str) = line.strip_prefix("product ") {
-                        if let Ok(product) = u16::from_str_radix(product_str, 16) {
-                            device.product_id = product;
-                        }
+                    } else if let Some(product_str) = line.strip_prefix("product ")
+                        && let Ok(product) = u16::from_str_radix(product_str, 16)
+                    {
+                        device.product_id = product;
                     }
                 }
             }

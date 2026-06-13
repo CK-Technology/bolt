@@ -9,7 +9,7 @@ use tokio::sync::RwLock;
 use tokio_stream::Stream;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::grpc::generated::network::*;
 use crate::network;
@@ -33,6 +33,12 @@ impl NetworkServiceImpl {
         Self {
             quic_server: Some(Arc::new(RwLock::new(quic_server))),
         }
+    }
+}
+
+impl Default for NetworkServiceImpl {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

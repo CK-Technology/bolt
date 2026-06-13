@@ -465,12 +465,11 @@ impl OrchestrationManager {
         }
 
         // Locality score (prefer nodes in same region/zone)
-        if let Some(preferred_zone) = deployment.placement_preferences.get("zone") {
-            if let Some(node_zone) = node.labels.get("zone") {
-                if preferred_zone == node_zone {
-                    score += 15.0;
-                }
-            }
+        if let Some(preferred_zone) = deployment.placement_preferences.get("zone")
+            && let Some(node_zone) = node.labels.get("zone")
+            && preferred_zone == node_zone
+        {
+            score += 15.0;
         }
 
         score

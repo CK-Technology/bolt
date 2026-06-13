@@ -10,6 +10,7 @@ use bolt::grpc::container_service::ContainerServiceImpl;
 use bolt::grpc::generated::container::*;
 use bolt::grpc::network_service::NetworkServiceImpl;
 use bolt::grpc::orchestration_service::OrchestrationServiceImpl;
+use bolt::grpc::{ContainerService, NetworkService, OrchestrationService};
 use futures::StreamExt;
 use tonic::Request;
 

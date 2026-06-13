@@ -382,7 +382,7 @@ async fn handle_grafana_command(command: GrafanaCommands) -> Result<()> {
             let is_root = std::env::var("USER").unwrap_or_default() == "root"
                 || std::env::var("SUDO_USER").is_ok();
 
-            if !is_root && grafana_base == PathBuf::from("/etc/grafana/provisioning") {
+            if !is_root && grafana_base == *"/etc/grafana/provisioning" {
                 println!("⚠️  System Grafana installation detected but not running as root.");
                 println!("   Run with sudo to install to system Grafana:");
                 println!("   sudo bolt compat grafana setup");
