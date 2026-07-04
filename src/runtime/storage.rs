@@ -774,15 +774,22 @@ struct StorageBootstrap {
     object_store: Option<ObjectStoreConfig>,
 }
 
+/// Resolve the Bolt storage root, honoring `BOLT_STORAGE_ROOT` and otherwise
+/// falling back to the platform data directory. Shared so the runtime and the
+/// CLI (which read persisted state directly) agree on the same location.
+pub fn storage_root() -> PathBuf {
+    env::var("BOLT_STORAGE_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            data_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("bolt")
+        })
+}
+
 impl StorageBootstrap {
     fn detect() -> Result<Self> {
-        let root = env::var("BOLT_STORAGE_ROOT")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                data_dir()
-                    .unwrap_or_else(|| PathBuf::from("."))
-                    .join("bolt")
-            });
+        let root = storage_root();
 
         let registry_endpoint = env::var("BOLT_REGISTRY_ENDPOINT")
             .or_else(|_| env::var("DRIFT_REGISTRY_ENDPOINT"))

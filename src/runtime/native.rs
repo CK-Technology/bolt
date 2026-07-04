@@ -24,6 +24,7 @@ use super::networking::{
 use super::oci::{self, ContainerConfig, ContainerState, ResourceLimits};
 use super::performance::{BenchmarkResults, BoltPerformanceOptimizer, PerformanceMetrics};
 use super::security::{BoltSecurityManager, SecurityMetrics};
+use super::state;
 use super::storage::StorageManager;
 use std::{env, fs};
 
@@ -166,9 +167,25 @@ impl BoltNativeRuntime {
             }
         };
 
+        // Hydrate persisted container state so lifecycle commands (ps/stop/
+        // restart/rm/logs/exec) survive a restart of the Bolt process.
+        let mut containers = HashMap::new();
+        match state::load_all() {
+            Ok(states) => {
+                for mut st in states {
+                    state::reconcile_liveness(&mut st);
+                    containers.insert(st.id.clone(), st);
+                }
+                if !containers.is_empty() {
+                    info!("📦 Hydrated {} persisted container(s)", containers.len());
+                }
+            }
+            Err(e) => warn!("⚠️  Failed to load persisted container state: {}", e),
+        }
+
         Ok(Self {
             storage,
-            containers: HashMap::new(),
+            containers,
             container_networks: HashMap::new(),
             runtime_dir,
             security_manager,
@@ -200,6 +217,12 @@ impl BoltNativeRuntime {
         // Create container configuration
         let container_config = self.create_container_config(&container_id, &config).await?;
 
+        // Resolve the image digest for provenance, best-effort.
+        let image_digest = self
+            .storage
+            .get_cached_image_metadata(&config.image)
+            .map(|meta| meta.digest);
+
         // Create container state (spec will be generated after rootfs preparation)
         let container_state = ContainerState {
             id: container_id.clone(),
@@ -208,6 +231,12 @@ impl BoltNativeRuntime {
             bundle_path: self.runtime_dir.join(&container_id),
             config: container_config,
             created: std::time::SystemTime::now(),
+            started: None,
+            finished: None,
+            exit_code: None,
+            image_digest,
+            log_path: Some(container_log_path(&container_id)),
+            gpu_allocation: config.gpu_config.as_ref().map(describe_gpu_allocation),
         };
 
         // Create bundle directory
@@ -383,6 +412,15 @@ impl BoltNativeRuntime {
         let mut updated_state = container_state;
         updated_state.status = super::oci::ContainerStatus::Running;
         updated_state.pid = Some(pid);
+        updated_state.started = Some(std::time::SystemTime::now());
+
+        // Persist state so lifecycle commands survive a process restart.
+        if let Err(err) = state::save(&updated_state) {
+            warn!(
+                "Failed to persist state for container {}: {}",
+                container_id, err
+            );
+        }
 
         // Store container state
         self.containers.insert(container_id.clone(), updated_state);
@@ -404,6 +442,11 @@ impl BoltNativeRuntime {
     /// Stop a running container (replaces docker/podman stop)
     pub async fn stop_container(&mut self, id: &str) -> Result<()> {
         info!("🛑 Stopping container: {}", id);
+
+        let id = self
+            .resolve_id(id)
+            .ok_or_else(|| anyhow!("Container not found: {}", id))?;
+        let id = id.as_str();
 
         let container = self
             .containers
@@ -442,6 +485,14 @@ impl BoltNativeRuntime {
 
         container.status = super::oci::ContainerStatus::Stopped;
         container.pid = None;
+        container.finished = Some(std::time::SystemTime::now());
+
+        if let Err(err) = state::save(container) {
+            warn!(
+                "Failed to persist stopped state for container {}: {}",
+                id, err
+            );
+        }
 
         info!("✅ Container stopped: {}", id);
         Ok(())
@@ -450,6 +501,11 @@ impl BoltNativeRuntime {
     /// Remove a container (replaces docker/podman rm)
     pub async fn remove_container(&mut self, id: &str, force: bool) -> Result<()> {
         info!("🗑️  Removing container: {}", id);
+
+        let id = self
+            .resolve_id(id)
+            .ok_or_else(|| anyhow!("Container not found: {}", id))?;
+        let id = id.as_str();
 
         // Check if container exists and get its status and bundle path
         let (is_running, bundle_path) = {
@@ -491,6 +547,12 @@ impl BoltNativeRuntime {
         self.containers.remove(id);
 
         self.storage.remove_container(id).await?;
+        if let Err(err) = state::remove(id) {
+            warn!(
+                "Failed to remove persisted state for container {}: {}",
+                id, err
+            );
+        }
 
         // Drop any per-container environment recorded during GPU/AI/gaming setup.
         if let Err(err) = crate::runtime::environment::env_manager().clear_container_env(id) {
@@ -501,33 +563,49 @@ impl BoltNativeRuntime {
         Ok(())
     }
 
+    /// Resolve a container reference (id or `--name`) to its stored id.
+    fn resolve_id(&self, name_or_id: &str) -> Option<String> {
+        if self.containers.contains_key(name_or_id) {
+            return Some(name_or_id.to_string());
+        }
+        self.containers
+            .iter()
+            .find(|(_, st)| st.config.name.as_deref() == Some(name_or_id))
+            .map(|(id, _)| id.clone())
+    }
+
     /// List containers (replaces docker/podman ps)
     pub async fn list_containers(&self, all: bool) -> Result<Vec<NativeContainerInfo>> {
         let mut containers = Vec::new();
 
-        for (id, state) in &self.containers {
-            if !all && !matches!(state.status, super::oci::ContainerStatus::Running) {
+        for (id, stored) in &self.containers {
+            // Report the reconciled status so a container whose process died
+            // while we were not running is not shown as Running.
+            let mut st = stored.clone();
+            state::reconcile_liveness(&mut st);
+
+            if !all && !matches!(st.status, super::oci::ContainerStatus::Running) {
                 continue;
             }
 
             let info = NativeContainerInfo {
                 id: id.clone(),
-                name: state.config.name.clone(),
-                image: state.config.image.clone(),
-                status: match &state.status {
+                name: st.config.name.clone(),
+                image: st.config.image.clone(),
+                status: match &st.status {
                     super::oci::ContainerStatus::Created => ContainerStatus::Created,
                     super::oci::ContainerStatus::Running => ContainerStatus::Running,
                     super::oci::ContainerStatus::Stopped => ContainerStatus::Stopped,
                     super::oci::ContainerStatus::Exited(code) => ContainerStatus::Exited(*code),
                 },
-                created: state.created,
-                ports: state
+                created: st.created,
+                ports: st
                     .config
                     .ports
                     .iter()
                     .map(|p| format!("{}:{}", p.host_port, p.container_port))
                     .collect(),
-                pid: state.pid,
+                pid: st.pid,
             };
 
             containers.push(info);
@@ -1631,6 +1709,28 @@ impl BoltNativeRuntime {
         loop {
             interval.tick().await;
 
+            // Detect process exit and persist the terminal state so that
+            // `ps -a`/`logs`/`rm` report the truth after the process is gone.
+            match state::load(&container_id) {
+                Ok(Some(mut st)) => {
+                    if state::reconcile_liveness(&mut st) {
+                        if let Err(err) = state::save(&st) {
+                            warn!(
+                                "Failed to persist exit state for container {}: {}",
+                                container_id, err
+                            );
+                        }
+                        info!("📦 Container {} exited; monitoring stopped", container_id);
+                        break;
+                    }
+                }
+                Ok(None) => break, // state removed (rm) — stop monitoring
+                Err(err) => warn!(
+                    "Failed to read state while monitoring container {}: {}",
+                    container_id, err
+                ),
+            }
+
             // Monitor security
             if let Ok(security_metrics) = security_manager
                 .monitor_container_security(&container_id)
@@ -1941,6 +2041,28 @@ impl BoltNativeRuntime {
         let _ = fs::remove_file(probe);
         Ok(())
     }
+}
+
+/// Directory where container logs are captured. Honors `BOLT_LOG_DIR`; must
+/// match the resolution used by `crate::cli::logs`.
+pub fn container_log_dir() -> PathBuf {
+    env::var_os("BOLT_LOG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/var/log/bolt/containers"))
+}
+
+/// Path to a container's captured stdout/stderr log file.
+pub fn container_log_path(container_id: &str) -> PathBuf {
+    container_log_dir().join(format!("{}.log", container_id))
+}
+
+/// Short human-readable summary of a GPU allocation for persisted state.
+fn describe_gpu_allocation(gpu: &GpuConfig) -> String {
+    let mut summary = format!("{:?}/{:?}", gpu.workload_type, gpu.isolation_level);
+    if let Some(ref mem) = gpu.memory_limit {
+        summary.push_str(&format!(" mem={}", mem));
+    }
+    summary
 }
 
 #[cfg(test)]

@@ -43,6 +43,24 @@ pub struct ContainerState {
     pub bundle_path: PathBuf,
     pub config: ContainerConfig,
     pub created: std::time::SystemTime,
+    /// When the container process was started.
+    #[serde(default)]
+    pub started: Option<std::time::SystemTime>,
+    /// When the container process exited or was stopped.
+    #[serde(default)]
+    pub finished: Option<std::time::SystemTime>,
+    /// Exit code once the container has stopped.
+    #[serde(default)]
+    pub exit_code: Option<i32>,
+    /// Resolved image digest the container was created from.
+    #[serde(default)]
+    pub image_digest: Option<String>,
+    /// Path to the captured stdout/stderr log file, when logs are captured.
+    #[serde(default)]
+    pub log_path: Option<PathBuf>,
+    /// Human-readable summary of the GPU allocation, when GPUs are attached.
+    #[serde(default)]
+    pub gpu_allocation: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

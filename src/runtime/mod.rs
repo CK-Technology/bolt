@@ -19,6 +19,7 @@ pub mod oci;
 pub mod performance;
 pub mod quick_sync;
 pub mod security;
+pub mod state;
 pub mod storage;
 pub mod unified;
 
