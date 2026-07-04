@@ -316,7 +316,10 @@ mod tests {
             .unwrap();
 
         let env = mgr.get_container_env("c1").unwrap();
-        assert_eq!(env.get("NVIDIA_VISIBLE_DEVICES").map(String::as_str), Some("0,1"));
+        assert_eq!(
+            env.get("NVIDIA_VISIBLE_DEVICES").map(String::as_str),
+            Some("0,1")
+        );
     }
 
     #[test]
@@ -324,7 +327,10 @@ mod tests {
         let mgr = EnvironmentManager::new();
         let mut vars = HashMap::new();
         vars.insert("CUDA_VISIBLE_DEVICES".to_string(), "0".to_string());
-        vars.insert("NVIDIA_DRIVER_CAPABILITIES".to_string(), "compute".to_string());
+        vars.insert(
+            "NVIDIA_DRIVER_CAPABILITIES".to_string(),
+            "compute".to_string(),
+        );
         mgr.set_container_env_batch("c1", vars).unwrap();
 
         let mut env_vec = mgr.to_env_vec("c1").unwrap();

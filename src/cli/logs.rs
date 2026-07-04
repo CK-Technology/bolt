@@ -134,8 +134,9 @@ impl LogsCommand {
     }
 
     async fn get_log_path(&self, container_id: &str) -> Result<std::path::PathBuf> {
-        // Container logs are stored in /var/log/bolt/containers/{id}.log
-        let log_dir = std::path::PathBuf::from("/var/log/bolt/containers");
+        let log_dir = std::env::var_os("BOLT_LOG_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from("/var/log/bolt/containers"));
         tokio::fs::create_dir_all(&log_dir).await?;
 
         let log_file = log_dir.join(format!("{}.log", container_id));

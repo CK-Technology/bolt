@@ -7,7 +7,10 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::process::Command;
+use tokio::time::{Duration, timeout};
 use tracing::{debug, info, warn};
+
+const OCI_COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// OCI container configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,12 +23,15 @@ pub struct ContainerConfig {
     pub env: HashMap<String, String>,
     pub working_dir: Option<String>,
     pub user: Option<String>,
+    pub hostname: Option<String>,
     pub ports: Vec<PortMapping>,
     pub volumes: Vec<VolumeMount>,
     pub capabilities: Vec<String>,
     pub resource_limits: Option<ResourceLimits>,
     pub gaming_config: Option<GamingConfig>,
     pub detach: bool,
+    pub privileged: bool,
+    pub tty: bool,
 }
 
 /// Container runtime state
@@ -109,9 +115,9 @@ pub async fn execute_container(
             .arg(&state.bundle_path)
             .arg(&state.id);
 
-        let output = cmd
-            .output()
+        let output = timeout(OCI_COMMAND_TIMEOUT, cmd.output())
             .await
+            .context("Timed out creating container with OCI runtime")?
             .context("Failed to create container with OCI runtime")?;
 
         if !output.status.success() {
@@ -123,9 +129,9 @@ pub async fn execute_container(
         let mut start_cmd = Command::new(&runtime);
         start_cmd.arg("start").arg(&state.id);
 
-        let start_output = start_cmd
-            .output()
+        let start_output = timeout(OCI_COMMAND_TIMEOUT, start_cmd.output())
             .await
+            .context("Timed out starting container")?
             .context("Failed to start container")?;
 
         if !start_output.status.success() {
@@ -150,9 +156,9 @@ pub async fn execute_container(
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
 
-        let status = run_cmd
-            .status()
+        let status = timeout(OCI_COMMAND_TIMEOUT, run_cmd.status())
             .await
+            .context("Timed out running container in attached mode")?
             .context("Failed to run container in attached mode")?;
 
         let exit_code = status.code().unwrap_or_default();
@@ -195,9 +201,9 @@ async fn get_container_pid(runtime: &str, container_id: &str) -> Result<u32> {
     let mut cmd = Command::new(runtime);
     cmd.arg("state").arg(container_id);
 
-    let output = cmd
-        .output()
+    let output = timeout(OCI_COMMAND_TIMEOUT, cmd.output())
         .await
+        .context("Timed out getting container state")?
         .context("Failed to get container state")?;
 
     if !output.status.success() {

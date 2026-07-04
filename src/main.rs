@@ -2,6 +2,7 @@ mod cli;
 
 use anyhow::Result;
 use bolt::runtime::gpu_integration::{GpuConfig, GpuIsolationLevel, GpuWorkloadType};
+use bolt::runtime::unified::ContainerRunOptions;
 use bolt::{BoltConfig, BoltRuntime, gaming, surge};
 use clap::Parser;
 use cli::{Cli, Commands, GamingCommands, NetworkCommands, SurgeCommands, VolumeCommands, compat};
@@ -43,17 +44,18 @@ async fn main() -> Result<()> {
             gpu_profile,
             interactive,
             tty,
-            rm: _rm,
-            workdir: _workdir,
-            user: _user,
-            hostname: _hostname,
-            entrypoint: _entrypoint,
-            cpus: _cpus,
-            memory: _memory,
-            network: _network,
-            cap_add: _cap_add,
-            cap_drop: _cap_drop,
-            privileged: _privileged,
+            rm,
+            workdir,
+            user,
+            hostname,
+            entrypoint,
+            cpus,
+            memory,
+            network,
+            cap_add,
+            cap_drop,
+            privileged,
+            command,
         } => {
             info!("Running container: {}", image);
 
@@ -92,8 +94,29 @@ async fn main() -> Result<()> {
                 info!("  Interactive mode: {}, TTY: {}", interactive, tty);
             }
 
+            let run_options = ContainerRunOptions {
+                rm,
+                command: if command.is_empty() {
+                    None
+                } else {
+                    Some(command)
+                },
+                entrypoint: entrypoint.map(|value| vec![value]),
+                working_dir: workdir,
+                user,
+                hostname,
+                cpus,
+                memory,
+                network,
+                cap_add,
+                cap_drop,
+                privileged,
+                tty,
+                interactive,
+            };
+
             runtime
-                .run_container_with_gpu(
+                .run_container_with_options(
                     &image,
                     name.as_deref(),
                     &ports,
@@ -101,6 +124,7 @@ async fn main() -> Result<()> {
                     &volumes,
                     detach,
                     gpu_config,
+                    run_options,
                 )
                 .await?;
         }
@@ -601,15 +625,8 @@ async fn main() -> Result<()> {
                     description,
                     snapshot_type,
                 } => {
-                    let snapshot_name = name.unwrap_or_else(|| {
-                        format!(
-                            "snapshot-{}",
-                            std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs()
-                        )
-                    });
+                    let snapshot_name = name
+                        .unwrap_or_else(|| format!("snapshot-{}", chrono::Utc::now().timestamp()));
                     info!("Creating {} snapshot '{}'", snapshot_type, snapshot_name);
                     if let Some(ref desc) = description {
                         info!("Description: {}", desc);

@@ -4,6 +4,7 @@ use serde_json::Value;
 use std::time::SystemTime;
 use tokio::process::Command as AsyncCommand;
 use tracing::{debug, info, warn};
+use unified::ContainerRunOptions;
 
 pub mod amd_metrics;
 pub mod environment;
@@ -102,6 +103,30 @@ pub async fn run_oci_container_delegate(
     volumes: &[String],
     detach: bool,
 ) -> Result<String> {
+    run_oci_container_delegate_with_options(
+        runtime,
+        image,
+        name,
+        ports,
+        env,
+        volumes,
+        detach,
+        &ContainerRunOptions::default(),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn run_oci_container_delegate_with_options(
+    runtime: &str,
+    image: &str,
+    name: Option<&str>,
+    ports: &[String],
+    env: &[String],
+    volumes: &[String],
+    detach: bool,
+    options: &ContainerRunOptions,
+) -> Result<String> {
     info!("🐳 Starting OCI container: {}", image);
 
     debug!("Container config:");
@@ -118,12 +143,66 @@ pub async fn run_oci_container_delegate(
     let mut cmd = AsyncCommand::new(runtime);
     cmd.arg("run");
 
+    if options.rm {
+        cmd.arg("--rm");
+    }
+
     if detach {
         cmd.arg("-d");
     }
 
+    if options.interactive {
+        cmd.arg("-i");
+    }
+
+    if options.tty {
+        cmd.arg("-t");
+    }
+
     if let Some(name) = name {
         cmd.arg("--name").arg(name);
+    }
+
+    if let Some(ref workdir) = options.working_dir {
+        cmd.arg("--workdir").arg(workdir);
+    }
+
+    if let Some(ref user) = options.user {
+        cmd.arg("--user").arg(user);
+    }
+
+    if let Some(ref hostname) = options.hostname {
+        cmd.arg("--hostname").arg(hostname);
+    }
+
+    if let Some(ref entrypoint) = options.entrypoint
+        && let Some(first) = entrypoint.first()
+    {
+        cmd.arg("--entrypoint").arg(first);
+    }
+
+    if let Some(cpus) = options.cpus {
+        cmd.arg("--cpus").arg(cpus.to_string());
+    }
+
+    if let Some(ref memory) = options.memory {
+        cmd.arg("--memory").arg(memory);
+    }
+
+    if let Some(ref network) = options.network {
+        cmd.arg("--network").arg(network);
+    }
+
+    for cap in &options.cap_add {
+        cmd.arg("--cap-add").arg(cap);
+    }
+
+    for cap in &options.cap_drop {
+        cmd.arg("--cap-drop").arg(cap);
+    }
+
+    if options.privileged {
+        cmd.arg("--privileged");
     }
 
     // Add port mappings
@@ -142,6 +221,9 @@ pub async fn run_oci_container_delegate(
     }
 
     cmd.arg(image);
+    if let Some(ref command) = options.command {
+        cmd.args(command);
+    }
 
     let output = cmd.output().await?;
 

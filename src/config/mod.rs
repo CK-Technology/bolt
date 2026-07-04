@@ -855,13 +855,12 @@ impl BoltFile {
             }
 
             if let Some(ref amd) = gpu.amd
-                && amd.device.is_some()
-                && amd.device.unwrap() > 7
+                && let Some(device) = amd.device
+                && device > 7
             {
                 warn!(
                     "Service '{}': AMD device ID {} is unusually high",
-                    service_name,
-                    amd.device.unwrap()
+                    service_name, device
                 );
             }
         }

@@ -4,11 +4,12 @@ use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 #[cfg(unix)]
 use nix::unistd::Uid;
+use oci_spec::runtime::{Capabilities, Capability};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 #[cfg(unix)]
 use std::os::unix::fs as unix_fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -20,7 +21,7 @@ use super::networking::{
     BoltNetworkManager, ContainerNetworkConfig, NetworkDriver, NetworkPerformanceMode,
     PortMapping as NetworkPortMapping, Protocol as NetworkProtocol,
 };
-use super::oci::{self, ContainerConfig, ContainerState};
+use super::oci::{self, ContainerConfig, ContainerState, ResourceLimits};
 use super::performance::{BenchmarkResults, BoltPerformanceOptimizer, PerformanceMetrics};
 use super::security::{BoltSecurityManager, SecurityMetrics};
 use super::storage::StorageManager;
@@ -56,9 +57,20 @@ pub struct NativeContainerConfig {
     pub env: Vec<String>,
     pub volumes: Vec<String>,
     pub detach: bool,
+    pub rm: bool,
     pub command: Option<Vec<String>>,
+    pub entrypoint: Option<Vec<String>>,
     pub working_dir: Option<String>,
     pub user: Option<String>,
+    pub hostname: Option<String>,
+    pub cpus: Option<f32>,
+    pub memory: Option<String>,
+    pub network: Option<String>,
+    pub cap_add: Vec<String>,
+    pub cap_drop: Vec<String>,
+    pub privileged: bool,
+    pub tty: bool,
+    pub interactive: bool,
     pub gpu_config: Option<GpuConfig>,
     pub cpu_affinity: Option<Vec<usize>>, // CPU cores to pin to
     pub workload_hint: Option<WorkloadHint>, // Hint for auto-optimization
@@ -173,6 +185,7 @@ impl BoltNativeRuntime {
     /// Run a container with native OCI runtime (replaces docker/podman run)
     pub async fn run_container(&mut self, config: NativeContainerConfig) -> Result<String> {
         info!("🐳 Starting native container: {}", config.image);
+        Self::validate_run_options(&config)?;
 
         // Generate unique container ID
         let uuid_str = Uuid::new_v4().to_string();
@@ -608,7 +621,9 @@ impl BoltNativeRuntime {
 
         // Determine command/entrypoint behavior
         let mut command = Vec::new();
-        if let Some(ref metadata) = image_metadata
+        if let Some(ref entrypoint) = config.entrypoint {
+            command.extend(entrypoint.clone());
+        } else if let Some(ref metadata) = image_metadata
             && let Some(ref entrypoint) = metadata.config.entrypoint
         {
             command.extend(entrypoint.clone());
@@ -625,6 +640,9 @@ impl BoltNativeRuntime {
         if command.is_empty() {
             command.push("/bin/sh".to_string());
         }
+
+        let resource_limits = Self::resource_limits_for(config)?;
+        let capabilities = Self::capabilities_for(config)?;
 
         let working_dir = config.working_dir.clone().or_else(|| {
             image_metadata
@@ -648,10 +666,13 @@ impl BoltNativeRuntime {
             user,
             ports,
             volumes,
-            capabilities: vec![], // Default capabilities
-            resource_limits: None,
+            capabilities,
+            resource_limits,
             gaming_config: None, // Will be set later if needed
             detach: config.detach,
+            hostname: config.hostname.clone(),
+            privileged: config.privileged,
+            tty: config.tty,
         })
     }
 
@@ -673,6 +694,7 @@ impl BoltNativeRuntime {
         // Create process configuration
         let mut process = Process::default();
         process.set_args(Some(config.command.clone()));
+        process.set_terminal(Some(config.tty));
         if let Some(ref cwd) = config.working_dir {
             process.set_cwd(PathBuf::from(cwd));
         }
@@ -709,11 +731,23 @@ impl BoltNativeRuntime {
             process.set_env(Some(env_vec));
         }
 
+        if !config.capabilities.is_empty() || config.privileged {
+            let capabilities = Self::linux_capabilities_for(config)?;
+            process.set_capabilities(Some(capabilities));
+            process.set_no_new_privileges(Some(!config.privileged));
+        }
+
         spec_builder.set_process(Some(process));
+        if let Some(ref hostname) = config.hostname {
+            spec_builder.set_hostname(Some(hostname.clone()));
+        }
 
         // Set root filesystem
         let mut root = Root::default();
-        root.set_path(PathBuf::from("rootfs"));
+        let bundle_rootfs = self.runtime_dir.join(container_id).join("rootfs");
+        let rootfs_path = fs::canonicalize(&bundle_rootfs).unwrap_or(bundle_rootfs);
+        root.set_path(rootfs_path);
+        root.set_readonly(Some(false));
         spec_builder.set_root(Some(root));
 
         // Create basic mounts
@@ -1112,6 +1146,52 @@ impl BoltNativeRuntime {
             linux.set_resources(Some(resources));
         }
 
+        if let Some(ref limits) = config.resource_limits {
+            let mut resources = match linux.resources() {
+                Some(r) => r.clone(),
+                None => oci_spec::runtime::LinuxResources::default(),
+            };
+
+            if let Some(memory_limit) = limits.memory {
+                let mut memory_builder =
+                    oci_spec::runtime::LinuxMemoryBuilder::default().limit(memory_limit as i64);
+                if let Some(existing) = resources.memory() {
+                    if let Some(reservation) = existing.reservation() {
+                        memory_builder = memory_builder.reservation(reservation);
+                    }
+                    if let Some(swap) = existing.swap() {
+                        memory_builder = memory_builder.swap(swap);
+                    }
+                }
+                let memory = memory_builder
+                    .build()
+                    .context("Failed to build memory limits")?;
+                resources.set_memory(Some(memory));
+            }
+
+            if limits.cpu_quota.is_some()
+                || limits.cpu_period.is_some()
+                || limits.cpu_shares.is_some()
+            {
+                let mut cpu = match resources.cpu() {
+                    Some(c) => c.clone(),
+                    None => oci_spec::runtime::LinuxCpu::default(),
+                };
+                if let Some(quota) = limits.cpu_quota {
+                    cpu.set_quota(Some(quota));
+                }
+                if let Some(period) = limits.cpu_period {
+                    cpu.set_period(Some(period));
+                }
+                if let Some(shares) = limits.cpu_shares {
+                    cpu.set_shares(Some(shares));
+                }
+                resources.set_cpu(Some(cpu));
+            }
+
+            linux.set_resources(Some(resources));
+        }
+
         spec_builder.set_linux(Some(linux));
 
         Ok(spec_builder)
@@ -1149,6 +1229,241 @@ impl BoltNativeRuntime {
         }
 
         ranges.join(",")
+    }
+
+    fn validate_run_options(config: &NativeContainerConfig) -> Result<()> {
+        if config.rm {
+            return Err(anyhow!(
+                "`bolt run --rm` is not supported by the native runtime yet; remove the container explicitly with `bolt rm`"
+            )
+            .into());
+        }
+
+        if let Some(ref network) = config.network {
+            match network.as_str() {
+                "bridge" | "bolt" => {}
+                _ => {
+                    return Err(anyhow!(
+                        "`--network {}` is not supported by the native runtime yet (supported: bridge, bolt)",
+                        network
+                    )
+                    .into());
+                }
+            }
+        }
+
+        if let Some(cpus) = config.cpus
+            && (!cpus.is_finite() || cpus <= 0.0)
+        {
+            return Err(anyhow!("`--cpus` must be a positive number").into());
+        }
+
+        if let Some(ref memory) = config.memory {
+            Self::parse_memory_limit(memory)?;
+        }
+
+        for cap in config.cap_add.iter().chain(config.cap_drop.iter()) {
+            Self::parse_capability(cap)?;
+        }
+
+        Ok(())
+    }
+
+    fn resource_limits_for(config: &NativeContainerConfig) -> Result<Option<ResourceLimits>> {
+        let memory = config
+            .memory
+            .as_deref()
+            .map(Self::parse_memory_limit)
+            .transpose()?;
+
+        let (cpu_period, cpu_quota, cpu_shares) = if let Some(cpus) = config.cpus {
+            let period = 100_000_u64;
+            let quota = (cpus as f64 * period as f64).round() as i64;
+            let shares = (cpus as f64 * 1024.0).round().clamp(2.0, 262_144.0) as u64;
+            (Some(period), Some(quota.max(1)), Some(shares))
+        } else {
+            (None, None, None)
+        };
+
+        if memory.is_none() && cpu_quota.is_none() && cpu_period.is_none() && cpu_shares.is_none() {
+            return Ok(None);
+        }
+
+        Ok(Some(ResourceLimits {
+            memory,
+            cpu_shares,
+            cpu_quota,
+            cpu_period,
+        }))
+    }
+
+    fn parse_memory_limit(value: &str) -> Result<u64> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(anyhow!("memory limit cannot be empty").into());
+        }
+
+        let split_at = trimmed
+            .find(|ch: char| !ch.is_ascii_digit())
+            .unwrap_or(trimmed.len());
+        let (number, suffix) = trimmed.split_at(split_at);
+        if number.is_empty() {
+            return Err(anyhow!("invalid memory limit '{}'", value).into());
+        }
+
+        let amount: u64 = number
+            .parse()
+            .with_context(|| format!("invalid memory limit '{}'", value))?;
+        let multiplier = match suffix.trim().to_ascii_lowercase().as_str() {
+            "" | "b" => 1,
+            "k" | "kb" | "kib" => 1024,
+            "m" | "mb" | "mib" => 1024 * 1024,
+            "g" | "gb" | "gib" => 1024 * 1024 * 1024,
+            "t" | "tb" | "tib" => 1024_u64.pow(4),
+            other => return Err(anyhow!("unsupported memory suffix '{}'", other).into()),
+        };
+
+        amount
+            .checked_mul(multiplier)
+            .ok_or_else(|| anyhow!("memory limit '{}' is too large", value).into())
+    }
+
+    fn capabilities_for(config: &NativeContainerConfig) -> Result<Vec<String>> {
+        if config.privileged {
+            return Ok(Self::all_capability_names());
+        }
+
+        let mut capabilities = Self::default_capability_names();
+
+        for cap in &config.cap_add {
+            let normalized = Self::normalize_capability_name(cap)?;
+            if normalized == "ALL" {
+                capabilities = Self::all_capability_names();
+            } else if !capabilities.contains(&normalized) {
+                capabilities.push(normalized);
+            }
+        }
+
+        for cap in &config.cap_drop {
+            let normalized = Self::normalize_capability_name(cap)?;
+            if normalized == "ALL" {
+                capabilities.clear();
+            } else {
+                capabilities.retain(|existing| existing != &normalized);
+            }
+        }
+
+        capabilities.sort();
+        Ok(capabilities)
+    }
+
+    fn linux_capabilities_for(
+        config: &ContainerConfig,
+    ) -> Result<oci_spec::runtime::LinuxCapabilities> {
+        let parsed = config
+            .capabilities
+            .iter()
+            .map(|cap| Self::parse_capability(cap))
+            .collect::<Result<Vec<_>>>()?;
+        let set = parsed.into_iter().collect::<Capabilities>();
+
+        let mut capabilities = oci_spec::runtime::LinuxCapabilities::default();
+        capabilities.set_bounding(Some(set.clone()));
+        capabilities.set_effective(Some(set.clone()));
+        capabilities.set_inheritable(Some(set.clone()));
+        capabilities.set_permitted(Some(set.clone()));
+        capabilities.set_ambient(Some(set));
+        Ok(capabilities)
+    }
+
+    fn default_capability_names() -> Vec<String> {
+        ["CAP_AUDIT_WRITE", "CAP_KILL", "CAP_NET_BIND_SERVICE"]
+            .into_iter()
+            .map(str::to_string)
+            .collect()
+    }
+
+    fn all_capability_names() -> Vec<String> {
+        [
+            "CAP_AUDIT_CONTROL",
+            "CAP_AUDIT_READ",
+            "CAP_AUDIT_WRITE",
+            "CAP_BLOCK_SUSPEND",
+            "CAP_BPF",
+            "CAP_CHECKPOINT_RESTORE",
+            "CAP_CHOWN",
+            "CAP_DAC_OVERRIDE",
+            "CAP_DAC_READ_SEARCH",
+            "CAP_FOWNER",
+            "CAP_FSETID",
+            "CAP_IPC_LOCK",
+            "CAP_IPC_OWNER",
+            "CAP_KILL",
+            "CAP_LEASE",
+            "CAP_LINUX_IMMUTABLE",
+            "CAP_MAC_ADMIN",
+            "CAP_MAC_OVERRIDE",
+            "CAP_MKNOD",
+            "CAP_NET_ADMIN",
+            "CAP_NET_BIND_SERVICE",
+            "CAP_NET_BROADCAST",
+            "CAP_NET_RAW",
+            "CAP_PERFMON",
+            "CAP_SETFCAP",
+            "CAP_SETGID",
+            "CAP_SETPCAP",
+            "CAP_SETUID",
+            "CAP_SYS_ADMIN",
+            "CAP_SYS_BOOT",
+            "CAP_SYS_CHROOT",
+            "CAP_SYS_MODULE",
+            "CAP_SYS_NICE",
+            "CAP_SYS_PACCT",
+            "CAP_SYS_PTRACE",
+            "CAP_SYS_RAWIO",
+            "CAP_SYS_RESOURCE",
+            "CAP_SYS_TIME",
+            "CAP_SYS_TTY_CONFIG",
+            "CAP_SYSLOG",
+            "CAP_WAKE_ALARM",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+    }
+
+    fn normalize_capability_name(value: &str) -> Result<String> {
+        let trimmed = value.trim();
+        if trimmed.eq_ignore_ascii_case("all") {
+            return Ok("ALL".to_string());
+        }
+
+        let upper = trimmed.to_ascii_uppercase().replace('-', "_");
+        let normalized = if upper.starts_with("CAP_") {
+            upper
+        } else {
+            format!("CAP_{}", upper)
+        };
+        Self::parse_capability(&normalized)?;
+        Ok(normalized)
+    }
+
+    fn parse_capability(value: &str) -> Result<Capability> {
+        if value.eq_ignore_ascii_case("all") {
+            return Err(
+                anyhow!("ALL is a capability set keyword, not an individual capability").into(),
+            );
+        }
+
+        let parse_value = value
+            .strip_prefix("CAP_")
+            .or_else(|| value.strip_prefix("cap_"))
+            .unwrap_or(value);
+
+        parse_value
+            .parse::<Capability>()
+            .with_context(|| format!("invalid Linux capability '{}'", value))
+            .map_err(Into::into)
     }
 
     /// Resolve volume source path (handle named volumes and host paths)
@@ -1436,9 +1751,20 @@ impl BoltNativeRuntime {
             env: vec![],
             volumes: vec![],
             detach: true,
+            rm: false,
             command: None,
+            entrypoint: None,
             working_dir: None,
             user: None,
+            hostname: None,
+            cpus: None,
+            memory: None,
+            network: None,
+            cap_add: vec![],
+            cap_drop: vec![],
+            privileged: false,
+            tty: false,
+            interactive: false,
             gpu_config: Some(gpu_config),
             cpu_affinity: None,
             workload_hint: Some(WorkloadHint::Gaming),
@@ -1477,9 +1803,20 @@ impl BoltNativeRuntime {
             env: vec![],
             volumes: vec![],
             detach: true,
+            rm: false,
             command: None,
+            entrypoint: None,
             working_dir: None,
             user: None,
+            hostname: None,
+            cpus: None,
+            memory: None,
+            network: None,
+            cap_add: vec![],
+            cap_drop: vec![],
+            privileged: false,
+            tty: false,
+            interactive: false,
             gpu_config: Some(gpu_config),
             cpu_affinity: None,
             workload_hint: Some(WorkloadHint::Gaming),
@@ -1573,13 +1910,149 @@ impl BoltNativeRuntime {
     }
 
     fn resolve_runtime_dir(rootless: bool) -> Result<PathBuf> {
+        if let Some(dir) = env::var_os("BOLT_RUNTIME_DIR") {
+            let path = PathBuf::from(dir);
+            Self::ensure_writable_runtime_dir(&path)?;
+            return Ok(path);
+        }
+
         if rootless {
-            let base = dirs::runtime_dir()
-                .or_else(dirs::data_dir)
-                .unwrap_or_else(env::temp_dir);
-            Ok(base.join("bolt").join("runtime"))
+            let candidates = [dirs::runtime_dir(), dirs::data_dir(), Some(env::temp_dir())];
+
+            for base in candidates.into_iter().flatten() {
+                let path = base.join("bolt").join("runtime");
+                if Self::ensure_writable_runtime_dir(&path).is_ok() {
+                    return Ok(path);
+                }
+            }
+
+            Err(anyhow!("no writable rootless runtime directory found").into())
         } else {
             Ok(PathBuf::from("/run/bolt"))
         }
+    }
+
+    fn ensure_writable_runtime_dir(path: &Path) -> Result<()> {
+        fs::create_dir_all(path)
+            .with_context(|| format!("Failed to create runtime directory at {}", path.display()))?;
+        let probe = path.join(".bolt-write-test");
+        fs::write(&probe, b"ok")
+            .with_context(|| format!("Runtime directory {} is not writable", path.display()))?;
+        let _ = fs::remove_file(probe);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oci_spec::runtime::Capability;
+
+    fn test_config() -> NativeContainerConfig {
+        NativeContainerConfig {
+            image: "alpine:latest".to_string(),
+            name: Some("web".to_string()),
+            ports: vec!["8080:80".to_string()],
+            env: vec!["APP_ENV=prod".to_string()],
+            volumes: vec![],
+            detach: true,
+            rm: false,
+            command: Some(vec!["echo".to_string(), "ok".to_string()]),
+            entrypoint: Some(vec!["/bin/custom".to_string()]),
+            working_dir: Some("/srv/app".to_string()),
+            user: Some("1000:1001".to_string()),
+            hostname: Some("bolt-web".to_string()),
+            cpus: Some(1.5),
+            memory: Some("512m".to_string()),
+            network: Some("bridge".to_string()),
+            cap_add: vec!["NET_ADMIN".to_string()],
+            cap_drop: vec!["KILL".to_string()],
+            privileged: false,
+            tty: true,
+            interactive: true,
+            gpu_config: None,
+            cpu_affinity: None,
+            workload_hint: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn run_options_are_reflected_in_oci_spec() {
+        let runtime = BoltNativeRuntime::new()
+            .await
+            .expect("native runtime should initialize for spec-only test");
+        let native_config = test_config();
+        let container_config = runtime
+            .create_container_config("bolt-test", &native_config)
+            .await
+            .expect("container config should build");
+        let spec = runtime
+            .create_oci_spec("bolt-test", &container_config, None, None)
+            .await
+            .expect("oci spec should build");
+
+        assert_eq!(spec.hostname(), &Some("bolt-web".to_string()));
+
+        let process = spec.process().as_ref().expect("process should be set");
+        assert_eq!(
+            process.args().as_ref().expect("args should be set"),
+            &vec![
+                "/bin/custom".to_string(),
+                "echo".to_string(),
+                "ok".to_string()
+            ]
+        );
+        assert_eq!(process.cwd(), &PathBuf::from("/srv/app"));
+        assert_eq!(process.terminal(), Some(true));
+        assert_eq!(process.user().uid(), 1000);
+        assert_eq!(process.user().gid(), 1001);
+        assert!(
+            process
+                .env()
+                .as_ref()
+                .expect("env should be set")
+                .contains(&"APP_ENV=prod".to_string())
+        );
+
+        let capabilities = process
+            .capabilities()
+            .as_ref()
+            .expect("capabilities should be set");
+        let effective = capabilities
+            .effective()
+            .as_ref()
+            .expect("effective capabilities should be set");
+        assert!(effective.contains(&Capability::NetAdmin));
+        assert!(!effective.contains(&Capability::Kill));
+
+        let linux = spec.linux().as_ref().expect("linux config should be set");
+        let resources = linux.resources().as_ref().expect("resources should be set");
+        assert_eq!(
+            resources
+                .memory()
+                .as_ref()
+                .expect("memory limit should be set")
+                .limit(),
+            Some(512 * 1024 * 1024)
+        );
+        let cpu = resources.cpu().as_ref().expect("cpu limits should be set");
+        assert_eq!(cpu.period(), Some(100_000));
+        assert_eq!(cpu.quota(), Some(150_000));
+    }
+
+    #[test]
+    fn unsupported_native_run_flags_fail_clearly() {
+        let mut config = test_config();
+
+        config.rm = true;
+        let err = BoltNativeRuntime::validate_run_options(&config)
+            .expect_err("--rm should be rejected until native cleanup is implemented");
+        assert!(err.to_string().contains("--rm"));
+
+        config.rm = false;
+        config.network = Some("host".to_string());
+        let err = BoltNativeRuntime::validate_run_options(&config)
+            .expect_err("unsupported network mode should be rejected");
+        assert!(err.to_string().contains("--network host"));
     }
 }

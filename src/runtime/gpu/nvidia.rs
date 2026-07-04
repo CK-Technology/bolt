@@ -1171,7 +1171,11 @@ impl NvidiaManager {
         );
 
         // Set OpenCL environment
-        env_manager().set_container_env(container_id, "OPENCL_VENDOR_PATH", "/etc/OpenCL/vendors")?;
+        env_manager().set_container_env(
+            container_id,
+            "OPENCL_VENDOR_PATH",
+            "/etc/OpenCL/vendors",
+        )?;
 
         Ok(())
     }

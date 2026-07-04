@@ -11,8 +11,8 @@ pub mod tools;
 
 #[derive(Parser)]
 #[command(
-    name = "Bolt",
-    about = "Performance-first container runtime with revolutionary networking and optimization",
+    name = "bolt",
+    about = "Performance-first container runtime with GPU, QUIC networking, and orchestration",
     version = env!("CARGO_PKG_VERSION"),
     long_about = None
 )]
@@ -124,6 +124,10 @@ pub enum Commands {
         /// Run container in privileged mode
         #[arg(long)]
         privileged: bool,
+
+        /// Command and arguments to run in the container
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
     },
 
     /// Build a container image
@@ -163,6 +167,7 @@ pub enum Commands {
     /// Stop containers
     Stop {
         /// Container names or IDs
+        #[arg(required = true)]
         containers: Vec<String>,
     },
 
@@ -182,6 +187,7 @@ pub enum Commands {
     #[command(alias = "remove")]
     Rm {
         /// Container names or IDs
+        #[arg(required = true)]
         containers: Vec<String>,
 
         /// Force removal
@@ -192,6 +198,7 @@ pub enum Commands {
     /// Restart containers
     Restart {
         /// Container names or IDs
+        #[arg(required = true)]
         containers: Vec<String>,
 
         /// Timeout for stop before restart (seconds)
@@ -325,8 +332,113 @@ pub enum SurgeCommands {
     /// Scale services
     Scale {
         /// Service scaling (service=count)
+        #[arg(required = true)]
         services: Vec<String>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Cli, Commands};
+    use clap::{CommandFactory, Parser};
+
+    #[test]
+    fn command_name_is_lowercase_binary_name() {
+        assert_eq!(Cli::command().get_name(), "bolt");
+    }
+
+    #[test]
+    fn lifecycle_commands_require_container_arguments() {
+        for args in [
+            ["bolt", "stop"].as_slice(),
+            ["bolt", "rm"].as_slice(),
+            ["bolt", "restart"].as_slice(),
+        ] {
+            assert!(
+                Cli::try_parse_from(args).is_err(),
+                "{args:?} should require at least one container"
+            );
+        }
+    }
+
+    #[test]
+    fn lifecycle_commands_accept_one_or_more_containers() {
+        for args in [
+            ["bolt", "stop", "web"].as_slice(),
+            ["bolt", "rm", "web", "worker"].as_slice(),
+            ["bolt", "restart", "web"].as_slice(),
+        ] {
+            assert!(
+                Cli::try_parse_from(args).is_ok(),
+                "{args:?} should parse successfully"
+            );
+        }
+    }
+
+    #[test]
+    fn run_command_parses_docker_compatible_options() {
+        let cli = Cli::try_parse_from([
+            "bolt",
+            "run",
+            "--rm",
+            "--workdir",
+            "/srv/app",
+            "--user",
+            "1000:1000",
+            "--hostname",
+            "bolt-web",
+            "--entrypoint",
+            "/bin/app",
+            "--cpus",
+            "1.5",
+            "--memory",
+            "512m",
+            "--network",
+            "bridge",
+            "--cap-add",
+            "NET_ADMIN",
+            "--cap-drop",
+            "KILL",
+            "--privileged",
+            "-it",
+            "alpine:latest",
+        ])
+        .expect("run command should parse");
+
+        match cli.command {
+            Commands::Run {
+                rm,
+                workdir,
+                user,
+                hostname,
+                entrypoint,
+                cpus,
+                memory,
+                network,
+                cap_add,
+                cap_drop,
+                privileged,
+                interactive,
+                tty,
+                ..
+            } => {
+                assert!(rm);
+                assert_eq!(workdir.as_deref(), Some("/srv/app"));
+                assert_eq!(user.as_deref(), Some("1000:1000"));
+                assert_eq!(hostname.as_deref(), Some("bolt-web"));
+                assert_eq!(entrypoint.as_deref(), Some("/bin/app"));
+                assert_eq!(cpus, Some(1.5));
+                assert_eq!(memory.as_deref(), Some("512m"));
+                assert_eq!(network.as_deref(), Some("bridge"));
+                assert_eq!(cap_add, vec!["NET_ADMIN"]);
+                assert_eq!(cap_drop, vec!["KILL"]);
+                assert!(privileged);
+                assert!(interactive);
+                assert!(tty);
+            }
+            _ => panic!("expected run command"),
+        }
+    }
 }
 
 #[derive(Subcommand)]

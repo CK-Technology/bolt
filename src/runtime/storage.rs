@@ -5,24 +5,31 @@ use crate::{
 use anyhow::{Context, anyhow};
 use chrono::{DateTime, Utc};
 use dirs::data_dir;
-use flate2::{Compression, read::GzDecoder, write::GzEncoder};
+use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::env;
 use std::fmt;
 use std::fs as stdfs;
+use std::io::Read;
+#[cfg(test)]
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tar::{Archive, Builder};
-use tempfile::tempdir;
+use tar::Archive;
 use tokio::fs;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::task;
 use tracing::{debug, info, warn};
+#[cfg(test)]
+use {
+    flate2::{Compression, write::GzEncoder},
+    tar::Builder,
+};
 
 #[cfg(unix)]
+#[cfg(test)]
 use std::os::unix::fs::PermissionsExt;
 
 // Boltfile TOML Configuration Structures
@@ -1380,18 +1387,8 @@ impl StorageManager {
             .await
             .context("Failed to create container rootfs directory")?;
 
-        match self.unpack_image_layers(&reference, &rootfs_path).await {
-            Ok(()) => {
-                self.ensure_minimal_rootfs(&rootfs_path).await?;
-            }
-            Err(err) => {
-                warn!(
-                    "⚠️  Falling back to minimal rootfs for {} (layer extraction failed: {err})",
-                    container_id
-                );
-                self.ensure_minimal_rootfs(&rootfs_path).await?;
-            }
-        }
+        self.unpack_image_layers(&reference, &rootfs_path).await?;
+        self.ensure_minimal_rootfs(&rootfs_path).await?;
 
         info!("✅ Container rootfs created: {}", rootfs_path.display());
         Ok(rootfs_path)
@@ -1434,12 +1431,12 @@ impl StorageManager {
         task::spawn_blocking(move || -> Result<()> {
             for (layer, layer_path) in layer_specs {
                 if !layer_path.exists() {
-                    warn!(
+                    return Err(anyhow!(
                         "Layer file missing for {} (expected at {})",
                         layer.digest,
                         layer_path.display()
-                    );
-                    continue;
+                    )
+                    .into());
                 }
 
                 let file = stdfs::File::open(&layer_path).with_context(|| {
@@ -1454,14 +1451,10 @@ impl StorageManager {
                     || layer_path.extension().and_then(|s| s.to_str()) == Some("gz")
                 {
                     let decoder = GzDecoder::new(file);
-                    let mut archive = Archive::new(decoder);
-                    archive
-                        .unpack(&rootfs)
+                    Self::unpack_layer_archive(decoder, &rootfs)
                         .with_context(|| format!("Failed to extract layer {}", layer.digest))?;
                 } else {
-                    let mut archive = Archive::new(file);
-                    archive
-                        .unpack(&rootfs)
+                    Self::unpack_layer_archive(file, &rootfs)
                         .with_context(|| format!("Failed to extract layer {}", layer.digest))?;
                 }
             }
@@ -1471,6 +1464,85 @@ impl StorageManager {
         .map_err(|e| anyhow!("Layer extraction task failed: {e}"))??;
 
         Ok(())
+    }
+
+    fn unpack_layer_archive<R: Read>(reader: R, rootfs: &Path) -> Result<()> {
+        let mut archive = Archive::new(reader);
+        for entry in archive.entries().context("Failed to read layer entries")? {
+            let mut entry = entry.context("Failed to read layer entry")?;
+            let path = entry
+                .path()
+                .context("Failed to read layer entry path")?
+                .into_owned();
+
+            if Self::apply_whiteout(rootfs, &path)? {
+                continue;
+            }
+
+            entry
+                .unpack_in(rootfs)
+                .with_context(|| format!("Failed to unpack {}", path.display()))?;
+        }
+
+        Ok(())
+    }
+
+    fn apply_whiteout(rootfs: &Path, entry_path: &Path) -> Result<bool> {
+        let Some(file_name) = entry_path.file_name().and_then(|name| name.to_str()) else {
+            return Ok(false);
+        };
+
+        if file_name == ".wh..wh..opq" {
+            let parent = entry_path.parent().unwrap_or_else(|| Path::new(""));
+            let target_dir = rootfs.join(parent);
+            if target_dir.exists() {
+                for entry in stdfs::read_dir(&target_dir).with_context(|| {
+                    format!("Failed to read opaque directory {}", target_dir.display())
+                })? {
+                    let path = entry
+                        .with_context(|| {
+                            format!(
+                                "Failed to inspect opaque directory {}",
+                                target_dir.display()
+                            )
+                        })?
+                        .path();
+                    if path.is_dir() {
+                        stdfs::remove_dir_all(&path).with_context(|| {
+                            format!("Failed to remove opaque child {}", path.display())
+                        })?;
+                    } else {
+                        stdfs::remove_file(&path).with_context(|| {
+                            format!("Failed to remove opaque child {}", path.display())
+                        })?;
+                    }
+                }
+            }
+            return Ok(true);
+        }
+
+        if let Some(removed_name) = file_name.strip_prefix(".wh.") {
+            let target = entry_path
+                .parent()
+                .unwrap_or_else(|| Path::new(""))
+                .join(removed_name);
+            let target_path = rootfs.join(target);
+            if target_path.is_dir() {
+                stdfs::remove_dir_all(&target_path).with_context(|| {
+                    format!(
+                        "Failed to remove whiteout directory {}",
+                        target_path.display()
+                    )
+                })?;
+            } else if target_path.exists() {
+                stdfs::remove_file(&target_path).with_context(|| {
+                    format!("Failed to remove whiteout file {}", target_path.display())
+                })?;
+            }
+            return Ok(true);
+        }
+
+        Ok(false)
     }
 
     async fn ensure_minimal_rootfs(&self, rootfs_path: &Path) -> Result<()> {
@@ -1569,7 +1641,7 @@ impl StorageManager {
         })
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     async fn create_mock_image(&self, image: &str) -> Result<ImageMetadata> {
         let reference = normalize_reference(image);
         let image_path = self.get_image_path(&reference);
@@ -1625,9 +1697,10 @@ impl StorageManager {
         Ok(metadata)
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     fn create_mock_layer(layer_dir: &Path, layer: &LayerMetadata) -> Result<u64> {
-        let temp_root = tempdir().context("Failed to allocate mock layer temp directory")?;
+        let temp_root =
+            tempfile::tempdir().context("Failed to allocate mock layer temp directory")?;
         let temp_path = temp_root.path();
 
         stdfs::create_dir_all(temp_path.join("etc"))
@@ -2159,6 +2232,116 @@ mod tests {
             persisted.config_digest.as_deref(),
             Some(manifest.config.digest.as_str())
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn layer_unpack_applies_file_and_opaque_whiteouts() -> crate::Result<()> {
+        let temp_root = tempdir().expect("temp dir");
+        let rootfs = temp_root.path().join("rootfs");
+        stdfs::create_dir_all(rootfs.join("etc/app"))?;
+        stdfs::write(rootfs.join("etc/app/old.conf"), b"old")?;
+        stdfs::write(rootfs.join("etc/app/keep.conf"), b"keep")?;
+        stdfs::create_dir_all(rootfs.join("var/cache"))?;
+        stdfs::write(rootfs.join("var/cache/stale"), b"stale")?;
+
+        let layer_dir = temp_root.path().join("layer");
+        stdfs::create_dir_all(layer_dir.join("etc/app"))?;
+        stdfs::write(layer_dir.join("etc/app/.wh.old.conf"), b"")?;
+        stdfs::create_dir_all(layer_dir.join("var/cache"))?;
+        stdfs::write(layer_dir.join("var/cache/.wh..wh..opq"), b"")?;
+        stdfs::write(layer_dir.join("var/cache/fresh"), b"fresh")?;
+
+        let mut layer_bytes = Vec::new();
+        {
+            let mut builder = Builder::new(&mut layer_bytes);
+            builder.append_dir_all(".", &layer_dir)?;
+            builder.finish()?;
+        }
+
+        StorageManager::unpack_layer_archive(layer_bytes.as_slice(), &rootfs)?;
+
+        assert!(!rootfs.join("etc/app/old.conf").exists());
+        assert!(rootfs.join("etc/app/keep.conf").exists());
+        assert!(!rootfs.join("var/cache/stale").exists());
+        assert!(rootfs.join("var/cache/fresh").exists());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn missing_layer_file_fails_rootfs_creation() -> crate::Result<()> {
+        let temp_root = tempdir().expect("temp dir");
+        let storage_root = temp_root.path().to_path_buf();
+        let mut manager = StorageManager {
+            storage_root,
+            images: HashMap::new(),
+            registry: DriftRegistryClient::new_test(None),
+            object_store: None,
+        };
+
+        let reference = "library/missing:latest".to_string();
+        let metadata = ImageMetadata {
+            name: "library/missing".to_string(),
+            tag: "latest".to_string(),
+            reference: Some(reference.clone()),
+            digest: "sha256:missing".to_string(),
+            size: 1,
+            created: Utc::now(),
+            layers: vec![LayerMetadata {
+                digest: "sha256:missinglayer".to_string(),
+                size: 1,
+                media_type: "application/vnd.oci.image.layer.v1.tar+gzip".to_string(),
+            }],
+            config: ImageConfig {
+                env: vec![],
+                cmd: Some(vec!["/bin/sh".to_string()]),
+                entrypoint: None,
+                working_dir: Some("/".to_string()),
+                user: None,
+                exposed_ports: vec![],
+            },
+            config_digest: None,
+        };
+        manager.images.insert(reference.clone(), metadata);
+
+        let result = manager
+            .create_container_rootfs("bolt-missing", &reference)
+            .await;
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .expect_err("missing layer should fail")
+                .to_string()
+                .contains("Layer file missing")
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn mock_image_fixture_is_test_scoped_and_unpackable() -> crate::Result<()> {
+        let temp_root = tempdir().expect("temp dir");
+        let mut manager = StorageManager {
+            storage_root: temp_root.path().to_path_buf(),
+            images: HashMap::new(),
+            registry: DriftRegistryClient::new_test(None),
+            object_store: None,
+        };
+
+        let metadata = manager.create_mock_image("fixture:latest").await?;
+        manager
+            .images
+            .insert("fixture:latest".to_string(), metadata);
+
+        let rootfs = manager
+            .create_container_rootfs("bolt-fixture", "fixture:latest")
+            .await?;
+
+        assert!(rootfs.join("etc/bolt-release").exists());
+        assert!(rootfs.join("bin/hello").exists());
 
         Ok(())
     }

@@ -320,11 +320,9 @@ impl QuicFabric {
     ) -> Result<Connection> {
         info!("🔌 Connecting to service: {} at {}", service_name, target_addr);
 
-        if self.endpoint.is_none() {
+        let Some(endpoint) = self.endpoint.as_ref() else {
             return Err(anyhow::anyhow!("QUIC endpoint not started"));
-        }
-
-        let endpoint = self.endpoint.as_ref().unwrap();
+        };
 
         // Create client configuration
         let mut client_config = ClientConfig::with_native_roots();

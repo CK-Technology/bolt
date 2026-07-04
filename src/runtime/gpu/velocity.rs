@@ -109,11 +109,7 @@ impl GPUManager {
 
         // Set up environment variables that nvidia-container-runtime uses
         let env = env_manager();
-        env.set_container_env(
-            container_id,
-            "NVIDIA_VISIBLE_DEVICES",
-            device.to_string(),
-        )?;
+        env.set_container_env(container_id, "NVIDIA_VISIBLE_DEVICES", device.to_string())?;
 
         let mut capabilities = vec!["utility"];
 

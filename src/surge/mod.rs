@@ -162,7 +162,7 @@ pub async fn up_with_native_runtime(
                         // Use unified runtime to create GPU-optimized container
                         if runtime.is_native() {
                             // Create gaming container with nvbind if native runtime available
-                            let native_runtime_arc = runtime.get_native_runtime();
+                            let native_runtime_arc = runtime.get_native_runtime()?;
                             let mut native_runtime = native_runtime_arc.write().await;
                             native_runtime
                                 .create_gaming_container(
@@ -617,7 +617,10 @@ pub async fn scale(config: &BoltConfig, services: &[String]) -> Result<()> {
 
         if count > current_count {
             // Scale up - start new instances
-            let service = boltfile.services.get(service_name).unwrap();
+            let Some(service) = boltfile.services.get(service_name) else {
+                error!("Service '{}' not found", service_name);
+                continue;
+            };
             for i in current_count..count {
                 let instance_name = format!("{}_{}", container_prefix, i + 1);
 

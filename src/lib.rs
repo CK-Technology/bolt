@@ -54,7 +54,7 @@ use chrono::{DateTime, Utc};
 use tokio::sync::OnceCell;
 
 use crate::runtime::native::ContainerStatus as NativeContainerStatus;
-use crate::runtime::unified::RuntimeMode;
+use crate::runtime::unified::{ContainerRunOptions, RuntimeMode};
 
 pub mod api {
     pub use crate::config::{BoltConfig, BoltFile, GamingConfig, Service, create_example_boltfile};
@@ -190,9 +190,37 @@ impl BoltRuntime {
         detach: bool,
         gpu_config: Option<runtime::gpu_integration::GpuConfig>,
     ) -> Result<()> {
+        self.run_container_with_options(
+            image,
+            name,
+            ports,
+            env,
+            volumes,
+            detach,
+            gpu_config,
+            ContainerRunOptions::default(),
+        )
+        .await
+    }
+
+    /// Run a container with GPU configuration and Docker-compatible run options.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_container_with_options(
+        &self,
+        image: &str,
+        name: Option<&str>,
+        ports: &[String],
+        env: &[String],
+        volumes: &[String],
+        detach: bool,
+        gpu_config: Option<runtime::gpu_integration::GpuConfig>,
+        options: ContainerRunOptions,
+    ) -> Result<()> {
         let runtime = self.unified_runtime().await?;
         runtime
-            .run_container_with_gpu(image, name, ports, env, volumes, detach, gpu_config)
+            .run_container_with_options(
+                image, name, ports, env, volumes, detach, gpu_config, options,
+            )
             .await
             .map(|_| ())
     }
