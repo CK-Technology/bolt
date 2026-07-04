@@ -127,25 +127,27 @@ impl ExecCommand {
     }
 
     async fn get_container_pid(&self, container_id: &str) -> Result<u32> {
-        // Read PID from container runtime state
-        let runtime_dir = std::path::PathBuf::from("/run/bolt/containers");
-        let state_file = runtime_dir.join(container_id).join("state.json");
+        use bolt::runtime::state;
 
-        if !state_file.exists() {
+        // Resolve the reference (id or --name) against persisted state so exec
+        // works across a restart of the Bolt process.
+        let container = state::resolve_ref(container_id)?
+            .ok_or_else(|| anyhow!("Container not found: {}", container_id))?;
+
+        let pid = container
+            .pid
+            .ok_or_else(|| anyhow!("Container {} is not running", container_id))?;
+
+        // Verify the process is actually alive before entering its namespaces.
+        if !state::pid_is_alive(pid) {
             return Err(anyhow!(
-                "Container {} not found or not running",
-                container_id
+                "Container {} is not running (process {} has exited)",
+                container_id,
+                pid
             ));
         }
 
-        let state_json = tokio::fs::read_to_string(&state_file).await?;
-        let state: serde_json::Value = serde_json::from_str(&state_json)?;
-
-        let pid = state["pid"]
-            .as_u64()
-            .ok_or_else(|| anyhow!("Container PID not found in state"))?;
-
-        Ok(pid as u32)
+        Ok(pid)
     }
 
     async fn setup_interactive_tty(&self, cmd: &mut tokio::process::Command) -> Result<()> {

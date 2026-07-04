@@ -16,6 +16,25 @@ pub struct DockerAPIServer {
     port: u16,
 }
 
+/// A pending `docker exec` instance created by `POST /containers/{id}/exec`
+/// and executed by `POST /exec/{id}/start`.
+#[derive(Clone)]
+struct ExecInstance {
+    container: String,
+    cmd: Vec<String>,
+    user: Option<String>,
+    workdir: Option<String>,
+    env: Vec<String>,
+}
+
+/// Process-global registry correlating an exec id with its pending instance
+/// across the two-phase Docker exec protocol.
+fn exec_registry() -> &'static std::sync::Mutex<HashMap<String, ExecInstance>> {
+    static REGISTRY: std::sync::OnceLock<std::sync::Mutex<HashMap<String, ExecInstance>>> =
+        std::sync::OnceLock::new();
+    REGISTRY.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DockerVersion {
     #[serde(rename = "Version")]
@@ -1427,23 +1446,52 @@ impl DockerAPIServer {
     ) -> Result<impl Reply, Rejection> {
         tracing::info!("Creating exec instance for container: {}", container_id);
 
-        // Extract exec config from body
-        let _cmd = body["Cmd"].as_array();
-        let _attach_stdin = body["AttachStdin"].as_bool().unwrap_or(false);
-        let _attach_stdout = body["AttachStdout"].as_bool().unwrap_or(true);
-        let _attach_stderr = body["AttachStderr"].as_bool().unwrap_or(true);
-        let _tty = body["Tty"].as_bool().unwrap_or(false);
+        // Extract the command and execution options from the request body.
+        let cmd: Vec<String> = body["Cmd"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let user = body["User"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let workdir = body["WorkingDir"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let env: Vec<String> = body["Env"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
 
-        // Generate exec ID
+        // Generate exec ID and record the pending instance for exec/start.
         let exec_id = format!(
             "exec-{}",
             &uuid::Uuid::new_v4().to_string().replace("-", "")[..12]
         );
+        exec_registry()
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .insert(
+                exec_id.clone(),
+                ExecInstance {
+                    container: container_id,
+                    cmd,
+                    user,
+                    workdir,
+                    env,
+                },
+            );
 
-        let response = serde_json::json!({
-            "Id": exec_id
-        });
-
+        let response = serde_json::json!({ "Id": exec_id });
         Ok(warp::reply::json(&response))
     }
 
@@ -1452,10 +1500,92 @@ impl DockerAPIServer {
         exec_id: String,
         _body: serde_json::Value,
     ) -> Result<impl Reply, Rejection> {
+        use warp::http::StatusCode;
         tracing::info!("Starting exec instance: {}", exec_id);
 
-        // Return empty response (in real impl, would stream output)
-        Ok(warp::reply::with_status("", warp::http::StatusCode::OK))
+        let instance = exec_registry()
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .remove(&exec_id);
+        let instance = match instance {
+            Some(instance) => instance,
+            None => {
+                return Ok(warp::reply::with_status(
+                    format!("No such exec instance: {}", exec_id),
+                    StatusCode::NOT_FOUND,
+                ));
+            }
+        };
+
+        if instance.cmd.is_empty() {
+            return Ok(warp::reply::with_status(
+                "No command specified for exec".to_string(),
+                StatusCode::BAD_REQUEST,
+            ));
+        }
+
+        // Resolve the container to a live PID via persisted state.
+        let state = match crate::runtime::state::resolve_ref(&instance.container) {
+            Ok(Some(state)) => state,
+            Ok(None) => {
+                return Ok(warp::reply::with_status(
+                    format!("No such container: {}", instance.container),
+                    StatusCode::NOT_FOUND,
+                ));
+            }
+            Err(e) => {
+                return Ok(warp::reply::with_status(
+                    format!("Failed to resolve container: {}", e),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                ));
+            }
+        };
+        let pid = match state
+            .pid
+            .filter(|pid| crate::runtime::state::pid_is_alive(*pid))
+        {
+            Some(pid) => pid,
+            None => {
+                return Ok(warp::reply::with_status(
+                    format!("Container {} is not running", instance.container),
+                    StatusCode::CONFLICT,
+                ));
+            }
+        };
+
+        // Enter the container namespaces and run the command, capturing output.
+        let mut cmd = tokio::process::Command::new("nsenter");
+        cmd.args(["-t", &pid.to_string(), "-m", "-u", "-i", "-n", "-p"]);
+        if let Some(ref user) = instance.user {
+            if let Some((uid, gid)) = user.split_once(':') {
+                cmd.args(["--setuid", uid]);
+                cmd.args(["--setgid", gid]);
+            } else {
+                cmd.args(["--setuid", user]);
+            }
+        }
+        if let Some(ref workdir) = instance.workdir {
+            cmd.current_dir(workdir);
+        }
+        for env_var in &instance.env {
+            if let Some((key, value)) = env_var.split_once('=') {
+                cmd.env(key, value);
+            }
+        }
+        cmd.args(&instance.cmd);
+
+        match cmd.output().await {
+            Ok(output) => {
+                let mut body = output.stdout;
+                body.extend_from_slice(&output.stderr);
+                let text = String::from_utf8_lossy(&body).into_owned();
+                Ok(warp::reply::with_status(text, StatusCode::OK))
+            }
+            Err(e) => Ok(warp::reply::with_status(
+                format!("Failed to execute command in container: {}", e),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )),
+        }
     }
 
     async fn containers_logs_handler(
@@ -1463,22 +1593,44 @@ impl DockerAPIServer {
         container_id: String,
         params: HashMap<String, String>,
     ) -> Result<impl Reply, Rejection> {
-        let _follow = params
-            .get("follow")
-            .map(|v| v == "true" || v == "1")
-            .unwrap_or(false);
-        let _tail = params.get("tail").and_then(|v| v.parse::<usize>().ok());
-        let _timestamps = params
-            .get("timestamps")
-            .map(|v| v == "true" || v == "1")
-            .unwrap_or(false);
+        let tail = params
+            .get("tail")
+            .filter(|v| v.as_str() != "all")
+            .and_then(|v| v.parse::<usize>().ok());
 
         tracing::info!("Fetching logs for container: {}", container_id);
 
-        // Return mock logs (in real impl, would stream from /var/log/bolt/containers/{id}.log)
-        let logs = format!("Container {} logs\nLine 2\nLine 3\n", container_id);
+        // Resolve the reference (id or name) to the captured log file. Follow is
+        // best-effort: we return the current contents rather than a live stream.
+        let id = match crate::runtime::state::resolve_ref(&container_id) {
+            Ok(Some(state)) => state.id,
+            _ => container_id.clone(),
+        };
+        let log_path = crate::runtime::native::container_log_path(&id);
 
-        Ok(warp::reply::with_header(logs, "content-type", "text/plain"))
+        let logs = match tokio::fs::read_to_string(&log_path).await {
+            Ok(content) => match tail {
+                Some(n) => {
+                    let lines: Vec<&str> = content.lines().collect();
+                    let start = lines.len().saturating_sub(n);
+                    let mut out = lines[start..].join("\n");
+                    if !out.is_empty() {
+                        out.push('\n');
+                    }
+                    out
+                }
+                None => content,
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => {
+                return Ok(warp::reply::with_status(
+                    format!("Failed to read logs for {}: {}", container_id, e),
+                    warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                ));
+            }
+        };
+
+        Ok(warp::reply::with_status(logs, warp::http::StatusCode::OK))
     }
 
     async fn containers_stats_handler(

@@ -41,10 +41,20 @@ impl LogsCommand {
     pub async fn execute(&self) -> Result<()> {
         info!("📜 Fetching logs for container: {}", self.container);
 
-        let log_path = self.get_log_path(&self.container).await?;
+        // Resolve the reference (id or --name) against persisted state so logs
+        // work across a restart and accept container names.
+        let id = match bolt::runtime::state::resolve_ref(&self.container)? {
+            Some(state) => state.id,
+            None => self.container.clone(),
+        };
+
+        let log_path = self.get_log_path(&id).await?;
 
         if !log_path.exists() {
-            return Err(anyhow!("No logs found for container: {}", self.container));
+            return Err(anyhow!(
+                "No logs found for container: {} (foreground/tty containers are not captured yet)",
+                self.container
+            ));
         }
 
         if self.follow {

@@ -126,6 +126,30 @@ pub async fn execute_container(
     debug!("Bundle path: {}", state.bundle_path.display());
 
     if state.config.detach {
+        // Capture container stdout/stderr to the log file for non-tty detached
+        // containers. The init process inherits the fds we hand to `runc create`.
+        // TTY containers need a console socket to capture output; that is not yet
+        // implemented, so their output is left uncaptured.
+        // TODO: capture tty container output via a console socket.
+        let log_file = if state.config.tty {
+            None
+        } else if let Some(path) = state.log_path.as_ref() {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).with_context(|| {
+                    format!("Failed to create log directory {}", parent.display())
+                })?;
+            }
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(path)
+                .with_context(|| format!("Failed to open container log file {}", path.display()))?;
+            Some(file)
+        } else {
+            None
+        };
+
         // Create container with OCI runtime
         let mut cmd = Command::new(&runtime);
         cmd.arg("create")
@@ -133,14 +157,33 @@ pub async fn execute_container(
             .arg(&state.bundle_path)
             .arg(&state.id);
 
-        let output = timeout(OCI_COMMAND_TIMEOUT, cmd.output())
+        if let Some(ref file) = log_file {
+            let out = file
+                .try_clone()
+                .context("Failed to clone log file handle for stdout")?;
+            let err = file
+                .try_clone()
+                .context("Failed to clone log file handle for stderr")?;
+            cmd.stdout(Stdio::from(out)).stderr(Stdio::from(err));
+        }
+
+        let status = timeout(OCI_COMMAND_TIMEOUT, cmd.status())
             .await
             .context("Timed out creating container with OCI runtime")?
             .context("Failed to create container with OCI runtime")?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow!("Container creation failed: {}", stderr).into());
+        if !status.success() {
+            // When logs are captured, the runtime's own diagnostics land in the
+            // log file; surface them so failures remain debuggable.
+            let detail = state
+                .log_path
+                .as_ref()
+                .filter(|_| log_file.is_some())
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| format!("exit status {}", status));
+            return Err(anyhow!("Container creation failed: {}", detail).into());
         }
 
         // Start the container
