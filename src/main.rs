@@ -55,6 +55,9 @@ async fn main() -> Result<()> {
             cap_add,
             cap_drop,
             privileged,
+            read_only,
+            pids_limit,
+            security_opt,
             command,
         } => {
             info!("Running container: {}", image);
@@ -94,6 +97,12 @@ async fn main() -> Result<()> {
                 info!("  Interactive mode: {}, TTY: {}", interactive, tty);
             }
 
+            // Parse `--security-opt seccomp=<path|unconfined>`; other options
+            // are accepted but not yet consumed.
+            let seccomp = security_opt
+                .iter()
+                .find_map(|opt| opt.strip_prefix("seccomp=").map(|value| value.to_string()));
+
             let run_options = ContainerRunOptions {
                 rm,
                 command: if command.is_empty() {
@@ -113,6 +122,9 @@ async fn main() -> Result<()> {
                 privileged,
                 tty,
                 interactive,
+                readonly_rootfs: read_only,
+                pids_limit,
+                seccomp,
             };
 
             runtime

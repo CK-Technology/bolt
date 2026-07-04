@@ -206,6 +206,19 @@ pub async fn run_oci_container_delegate_with_options(
         cmd.arg("--privileged");
     }
 
+    if options.readonly_rootfs {
+        cmd.arg("--read-only");
+    }
+
+    if let Some(pids_limit) = options.pids_limit {
+        cmd.arg("--pids-limit").arg(pids_limit.to_string());
+    }
+
+    if let Some(ref seccomp) = options.seccomp {
+        cmd.arg("--security-opt")
+            .arg(format!("seccomp={}", seccomp));
+    }
+
     // Add port mappings
     for port in ports {
         cmd.arg("-p").arg(port);

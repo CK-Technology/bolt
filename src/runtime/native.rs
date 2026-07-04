@@ -72,6 +72,9 @@ pub struct NativeContainerConfig {
     pub privileged: bool,
     pub tty: bool,
     pub interactive: bool,
+    pub readonly_rootfs: bool,
+    pub pids_limit: Option<i64>,
+    pub seccomp: Option<String>, // OCI seccomp profile path, or "unconfined"
     pub gpu_config: Option<GpuConfig>,
     pub cpu_affinity: Option<Vec<usize>>, // CPU cores to pin to
     pub workload_hint: Option<WorkloadHint>, // Hint for auto-optimization
@@ -751,6 +754,8 @@ impl BoltNativeRuntime {
             hostname: config.hostname.clone(),
             privileged: config.privileged,
             tty: config.tty,
+            readonly_rootfs: config.readonly_rootfs,
+            seccomp: config.seccomp.clone(),
         })
     }
 
@@ -825,7 +830,7 @@ impl BoltNativeRuntime {
         let bundle_rootfs = self.runtime_dir.join(container_id).join("rootfs");
         let rootfs_path = fs::canonicalize(&bundle_rootfs).unwrap_or(bundle_rootfs);
         root.set_path(rootfs_path);
-        root.set_readonly(Some(false));
+        root.set_readonly(Some(config.readonly_rootfs));
         spec_builder.set_root(Some(root));
 
         // Create basic mounts
@@ -1267,7 +1272,26 @@ impl BoltNativeRuntime {
                 resources.set_cpu(Some(cpu));
             }
 
+            if let Some(pids_limit) = limits.pids_limit {
+                let pids = oci_spec::runtime::LinuxPidsBuilder::default()
+                    .limit(pids_limit)
+                    .build()
+                    .context("Failed to build pids limit")?;
+                resources.set_pids(Some(pids));
+            }
+
             linux.set_resources(Some(resources));
+        }
+
+        // Attach a seccomp profile when one is supplied via
+        // `--security-opt seccomp=<path>`. "unconfined" or a privileged
+        // container disables seccomp filtering entirely.
+        if !config.privileged
+            && let Some(ref seccomp) = config.seccomp
+            && seccomp != "unconfined"
+        {
+            let profile = Self::load_seccomp_profile(seccomp)?;
+            linux.set_seccomp(Some(profile));
         }
 
         spec_builder.set_linux(Some(linux));
@@ -1347,6 +1371,17 @@ impl BoltNativeRuntime {
         Ok(())
     }
 
+    /// Load an OCI seccomp profile from a JSON file. The file must match the
+    /// standard runtime-spec `LinuxSeccomp` schema (as produced by Docker's
+    /// default profile, `containerd`, etc.).
+    fn load_seccomp_profile(path: &str) -> Result<oci_spec::runtime::LinuxSeccomp> {
+        let contents = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read seccomp profile: {}", path))?;
+        let profile: oci_spec::runtime::LinuxSeccomp = serde_json::from_str(&contents)
+            .with_context(|| format!("Failed to parse seccomp profile: {}", path))?;
+        Ok(profile)
+    }
+
     fn resource_limits_for(config: &NativeContainerConfig) -> Result<Option<ResourceLimits>> {
         let memory = config
             .memory
@@ -1363,7 +1398,14 @@ impl BoltNativeRuntime {
             (None, None, None)
         };
 
-        if memory.is_none() && cpu_quota.is_none() && cpu_period.is_none() && cpu_shares.is_none() {
+        let pids_limit = config.pids_limit;
+
+        if memory.is_none()
+            && cpu_quota.is_none()
+            && cpu_period.is_none()
+            && cpu_shares.is_none()
+            && pids_limit.is_none()
+        {
             return Ok(None);
         }
 
@@ -1372,6 +1414,7 @@ impl BoltNativeRuntime {
             cpu_shares,
             cpu_quota,
             cpu_period,
+            pids_limit,
         }))
     }
 
@@ -1865,6 +1908,9 @@ impl BoltNativeRuntime {
             privileged: false,
             tty: false,
             interactive: false,
+            readonly_rootfs: false,
+            pids_limit: None,
+            seccomp: None,
             gpu_config: Some(gpu_config),
             cpu_affinity: None,
             workload_hint: Some(WorkloadHint::Gaming),
@@ -1917,6 +1963,9 @@ impl BoltNativeRuntime {
             privileged: false,
             tty: false,
             interactive: false,
+            readonly_rootfs: false,
+            pids_limit: None,
+            seccomp: None,
             gpu_config: Some(gpu_config),
             cpu_affinity: None,
             workload_hint: Some(WorkloadHint::Gaming),
@@ -2092,6 +2141,9 @@ mod tests {
             privileged: false,
             tty: true,
             interactive: true,
+            readonly_rootfs: false,
+            pids_limit: None,
+            seccomp: None,
             gpu_config: None,
             cpu_affinity: None,
             workload_hint: None,
@@ -2160,6 +2212,110 @@ mod tests {
         let cpu = resources.cpu().as_ref().expect("cpu limits should be set");
         assert_eq!(cpu.period(), Some(100_000));
         assert_eq!(cpu.quota(), Some(150_000));
+    }
+
+    async fn spec_for(config: &NativeContainerConfig) -> oci_spec::runtime::Spec {
+        let runtime = BoltNativeRuntime::new()
+            .await
+            .expect("native runtime should initialize for spec-only test");
+        let container_config = runtime
+            .create_container_config("bolt-test", config)
+            .await
+            .expect("container config should build");
+        runtime
+            .create_oci_spec("bolt-test", &container_config, None, None)
+            .await
+            .expect("oci spec should build")
+    }
+
+    #[tokio::test]
+    async fn readonly_rootfs_flag_sets_root_readonly() {
+        let mut config = test_config();
+        config.readonly_rootfs = true;
+        let spec = spec_for(&config).await;
+        let root = spec.root().as_ref().expect("root should be set");
+        assert_eq!(root.readonly(), Some(true));
+
+        config.readonly_rootfs = false;
+        let spec = spec_for(&config).await;
+        let root = spec.root().as_ref().expect("root should be set");
+        assert_eq!(root.readonly(), Some(false));
+    }
+
+    #[tokio::test]
+    async fn pids_limit_is_set_on_resources() {
+        let mut config = test_config();
+        config.pids_limit = Some(128);
+        let spec = spec_for(&config).await;
+        let linux = spec.linux().as_ref().expect("linux config should be set");
+        let resources = linux.resources().as_ref().expect("resources should be set");
+        let pids = resources.pids().as_ref().expect("pids limit should be set");
+        assert_eq!(pids.limit(), 128);
+    }
+
+    #[tokio::test]
+    async fn seccomp_profile_attached_from_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let profile_path = dir.path().join("seccomp.json");
+        std::fs::write(&profile_path, r#"{"defaultAction":"SCMP_ACT_ALLOW"}"#)
+            .expect("write profile");
+
+        let mut config = test_config();
+        config.seccomp = Some(profile_path.to_string_lossy().into_owned());
+        let spec = spec_for(&config).await;
+        let linux = spec.linux().as_ref().expect("linux config should be set");
+        let seccomp = linux
+            .seccomp()
+            .as_ref()
+            .expect("seccomp should be attached");
+        assert_eq!(
+            seccomp.default_action(),
+            oci_spec::runtime::LinuxSeccompAction::ScmpActAllow
+        );
+    }
+
+    #[tokio::test]
+    async fn seccomp_unconfined_leaves_no_profile() {
+        let mut config = test_config();
+        config.seccomp = Some("unconfined".to_string());
+        let spec = spec_for(&config).await;
+        let linux = spec.linux().as_ref().expect("linux config should be set");
+        assert!(linux.seccomp().is_none());
+    }
+
+    #[tokio::test]
+    async fn privileged_container_skips_seccomp() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let profile_path = dir.path().join("seccomp.json");
+        std::fs::write(&profile_path, r#"{"defaultAction":"SCMP_ACT_ALLOW"}"#)
+            .expect("write profile");
+
+        let mut config = test_config();
+        config.privileged = true;
+        config.seccomp = Some(profile_path.to_string_lossy().into_owned());
+        let spec = spec_for(&config).await;
+        let linux = spec.linux().as_ref().expect("linux config should be set");
+        assert!(linux.seccomp().is_none());
+    }
+
+    #[tokio::test]
+    async fn privileged_container_gets_full_capability_set() {
+        let mut config = test_config();
+        config.privileged = true;
+        let spec = spec_for(&config).await;
+        let process = spec.process().as_ref().expect("process should be set");
+        let capabilities = process
+            .capabilities()
+            .as_ref()
+            .expect("capabilities should be set");
+        let effective = capabilities
+            .effective()
+            .as_ref()
+            .expect("effective capabilities should be set");
+        // Privileged grants the full capability set, including ones not in
+        // the default allow-list such as SysAdmin.
+        assert!(effective.contains(&Capability::SysAdmin));
+        assert!(effective.contains(&Capability::NetAdmin));
     }
 
     #[test]

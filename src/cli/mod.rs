@@ -125,6 +125,18 @@ pub enum Commands {
         #[arg(long)]
         privileged: bool,
 
+        /// Mount the container's root filesystem read-only
+        #[arg(long)]
+        read_only: bool,
+
+        /// Tune container process/thread limit (pids cgroup)
+        #[arg(long)]
+        pids_limit: Option<i64>,
+
+        /// Security options (e.g., seccomp=<profile.json>, seccomp=unconfined)
+        #[arg(long)]
+        security_opt: Vec<String>,
+
         /// Command and arguments to run in the container
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,

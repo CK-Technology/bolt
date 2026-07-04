@@ -32,6 +32,12 @@ pub struct ContainerConfig {
     pub detach: bool,
     pub privileged: bool,
     pub tty: bool,
+    /// Mount the container root filesystem read-only.
+    #[serde(default)]
+    pub readonly_rootfs: bool,
+    /// OCI seccomp profile path, or "unconfined" to disable seccomp.
+    #[serde(default)]
+    pub seccomp: Option<String>,
 }
 
 /// Container runtime state
@@ -91,6 +97,9 @@ pub struct ResourceLimits {
     pub cpu_shares: Option<u64>,
     pub cpu_quota: Option<i64>,
     pub cpu_period: Option<u64>,
+    /// Maximum number of processes/threads (pids cgroup controller).
+    #[serde(default)]
+    pub pids_limit: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -191,6 +191,8 @@ mod tests {
                 detach: true,
                 privileged: false,
                 tty: false,
+                readonly_rootfs: false,
+                seccomp: None,
             },
             created: std::time::SystemTime::now(),
             started: Some(std::time::SystemTime::now()),

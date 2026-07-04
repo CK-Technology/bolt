@@ -24,6 +24,9 @@ pub struct ContainerRunOptions {
     pub privileged: bool,
     pub tty: bool,
     pub interactive: bool,
+    pub readonly_rootfs: bool,
+    pub pids_limit: Option<i64>,
+    pub seccomp: Option<String>,
 }
 
 /// Unified runtime interface that can switch between native and delegation modes
@@ -161,6 +164,9 @@ impl UnifiedRuntime {
                     privileged: options.privileged,
                     tty: options.tty,
                     interactive: options.interactive,
+                    readonly_rootfs: options.readonly_rootfs,
+                    pids_limit: options.pids_limit,
+                    seccomp: options.seccomp,
                     gpu_config,
                     cpu_affinity: None,
                     workload_hint: None,

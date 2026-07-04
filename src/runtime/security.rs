@@ -200,19 +200,15 @@ impl BoltSecurityManager {
 
     /// Apply seccomp profile to container
     async fn apply_seccomp_profile(&self, container_id: &str, profile: &str) -> Result<()> {
-        if let Some(seccomp_profile) = self.seccomp_profiles.get(profile) {
+        if self.seccomp_profiles.contains_key(profile) {
+            // Seccomp is enforced through the OCI spec (linux.seccomp), which the
+            // runtime attaches when a profile file is supplied via
+            // `--security-opt seccomp=<path>`. This named-profile path is a
+            // higher-level policy selector and does not write BPF itself.
             info!(
-                "🔧 Applying seccomp profile '{}' to container {}",
+                "🔧 Selected seccomp profile '{}' for container {}",
                 profile, container_id
             );
-
-            // In a real implementation, this would write seccomp BPF programs
-            // For now, we'll create the profile configuration
-            let profile_path = format!("/tmp/bolt-seccomp-{}.json", container_id);
-            let profile_json = serde_json::to_string_pretty(seccomp_profile)?;
-            tokio::fs::write(&profile_path, profile_json).await?;
-
-            info!("✅ Seccomp profile applied: {}", profile_path);
         } else {
             warn!("⚠️  Seccomp profile '{}' not found, using default", profile);
         }
