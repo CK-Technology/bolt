@@ -294,6 +294,35 @@ pub enum Commands {
         json: bool,
     },
 
+    /// Validate Boltfile, lockfile, and static project state
+    Validate {
+        /// Emit JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Run non-destructive local self-tests
+    SelfTest {
+        /// Emit JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Service discovery DNS helpers
+    Dns {
+        #[command(subcommand)]
+        command: DnsCommands,
+    },
+
+    /// Generate shell completion scripts
+    Completions {
+        /// Shell: bash, zsh, fish
+        shell: String,
+    },
+
+    /// Print a basic manpage
+    Manpage,
+
     /// Import existing Docker/Bolt resources into Boltfile.toml
     Import {
         #[command(subcommand)]
@@ -398,6 +427,24 @@ pub enum ImageCommands {
     /// List native cached images
     List,
 
+    /// Inspect native cached image metadata
+    Inspect {
+        /// Image reference
+        image: String,
+    },
+
+    /// Pin image so native GC will not remove it
+    Pin {
+        /// Image reference
+        image: String,
+    },
+
+    /// Remove an image pin
+    Unpin {
+        /// Image reference
+        image: String,
+    },
+
     /// Prune native images not referenced by containers
     Prune {
         /// Show what would be removed without deleting anything
@@ -407,6 +454,25 @@ pub enum ImageCommands {
         /// Do not prompt before deleting
         #[arg(short, long)]
         force: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum DnsCommands {
+    /// Resolve a service name from Bolt service discovery
+    Resolve {
+        /// Service name or fully-qualified .bolt name
+        name: String,
+    },
+
+    /// Print /etc/hosts-compatible entries
+    Hosts,
+
+    /// Serve a tiny local DNS responder for .bolt A records
+    Serve {
+        /// Bind address
+        #[arg(long, default_value = "127.0.0.1:8053")]
+        bind: std::net::SocketAddr,
     },
 }
 

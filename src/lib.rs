@@ -265,6 +265,24 @@ impl BoltRuntime {
         runtime.prune_images(dry_run).await
     }
 
+    pub async fn inspect_image(
+        &self,
+        image: &str,
+    ) -> Result<(String, runtime::storage::ImageMetadata, bool)> {
+        let runtime = self.unified_runtime().await?;
+        runtime.inspect_image(image).await
+    }
+
+    pub async fn pin_image(&self, image: &str) -> Result<()> {
+        let runtime = self.unified_runtime().await?;
+        runtime.pin_image(image).await
+    }
+
+    pub async fn unpin_image(&self, image: &str) -> Result<()> {
+        let runtime = self.unified_runtime().await?;
+        runtime.unpin_image(image).await
+    }
+
     /// List containers
     pub async fn list_containers(&self, all: bool) -> Result<Vec<ContainerInfo>> {
         let runtime = self.unified_runtime().await?;

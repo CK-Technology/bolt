@@ -973,6 +973,18 @@ impl BoltNativeRuntime {
         self.storage.list_cached_images()
     }
 
+    pub async fn inspect_image_native(&self, image: &str) -> Result<(String, ImageMetadata, bool)> {
+        self.storage.inspect_image(image).await
+    }
+
+    pub async fn pin_image_native(&self, image: &str) -> Result<()> {
+        self.storage.pin_image(image).await
+    }
+
+    pub async fn unpin_image_native(&self, image: &str) -> Result<()> {
+        self.storage.unpin_image(image).await
+    }
+
     pub async fn prune_images_native(&mut self, dry_run: bool) -> Result<ImageGcReport> {
         let protected = self
             .containers

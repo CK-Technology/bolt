@@ -790,6 +790,8 @@ pub struct ImageGcReport {
     pub candidates: Vec<ImageGcCandidate>,
     pub roots: Vec<RootGcCandidate>,
     pub reclaimed_bytes: u64,
+    #[serde(default)]
+    pub protected_images: Vec<String>,
 }
 
 struct StorageBootstrap {
@@ -909,6 +911,56 @@ impl StorageManager {
         images
     }
 
+    pub async fn inspect_image(&self, image: &str) -> Result<(String, ImageMetadata, bool)> {
+        let reference = normalize_reference(image);
+        let metadata = self
+            .images
+            .get(&reference)
+            .cloned()
+            .ok_or_else(|| anyhow!("image '{}' not found", image))?;
+        let pins = self.load_image_pins().await?;
+        Ok((reference.clone(), metadata, pins.contains(&reference)))
+    }
+
+    pub async fn pin_image(&self, image: &str) -> Result<()> {
+        let reference = normalize_reference(image);
+        if !self.images.contains_key(&reference) {
+            return Err(anyhow!("image '{}' not found", image).into());
+        }
+        let mut pins = self.load_image_pins().await?;
+        pins.insert(reference);
+        self.save_image_pins(&pins).await
+    }
+
+    pub async fn unpin_image(&self, image: &str) -> Result<()> {
+        let reference = normalize_reference(image);
+        let mut pins = self.load_image_pins().await?;
+        pins.remove(&reference);
+        self.save_image_pins(&pins).await
+    }
+
+    async fn load_image_pins(&self) -> Result<HashSet<String>> {
+        let path = self.image_pins_path();
+        if !path.exists() {
+            return Ok(HashSet::new());
+        }
+        let data = fs::read_to_string(&path).await?;
+        Ok(serde_json::from_str(&data)?)
+    }
+
+    async fn save_image_pins(&self, pins: &HashSet<String>) -> Result<()> {
+        let path = self.image_pins_path();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+        fs::write(path, serde_json::to_string_pretty(pins)?).await?;
+        Ok(())
+    }
+
+    fn image_pins_path(&self) -> PathBuf {
+        self.storage_root.join("image_pins.json")
+    }
+
     pub async fn prune_images(
         &mut self,
         protected_references: &HashSet<String>,
@@ -923,11 +975,24 @@ impl StorageManager {
 
         let mut candidates = Vec::new();
         let mut candidate_paths = HashSet::new();
+        let pinned_images = self.load_image_pins().await.unwrap_or_default();
         for (reference, metadata) in &self.images {
             if protected_references.contains(reference) {
+                report
+                    .protected_images
+                    .push(format!("{reference} (container reference)"));
+                continue;
+            }
+            if pinned_images.contains(reference) {
+                report
+                    .protected_images
+                    .push(format!("{reference} (pinned)"));
                 continue;
             }
             if image_metadata_is_protected(metadata, protected_digests) {
+                report
+                    .protected_images
+                    .push(format!("{reference} (protected digest)"));
                 continue;
             }
             let path = self.get_image_path(reference);

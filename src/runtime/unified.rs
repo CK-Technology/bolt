@@ -310,6 +310,48 @@ impl UnifiedRuntime {
         }
     }
 
+    pub async fn inspect_image(&self, image: &str) -> Result<(String, ImageMetadata, bool)> {
+        match &self.mode {
+            RuntimeMode::Native => {
+                let native = self.native_runtime()?;
+                let native = native.read().await;
+                native.inspect_image_native(image).await
+            }
+            RuntimeMode::Delegate(_) => Err(anyhow!(
+                "native image inspection is unavailable while delegated to Docker/Podman"
+            )
+            .into()),
+        }
+    }
+
+    pub async fn pin_image(&self, image: &str) -> Result<()> {
+        match &self.mode {
+            RuntimeMode::Native => {
+                let native = self.native_runtime()?;
+                let native = native.read().await;
+                native.pin_image_native(image).await
+            }
+            RuntimeMode::Delegate(_) => Err(anyhow!(
+                "native image pinning is unavailable while delegated to Docker/Podman"
+            )
+            .into()),
+        }
+    }
+
+    pub async fn unpin_image(&self, image: &str) -> Result<()> {
+        match &self.mode {
+            RuntimeMode::Native => {
+                let native = self.native_runtime()?;
+                let native = native.read().await;
+                native.unpin_image_native(image).await
+            }
+            RuntimeMode::Delegate(_) => Err(anyhow!(
+                "native image pinning is unavailable while delegated to Docker/Podman"
+            )
+            .into()),
+        }
+    }
+
     /// Prune native cached images not referenced by any persisted container.
     pub async fn prune_images(&self, dry_run: bool) -> Result<ImageGcReport> {
         match &self.mode {

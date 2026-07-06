@@ -21,6 +21,10 @@ flowchart TD
 ## Commands
 
 ```bash
+bolt image inspect alpine:latest
+bolt image pin alpine:latest
+bolt image unpin alpine:latest
+
 # Preview only
 bolt image prune --dry-run
 
@@ -34,11 +38,14 @@ bolt image prune --force
 ## Protected Roots
 
 - Images referenced by persisted containers are protected.
+- Images pinned with `bolt image pin` are protected.
+- Image digests referenced by snapshot generations are protected.
 - Container bundle directories whose IDs are present in runtime state are
   protected.
-- Future generation metadata will become an additional GC root.
+- Container IDs referenced by snapshot generations are protected.
 
 ## Output Shape
 
 The prune report separates image candidates from runtime-root candidates and
-includes byte counts for both categories.
+includes byte counts for both categories. It also explains image references
+protected by pins, live containers, or generation digests.

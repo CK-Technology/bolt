@@ -4,7 +4,7 @@ use anyhow::Result;
 use bolt::runtime::gpu_integration::{GpuConfig, GpuIsolationLevel, GpuWorkloadType};
 use bolt::runtime::unified::ContainerRunOptions;
 use bolt::{BoltConfig, BoltRuntime, gaming, surge};
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use cli::{
     Cli, Commands, GamingCommands, GenerationCommands, ImageCommands, ImportCommands,
     NetworkCommands, SurgeCommands, VolumeCommands, compat,
@@ -15,16 +15,28 @@ use tracing::info;
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    let quiet_generator = matches!(
+        &cli.command,
+        Commands::Completions { .. } | Commands::Manpage
+    );
 
     // Initialize logging
-    let level = if cli.verbose { "debug" } else { "info" };
+    let level = if quiet_generator {
+        "error"
+    } else if cli.verbose {
+        "debug"
+    } else {
+        "info"
+    };
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env().add_directive(level.parse()?),
         )
         .init();
 
-    info!("🚀 Bolt starting up...");
+    if !quiet_generator {
+        info!("🚀 Bolt starting up...");
+    }
 
     // Create BoltConfig from CLI config path
     let mut bolt_config = BoltConfig::load()?;
@@ -182,6 +194,27 @@ async fn main() -> Result<()> {
                     );
                 }
             }
+            ImageCommands::Inspect { image } => {
+                let (reference, metadata, pinned) = runtime.inspect_image(&image).await?;
+                println!("Image: {}", reference);
+                println!("  Digest: {}", metadata.digest);
+                println!(
+                    "  Config digest: {}",
+                    metadata.config_digest.unwrap_or_else(|| "-".to_string())
+                );
+                println!("  Size: {}", format_bytes(metadata.size));
+                println!("  Created: {}", metadata.created.to_rfc3339());
+                println!("  Pinned: {}", yes_no(pinned));
+                println!("  Layers: {}", metadata.layers.len());
+            }
+            ImageCommands::Pin { image } => {
+                runtime.pin_image(&image).await?;
+                println!("Pinned image: {}", image);
+            }
+            ImageCommands::Unpin { image } => {
+                runtime.unpin_image(&image).await?;
+                println!("Unpinned image: {}", image);
+            }
             ImageCommands::Prune { dry_run, force } => {
                 let preview_only = dry_run || !force;
                 let report = runtime.prune_images(preview_only).await?;
@@ -215,6 +248,12 @@ async fn main() -> Result<()> {
                         candidate.id,
                         format_bytes(candidate.bytes)
                     );
+                }
+                if !report.protected_images.is_empty() {
+                    println!("Protected images:");
+                    for image in &report.protected_images {
+                        println!("  {}", image);
+                    }
                 }
                 println!(
                     "Total reclaimable: {}",
@@ -473,6 +512,40 @@ async fn main() -> Result<()> {
                     );
                 }
             }
+        }
+
+        Commands::Validate { json } => {
+            let report = bolt::project::validate(&bolt_config, &runtime).await;
+            print_check_report("Validate", &report, json)?;
+        }
+
+        Commands::SelfTest { json } => {
+            let report = bolt::project::self_test(&bolt_config, &runtime).await;
+            print_check_report("Self-test", &report, json)?;
+        }
+
+        Commands::Dns { command } => match command {
+            cli::DnsCommands::Resolve { name } => {
+                let entry = bolt::project::resolve_dns_name(&bolt_config, &name)?;
+                println!("{} {}", entry.dns_name, entry.address);
+            }
+            cli::DnsCommands::Hosts => {
+                for line in bolt::project::hosts_entries(&bolt_config)? {
+                    println!("{}", line);
+                }
+            }
+            cli::DnsCommands::Serve { bind } => {
+                println!("Serving Bolt DNS on {}", bind);
+                bolt::project::serve_dns(bolt_config.clone(), bind).await?;
+            }
+        },
+
+        Commands::Completions { shell } => {
+            print_completion(&shell)?;
+        }
+
+        Commands::Manpage => {
+            print_manpage();
         }
 
         Commands::Import { command } => match command {
@@ -1528,6 +1601,80 @@ fn parse_inspect_kind(kind: &str) -> Result<bolt::project::InspectKind> {
             "unsupported inspect kind '{}'; use service, container, image, volume, or network",
             other
         ),
+    }
+}
+
+fn print_check_report(label: &str, report: &bolt::project::DoctorReport, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(report)?);
+        return Ok(());
+    }
+    println!(
+        "{}: {}",
+        label,
+        if report.ok { "ok" } else { "issues found" }
+    );
+    for check in &report.checks {
+        println!(
+            "  {:<18} {:<4} {}",
+            check.name,
+            if check.ok { "ok" } else { "fail" },
+            check.message
+        );
+    }
+    Ok(())
+}
+
+fn print_completion(shell: &str) -> Result<()> {
+    let commands = "run build pull push image ps stop exec logs rm restart surge plan apply destroy lock drift doctor validate self-test dns import inspect gaming gpu nv amd arc network volume snapshot generations hardware compat tools dashboard completions manpage";
+    match shell {
+        "bash" => println!(
+            r#"_bolt()
+{{
+  local cur
+  cur="${{COMP_WORDS[COMP_CWORD]}}"
+  COMPREPLY=( $(compgen -W "{commands}" -- "$cur") )
+}}
+complete -F _bolt bolt"#
+        ),
+        "zsh" => println!(
+            r#"#compdef bolt
+_arguments '1:command:({commands})'"#
+        ),
+        "fish" => {
+            for command in commands.split_whitespace() {
+                println!("complete -c bolt -f -a {command}");
+            }
+        }
+        other => anyhow::bail!("unsupported shell '{}'; use bash, zsh, or fish", other),
+    }
+    Ok(())
+}
+
+fn print_manpage() {
+    let mut command = Cli::command();
+    let about = command
+        .get_about()
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+    println!(".TH BOLT 1");
+    println!(".SH NAME");
+    println!("bolt \\- {}", about);
+    println!(".SH SYNOPSIS");
+    println!(".B bolt [OPTIONS] <COMMAND>");
+    println!(".SH DESCRIPTION");
+    println!(
+        "Bolt is a performance-first container runtime with Boltfile orchestration, GPU support, snapshots, and QUIC networking."
+    );
+    println!(".SH COMMANDS");
+    for subcommand in command.get_subcommands_mut() {
+        let about = subcommand
+            .get_about()
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        println!(".TP");
+        println!(".B {}", subcommand.get_name());
+        println!("{}", about);
     }
 }
 

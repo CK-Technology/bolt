@@ -98,10 +98,17 @@ bolt destroy [--force] [--volumes] [SERVICE...]
 bolt lock [--check]
 bolt drift [--json]
 bolt doctor [--json]
+bolt validate [--json]
+bolt self-test [--json]
+bolt dns resolve <service|name.project.bolt>
+bolt dns hosts
+bolt dns serve [--bind 127.0.0.1:8053]
 bolt import compose [-i docker-compose.yml] [-o Boltfile.toml]
 bolt import container <ID|NAME> [--service <NAME>]
 bolt import image <REF> [--service <NAME>]
 bolt inspect <service|container|image|volume|network> <NAME|ID> [--json]
+bolt completions <bash|zsh|fish>
+bolt manpage
 ```
 
 `bolt apply` uses Surge as the executor, then writes `Boltfile.lock`.
@@ -109,6 +116,18 @@ bolt inspect <service|container|image|volume|network> <NAME|ID> [--json]
 `bolt apply` creates declared volumes and networks before services, honors
 `depends_on` order, and writes `.bolt` service-discovery metadata under the Bolt
 data directory.
+
+### Native Images
+
+```bash
+bolt image list
+bolt image inspect <REF>
+bolt image pin <REF>
+bolt image unpin <REF>
+bolt image prune [--dry-run] [--force]
+```
+
+Pinned images are protected from native image garbage collection.
 
 ## Snapshots
 

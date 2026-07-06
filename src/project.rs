@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fs;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
+use tokio::net::UdpSocket;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectPlan {
@@ -108,6 +110,8 @@ pub struct DoctorCheck {
     pub message: String,
 }
 
+pub type ValidationReport = DoctorReport;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceDiscoveryRegistry {
     pub project: String,
@@ -124,6 +128,8 @@ pub struct ServiceDiscoveryEntry {
     pub ports: Vec<String>,
     pub protocol: String,
     pub healthy: bool,
+    #[serde(default = "localhost_ip")]
+    pub address: Ipv4Addr,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,11 +173,13 @@ pub async fn apply(
     create_declared_volumes(runtime, &boltfile).await?;
     create_declared_networks(runtime, &boltfile).await?;
     write_service_discovery(config, &boltfile)?;
-    let ordered_services = ordered_target_services(&boltfile, services)?;
-    runtime
-        .surge_up(&ordered_services, detach, force_recreate)
-        .await
-        .context("failed to apply Boltfile through Surge")?;
+    let ordered_services = selective_apply_services(&boltfile, &before, services, force_recreate)?;
+    if !ordered_services.is_empty() {
+        runtime
+            .surge_up(&ordered_services, detach, force_recreate)
+            .await
+            .context("failed to apply Boltfile through Surge")?;
+    }
     write_lock(config, runtime).await?;
     Ok(before)
 }
@@ -434,6 +442,71 @@ pub async fn doctor(config: &BoltConfig, runtime: &BoltRuntime) -> DoctorReport 
     };
     checks.push(snapshot_check);
 
+    DoctorReport {
+        ok: checks.iter().all(|check| check.ok),
+        checks,
+    }
+}
+
+pub async fn validate(config: &BoltConfig, runtime: &BoltRuntime) -> ValidationReport {
+    let mut checks = Vec::new();
+    let boltfile = match config.load_boltfile() {
+        Ok(boltfile) => boltfile,
+        Err(err) => {
+            checks.push(DoctorCheck {
+                name: "Boltfile parse".to_string(),
+                ok: false,
+                message: err.to_string(),
+            });
+            return ValidationReport { ok: false, checks };
+        }
+    };
+
+    checks.push(DoctorCheck {
+        name: "Service graph".to_string(),
+        ok: service_order(&boltfile).is_ok(),
+        message: service_order(&boltfile)
+            .map(|order| format!("{} service(s), dependency order valid", order.len()))
+            .unwrap_or_else(|err| err.to_string()),
+    });
+    checks.push(DoctorCheck {
+        name: "Lockfile".to_string(),
+        ok: check_lock(config, runtime).await.is_ok(),
+        message: check_lock(config, runtime)
+            .await
+            .map(|_| "Boltfile.lock is current".to_string())
+            .unwrap_or_else(|err| err.to_string()),
+    });
+    checks.push(DoctorCheck {
+        name: "Service discovery".to_string(),
+        ok: !service_discovery_registry(&boltfile).services.is_empty()
+            || boltfile.services.is_empty(),
+        message: format!("{} service discovery entrie(s)", boltfile.services.len()),
+    });
+
+    ValidationReport {
+        ok: checks.iter().all(|check| check.ok),
+        checks,
+    }
+}
+
+pub async fn self_test(config: &BoltConfig, runtime: &BoltRuntime) -> DoctorReport {
+    let mut checks = doctor(config, runtime).await.checks;
+    let validation = validate(config, runtime).await;
+    checks.extend(validation.checks);
+    let plan_check = match plan(config, runtime).await {
+        Ok(plan) => DoctorCheck {
+            name: "Plan".to_string(),
+            ok: true,
+            message: format!("{} action(s)", plan.actions.len()),
+        },
+        Err(err) => DoctorCheck {
+            name: "Plan".to_string(),
+            ok: false,
+            message: err.to_string(),
+        },
+    };
+    checks.push(plan_check);
     DoctorReport {
         ok: checks.iter().all(|check| check.ok),
         checks,
@@ -783,6 +856,29 @@ fn ordered_target_services(boltfile: &BoltFile, services: &[String]) -> Result<V
     Ok(ordered)
 }
 
+fn selective_apply_services(
+    boltfile: &BoltFile,
+    plan: &ProjectPlan,
+    services: &[String],
+    force_recreate: bool,
+) -> Result<Vec<String>> {
+    if force_recreate || !services.is_empty() {
+        return ordered_target_services(boltfile, services);
+    }
+
+    let changed = plan
+        .actions
+        .iter()
+        .filter(|action| action.resource_type == ResourceType::Service)
+        .filter(|action| matches!(action.action, ActionKind::Create | ActionKind::Update))
+        .map(|action| action.name.clone())
+        .collect::<BTreeSet<_>>();
+
+    let mut ordered = service_order(boltfile)?;
+    ordered.retain(|service| changed.contains(service));
+    Ok(ordered)
+}
+
 async fn create_declared_volumes(runtime: &BoltRuntime, boltfile: &BoltFile) -> Result<()> {
     let existing = runtime
         .list_volumes()
@@ -862,6 +958,7 @@ fn service_discovery_registry(boltfile: &BoltFile) -> ServiceDiscoveryRegistry {
                         "tcp".to_string()
                     },
                     healthy: true,
+                    address: localhost_ip(),
                 };
             (name.clone(), entry)
         })
@@ -875,6 +972,10 @@ fn service_discovery_registry(boltfile: &BoltFile) -> ServiceDiscoveryRegistry {
 
 fn service_discovery_path(config: &BoltConfig) -> PathBuf {
     config.data_dir.join("service_discovery.json")
+}
+
+fn localhost_ip() -> Ipv4Addr {
+    Ipv4Addr::new(127, 0, 0, 1)
 }
 
 async fn inspect_service(
@@ -997,6 +1098,94 @@ pub fn print_plan(plan: &ProjectPlan) {
             action.action, action.resource_type, action.name, action.reason
         );
     }
+}
+
+pub fn hosts_entries(config: &BoltConfig) -> Result<Vec<String>> {
+    let registry = read_service_discovery(config)
+        .ok_or_else(|| anyhow!("service discovery registry not found; run bolt apply first"))?;
+    Ok(registry
+        .services
+        .values()
+        .map(|entry| format!("{} {}", entry.address, entry.dns_name))
+        .collect())
+}
+
+pub fn resolve_dns_name(config: &BoltConfig, name: &str) -> Result<ServiceDiscoveryEntry> {
+    let registry = read_service_discovery(config)
+        .ok_or_else(|| anyhow!("service discovery registry not found; run bolt apply first"))?;
+    registry
+        .services
+        .values()
+        .find(|entry| entry.dns_name == name || entry.service == name)
+        .cloned()
+        .ok_or_else(|| anyhow!("service '{}' not found in discovery registry", name).into())
+}
+
+pub async fn serve_dns(config: BoltConfig, bind: SocketAddr) -> Result<()> {
+    let socket = UdpSocket::bind(bind).await?;
+    let mut buf = [0u8; 512];
+    loop {
+        let (len, peer) = socket.recv_from(&mut buf).await?;
+        if let Some(response) = dns_response(&config, &buf[..len]) {
+            socket.send_to(&response, peer).await?;
+        }
+    }
+}
+
+fn dns_response(config: &BoltConfig, query: &[u8]) -> Option<Vec<u8>> {
+    if query.len() < 12 {
+        return None;
+    }
+    let qdcount = u16::from_be_bytes([query[4], query[5]]);
+    if qdcount == 0 {
+        return None;
+    }
+    let mut cursor = 12usize;
+    let mut labels = Vec::new();
+    while cursor < query.len() {
+        let len = *query.get(cursor)? as usize;
+        cursor += 1;
+        if len == 0 {
+            break;
+        }
+        let end = cursor.checked_add(len)?;
+        let label = std::str::from_utf8(query.get(cursor..end)?).ok()?;
+        labels.push(label.to_string());
+        cursor = end;
+    }
+    if cursor + 4 > query.len() {
+        return None;
+    }
+    let qtype = u16::from_be_bytes([query[cursor], query[cursor + 1]]);
+    let qclass = u16::from_be_bytes([query[cursor + 2], query[cursor + 3]]);
+    let question_end = cursor + 4;
+    let name = labels.join(".");
+    let resolved = resolve_dns_name(config, &name).ok();
+    let mut out = Vec::new();
+    out.extend_from_slice(&query[0..2]);
+    let flags = if resolved.is_some() && qtype == 1 && qclass == 1 {
+        0x8180u16
+    } else {
+        0x8183u16
+    };
+    out.extend_from_slice(&flags.to_be_bytes());
+    out.extend_from_slice(&1u16.to_be_bytes());
+    out.extend_from_slice(&(if flags == 0x8180 { 1u16 } else { 0u16 }).to_be_bytes());
+    out.extend_from_slice(&0u16.to_be_bytes());
+    out.extend_from_slice(&0u16.to_be_bytes());
+    out.extend_from_slice(&query[12..question_end]);
+    if let Some(entry) = resolved
+        && qtype == 1
+        && qclass == 1
+    {
+        out.extend_from_slice(&0xC00Cu16.to_be_bytes());
+        out.extend_from_slice(&1u16.to_be_bytes());
+        out.extend_from_slice(&1u16.to_be_bytes());
+        out.extend_from_slice(&30u32.to_be_bytes());
+        out.extend_from_slice(&4u16.to_be_bytes());
+        out.extend_from_slice(&entry.address.octets());
+    }
+    Some(out)
 }
 
 pub fn ensure_force(force: bool, operation: &str) -> Result<()> {
@@ -1180,6 +1369,60 @@ mod tests {
         assert_eq!(
             registry.services.get("web").unwrap().dns_name,
             "web.demo.bolt"
+        );
+    }
+
+    #[test]
+    fn selective_apply_chooses_only_changed_services() {
+        let mut services = std::collections::HashMap::new();
+        services.insert(
+            "db".to_string(),
+            Service {
+                image: Some("postgres:16".to_string()),
+                ..Service::default()
+            },
+        );
+        services.insert(
+            "web".to_string(),
+            Service {
+                image: Some("nginx:latest".to_string()),
+                depends_on: Some(vec!["db".to_string()]),
+                ..Service::default()
+            },
+        );
+        let boltfile = BoltFile {
+            project: "demo".to_string(),
+            services,
+            networks: None,
+            volumes: None,
+            snapshots: None,
+        };
+        let plan = ProjectPlan {
+            project: "demo".to_string(),
+            boltfile: PathBuf::from("Boltfile.toml"),
+            actions: vec![
+                ProjectAction {
+                    action: ActionKind::Noop,
+                    resource_type: ResourceType::Service,
+                    name: "db".to_string(),
+                    reason: String::new(),
+                },
+                ProjectAction {
+                    action: ActionKind::Update,
+                    resource_type: ResourceType::Service,
+                    name: "web".to_string(),
+                    reason: String::new(),
+                },
+            ],
+            summary: PlanSummary::default(),
+        };
+        assert_eq!(
+            selective_apply_services(&boltfile, &plan, &[], false).unwrap(),
+            vec!["web"]
+        );
+        assert_eq!(
+            selective_apply_services(&boltfile, &plan, &[], true).unwrap(),
+            vec!["db", "web"]
         );
     }
 }
