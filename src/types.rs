@@ -1,5 +1,8 @@
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
 /// Container information
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContainerInfo {
     pub id: String,
     pub name: String,
@@ -16,14 +19,14 @@ pub struct ContainerInfo {
 }
 
 /// Surge orchestration status
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SurgeStatus {
     pub services: Vec<ServiceInfo>,
     pub networks: Vec<NetworkInfo>,
 }
 
 /// Service information
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceInfo {
     pub name: String,
     pub status: String,
@@ -31,7 +34,7 @@ pub struct ServiceInfo {
 }
 
 /// Network information
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkInfo {
     pub id: String, // Docker API compatibility
     pub name: String,
@@ -41,12 +44,10 @@ pub struct NetworkInfo {
 }
 
 /// Image information
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageInfo {
     pub id: String,
     pub name: String,
     pub size: u64,
     pub created: Option<String>,
 }
-
-use std::collections::HashMap;

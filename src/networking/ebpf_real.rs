@@ -226,9 +226,10 @@ char _license[] SEC(\"license\") = \"GPL\";
 
     /// Test compile eBPF program
     async fn test_compile_ebpf_program(name: &str, source: &str) -> Result<()> {
-        let temp_dir = std::env::temp_dir();
-        let source_file = temp_dir.join(format!(\"{}.c\", name));
-        let object_file = temp_dir.join(format!(\"{}.o\", name));
+        let scratch_dir = std::path::PathBuf::from(".scratch").join("bolt-ebpf");
+        fs::create_dir_all(&scratch_dir)?;
+        let source_file = scratch_dir.join(format!(\"{}.c\", name));
+        let object_file = scratch_dir.join(format!(\"{}.o\", name));
 
         // Write source to file
         fs::write(&source_file, source)?;

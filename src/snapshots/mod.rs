@@ -28,6 +28,7 @@ pub struct SnapshotConfig {
 pub enum FilesystemType {
     BTRFS,
     ZFS,
+    Unsupported(String),
     Auto, // Auto-detect
 }
 
@@ -166,23 +167,40 @@ impl SnapshotManager {
             .trim()
             .to_lowercase();
 
-        match fstype.as_str() {
-            "btrfs" => {
+        match Self::filesystem_type_from_name(&fstype) {
+            FilesystemType::BTRFS => {
                 info!("✅ Detected BTRFS filesystem");
                 Ok(FilesystemType::BTRFS)
             }
-            "zfs" => {
+            FilesystemType::ZFS => {
                 info!("✅ Detected ZFS filesystem");
                 Ok(FilesystemType::ZFS)
             }
-            _ => {
-                warn!(
-                    "⚠️ Unsupported filesystem: {}, falling back to BTRFS",
-                    fstype
-                );
-                Ok(FilesystemType::BTRFS)
+            FilesystemType::Unsupported(name) => {
+                warn!("⚠️ Snapshot rollback unsupported on filesystem: {}", name);
+                Ok(FilesystemType::Unsupported(name))
             }
+            FilesystemType::Auto => unreachable!(),
         }
+    }
+
+    fn filesystem_type_from_name(fstype: &str) -> FilesystemType {
+        match fstype.trim().to_lowercase().as_str() {
+            "btrfs" => FilesystemType::BTRFS,
+            "zfs" => FilesystemType::ZFS,
+            other if other.is_empty() => FilesystemType::Unsupported("unknown".to_string()),
+            other => FilesystemType::Unsupported(other.to_string()),
+        }
+    }
+
+    fn ensure_snapshot_capable(&self) -> Result<()> {
+        if let FilesystemType::Unsupported(ref fstype) = self.filesystem_type {
+            return Err(anyhow::anyhow!(
+                "snapshot rollback is not supported on filesystem '{}'; configure BTRFS or ZFS before enabling snapshots",
+                fstype
+            ));
+        }
+        Ok(())
     }
 
     /// Create a snapshot
@@ -196,6 +214,7 @@ impl SnapshotManager {
             warn!("Snapshots disabled, skipping");
             return Err(anyhow::anyhow!("Snapshots are disabled"));
         }
+        self.ensure_snapshot_capable()?;
 
         let timestamp = chrono::Utc::now();
         let snapshot_id = format!("bolt-{}", timestamp.format("%Y%m%d-%H%M%S"));
@@ -227,6 +246,7 @@ impl SnapshotManager {
                 )
                 .await?
             }
+            FilesystemType::Unsupported(_) => unreachable!("snapshot capability checked earlier"),
             FilesystemType::Auto => unreachable!("Auto should be resolved during initialization"),
         };
 
@@ -259,6 +279,12 @@ impl SnapshotManager {
         let snapshots = match self.filesystem_type {
             FilesystemType::BTRFS => btrfs::list_snapshots(&self.config).await?,
             FilesystemType::ZFS => zfs::list_snapshots(&self.config).await?,
+            FilesystemType::Unsupported(ref fstype) => {
+                return Err(anyhow::anyhow!(
+                    "snapshot listing is not supported on filesystem '{}'",
+                    fstype
+                ));
+            }
             FilesystemType::Auto => unreachable!(),
         };
 
@@ -274,6 +300,12 @@ impl SnapshotManager {
         match self.filesystem_type {
             FilesystemType::BTRFS => btrfs::rollback_snapshot(&self.config, snapshot_id).await?,
             FilesystemType::ZFS => zfs::rollback_snapshot(&self.config, snapshot_id).await?,
+            FilesystemType::Unsupported(ref fstype) => {
+                return Err(anyhow::anyhow!(
+                    "snapshot rollback is not supported on filesystem '{}'",
+                    fstype
+                ));
+            }
             FilesystemType::Auto => unreachable!(),
         }
 
@@ -308,6 +340,12 @@ impl SnapshotManager {
         match self.filesystem_type {
             FilesystemType::BTRFS => btrfs::delete_snapshot(&self.config, snapshot_id).await?,
             FilesystemType::ZFS => zfs::delete_snapshot(&self.config, snapshot_id).await?,
+            FilesystemType::Unsupported(ref fstype) => {
+                return Err(anyhow::anyhow!(
+                    "snapshot deletion is not supported on filesystem '{}'",
+                    fstype
+                ));
+            }
             FilesystemType::Auto => unreachable!(),
         }
 
@@ -364,6 +402,27 @@ impl SnapshotManager {
         info!("⚙️  Updating snapshot configuration");
         self.config = new_config;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filesystem_detection_marks_unsupported_filesystems() {
+        assert!(matches!(
+            SnapshotManager::filesystem_type_from_name("btrfs"),
+            FilesystemType::BTRFS
+        ));
+        assert!(matches!(
+            SnapshotManager::filesystem_type_from_name("zfs"),
+            FilesystemType::ZFS
+        ));
+        assert!(matches!(
+            SnapshotManager::filesystem_type_from_name("ext4"),
+            FilesystemType::Unsupported(name) if name == "ext4"
+        ));
     }
 }
 

@@ -25,7 +25,7 @@ use super::oci::{self, ContainerConfig, ContainerState, ResourceLimits};
 use super::performance::{BenchmarkResults, BoltPerformanceOptimizer, PerformanceMetrics};
 use super::security::{BoltSecurityManager, SecurityMetrics};
 use super::state;
-use super::storage::StorageManager;
+use super::storage::{ImageGcReport, ImageMetadata, StorageManager, normalize_reference};
 use std::{env, fs};
 
 #[allow(dead_code)]
@@ -39,6 +39,7 @@ pub struct BoltNativeRuntime {
     storage: StorageManager,
     containers: HashMap<String, ContainerState>,
     container_networks: HashMap<String, String>,
+    container_network_modes: HashMap<String, String>,
     runtime_dir: PathBuf,
     security_manager: BoltSecurityManager,
     performance_optimizer: BoltPerformanceOptimizer,
@@ -190,6 +191,7 @@ impl BoltNativeRuntime {
             storage,
             containers,
             container_networks: HashMap::new(),
+            container_network_modes: HashMap::new(),
             runtime_dir,
             security_manager,
             performance_optimizer,
@@ -385,8 +387,8 @@ impl BoltNativeRuntime {
         fs::write(&spec_path, spec_json).context("Failed to write OCI spec")?;
 
         // Execute container with native OCI runtime
-        let pid = match oci::execute_container(&container_state, &spec).await {
-            Ok(pid) => pid,
+        let execution = match oci::execute_container(&container_state, &spec).await {
+            Ok(result) => result,
             Err(err) => {
                 if network_attached
                     && let Err(clean_err) = self.teardown_container_networking(&container_id).await
@@ -400,7 +402,7 @@ impl BoltNativeRuntime {
             }
         };
 
-        if pid > 0
+        if let Some(pid) = execution.pid
             && let Err(err) = self
                 .finalize_container_networking(&container_id, pid as i32)
                 .await
@@ -413,9 +415,43 @@ impl BoltNativeRuntime {
 
         // Update container state
         let mut updated_state = container_state;
-        updated_state.status = super::oci::ContainerStatus::Running;
-        updated_state.pid = Some(pid);
         updated_state.started = Some(std::time::SystemTime::now());
+        updated_state.pid = execution.pid;
+        updated_state.exit_code = execution.exit_code;
+        if let Some(code) = execution.exit_code {
+            updated_state.status = super::oci::ContainerStatus::Exited(code);
+            updated_state.finished = Some(std::time::SystemTime::now());
+        } else {
+            updated_state.status = super::oci::ContainerStatus::Running;
+        }
+
+        if config.rm && !config.detach {
+            if network_attached
+                && let Err(err) = self.teardown_container_networking(&container_id).await
+            {
+                warn!(
+                    "Failed to clean up networking for --rm container {}: {}",
+                    container_id, err
+                );
+            }
+            if let Err(err) = self
+                .cleanup_container_artifacts(&container_id, &updated_state)
+                .await
+            {
+                warn!(
+                    "Failed to clean up --rm container {} after exit: {}",
+                    container_id, err
+                );
+            }
+            return Ok(container_id);
+        }
+
+        if let Err(err) = self.mark_container_volumes_attached(&updated_state).await {
+            warn!(
+                "Failed to update volume usage for container {}: {}",
+                container_id, err
+            );
+        }
 
         // Persist state so lifecycle commands survive a process restart.
         if let Err(err) = state::save(&updated_state) {
@@ -429,14 +465,17 @@ impl BoltNativeRuntime {
         self.containers.insert(container_id.clone(), updated_state);
 
         // Start monitoring
-        tokio::spawn({
-            let security_manager = self.security_manager.clone();
-            let performance_optimizer = self.performance_optimizer.clone();
-            let container_id = container_id.clone();
-            async move {
-                Self::monitor_container(security_manager, performance_optimizer, container_id).await
-            }
-        });
+        if config.detach {
+            tokio::spawn({
+                let security_manager = self.security_manager.clone();
+                let performance_optimizer = self.performance_optimizer.clone();
+                let container_id = container_id.clone();
+                async move {
+                    Self::monitor_container(security_manager, performance_optimizer, container_id)
+                        .await
+                }
+            });
+        }
 
         // info!("✅ Enhanced native container started: {}", container_id);
         Ok(container_id)
@@ -444,6 +483,11 @@ impl BoltNativeRuntime {
 
     /// Stop a running container (replaces docker/podman stop)
     pub async fn stop_container(&mut self, id: &str) -> Result<()> {
+        self.stop_container_with_timeout(id, 10).await
+    }
+
+    /// Stop a running container with a graceful timeout before force kill.
+    pub async fn stop_container_with_timeout(&mut self, id: &str, timeout: u64) -> Result<()> {
         info!("🛑 Stopping container: {}", id);
 
         let id = self
@@ -466,8 +510,8 @@ impl BoltNativeRuntime {
                 info!("Sent SIGTERM to process {}", pid);
             }
 
-            // Wait for graceful shutdown
-            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            // Wait for graceful shutdown.
+            tokio::time::sleep(std::time::Duration::from_secs(timeout)).await;
 
             // Force kill if still running - check if process exists first
             match signal::kill(nix_pid, None) {
@@ -490,6 +534,13 @@ impl BoltNativeRuntime {
         container.pid = None;
         container.finished = Some(std::time::SystemTime::now());
 
+        if let Err(err) = oci::delete_runtime_container(id).await {
+            warn!(
+                "Failed to delete OCI runtime state for stopped container {}: {}",
+                id, err
+            );
+        }
+
         if let Err(err) = state::save(container) {
             warn!(
                 "Failed to persist stopped state for container {}: {}",
@@ -511,7 +562,7 @@ impl BoltNativeRuntime {
         let id = id.as_str();
 
         // Check if container exists and get its status and bundle path
-        let (is_running, bundle_path) = {
+        let (is_running, bundle_path, volumes) = {
             let container = self
                 .containers
                 .get(id)
@@ -520,6 +571,7 @@ impl BoltNativeRuntime {
             (
                 matches!(container.status, super::oci::ContainerStatus::Running),
                 container.bundle_path.clone(),
+                container.config.volumes.clone(),
             )
         };
 
@@ -532,6 +584,13 @@ impl BoltNativeRuntime {
                     anyhow!("Container is running. Use force=true to stop and remove.").into(),
                 );
             }
+        }
+
+        if let Err(err) = oci::delete_runtime_container(id).await {
+            warn!(
+                "Failed to delete OCI runtime state for removed container {}: {}",
+                id, err
+            );
         }
 
         // Clean up bundle directory
@@ -550,6 +609,12 @@ impl BoltNativeRuntime {
         self.containers.remove(id);
 
         self.storage.remove_container(id).await?;
+        if let Err(err) = self.mark_container_volumes_detached(id, &volumes).await {
+            warn!(
+                "Failed to update volume usage for removed container {}: {}",
+                id, err
+            );
+        }
         if let Err(err) = state::remove(id) {
             warn!(
                 "Failed to remove persisted state for container {}: {}",
@@ -564,6 +629,258 @@ impl BoltNativeRuntime {
 
         info!("✅ Container removed: {}", id);
         Ok(())
+    }
+
+    /// Restart a persisted native container.
+    pub async fn restart_container(&mut self, id: &str, timeout: u64) -> Result<()> {
+        info!(
+            "🔄 Restarting native container: {} (timeout: {}s)",
+            id, timeout
+        );
+
+        let container_id = self
+            .resolve_id(id)
+            .or_else(|| state::resolve_ref(id).ok().flatten().map(|state| state.id))
+            .ok_or_else(|| anyhow!("Container not found: {}", id))?;
+
+        let mut existing = self
+            .containers
+            .get(&container_id)
+            .cloned()
+            .or_else(|| state::load(&container_id).ok().flatten())
+            .ok_or_else(|| anyhow!("Container not found: {}", id))?;
+
+        if existing.config.gaming_config.is_some() || existing.gpu_allocation.is_some() {
+            return Err(anyhow!(
+                "native restart for GPU/gaming containers is not supported yet; remove and recreate {}",
+                id
+            )
+            .into());
+        }
+
+        state::reconcile_liveness(&mut existing);
+        if matches!(existing.status, super::oci::ContainerStatus::Running) {
+            self.stop_container_with_timeout(&container_id, timeout)
+                .await?;
+        }
+        if let Err(err) = oci::delete_runtime_container(&container_id).await {
+            warn!(
+                "Failed to delete OCI runtime state before restart for {}: {}",
+                container_id, err
+            );
+        }
+
+        if existing.bundle_path.exists() {
+            fs::remove_dir_all(&existing.bundle_path).with_context(|| {
+                format!(
+                    "Failed to reset container bundle {}",
+                    existing.bundle_path.display()
+                )
+            })?;
+        }
+        fs::create_dir_all(&existing.bundle_path).context("Failed to recreate container bundle")?;
+
+        let persistent_rootfs = self
+            .storage
+            .create_container_rootfs(&container_id, &existing.config.image)
+            .await?;
+        let bundle_rootfs = existing.bundle_path.join("rootfs");
+        if bundle_rootfs.exists() {
+            let metadata = fs::symlink_metadata(&bundle_rootfs)?;
+            if metadata.file_type().is_symlink() {
+                fs::remove_file(&bundle_rootfs).with_context(|| {
+                    format!(
+                        "Failed to remove existing bundle rootfs symlink for {}",
+                        container_id
+                    )
+                })?;
+            } else {
+                fs::remove_dir_all(&bundle_rootfs).with_context(|| {
+                    format!("Failed to reset bundle rootfs for {}", container_id)
+                })?;
+            }
+        }
+        #[cfg(unix)]
+        {
+            unix_fs::symlink(&persistent_rootfs, &bundle_rootfs).with_context(|| {
+                format!(
+                    "Failed to symlink bundle rootfs to persistent storage for {}",
+                    container_id
+                )
+            })?;
+        }
+        #[cfg(not(unix))]
+        {
+            fs::create_dir_all(&bundle_rootfs)
+                .with_context(|| format!("Failed to create bundle rootfs for {}", container_id))?;
+        }
+
+        let restart_config = Self::native_config_from_persisted_state(&existing);
+
+        let network_attached = if existing.config.detach {
+            self.setup_container_networking(&container_id, &restart_config)
+                .await?;
+            self.container_networks.contains_key(&container_id)
+        } else {
+            false
+        };
+
+        let spec = self
+            .create_oci_spec(&container_id, &existing.config, None, None)
+            .await?;
+
+        let spec_path = existing.bundle_path.join("config.json");
+        let spec_json = serde_json::to_string_pretty(&spec)?;
+        fs::write(&spec_path, spec_json).context("Failed to write OCI spec")?;
+
+        let execution = match oci::execute_container(&existing, &spec).await {
+            Ok(result) => result,
+            Err(err) => {
+                if network_attached
+                    && let Err(clean_err) = self.teardown_container_networking(&container_id).await
+                {
+                    warn!(
+                        "Failed to clean up networking after restart error for {}: {}",
+                        container_id, clean_err
+                    );
+                }
+                return Err(err);
+            }
+        };
+
+        if let Some(pid) = execution.pid
+            && let Err(err) = self
+                .finalize_container_networking(&container_id, pid as i32)
+                .await
+        {
+            warn!(
+                "Failed to finalize networking for restarted container {}: {}",
+                container_id, err
+            );
+        }
+
+        existing.status = if let Some(code) = execution.exit_code {
+            super::oci::ContainerStatus::Exited(code)
+        } else {
+            super::oci::ContainerStatus::Running
+        };
+        existing.pid = execution.pid;
+        existing.started = Some(std::time::SystemTime::now());
+        existing.finished = execution.exit_code.map(|_| std::time::SystemTime::now());
+        existing.exit_code = execution.exit_code;
+
+        if let Err(err) = state::save(&existing) {
+            warn!(
+                "Failed to persist restarted state for container {}: {}",
+                container_id, err
+            );
+        }
+        self.containers.insert(container_id.clone(), existing);
+
+        tokio::spawn({
+            let security_manager = self.security_manager.clone();
+            let performance_optimizer = self.performance_optimizer.clone();
+            let container_id = container_id.clone();
+            async move {
+                Self::monitor_container(security_manager, performance_optimizer, container_id).await
+            }
+        });
+
+        info!("✅ Container restarted: {}", container_id);
+        Ok(())
+    }
+
+    async fn cleanup_container_artifacts(
+        &mut self,
+        container_id: &str,
+        state: &ContainerState,
+    ) -> Result<()> {
+        if state.bundle_path.exists() {
+            fs::remove_dir_all(&state.bundle_path).with_context(|| {
+                format!(
+                    "Failed to remove container bundle {}",
+                    state.bundle_path.display()
+                )
+            })?;
+        }
+
+        if let Err(err) = oci::delete_runtime_container(container_id).await {
+            warn!(
+                "Failed to delete OCI runtime state for cleaned-up container {}: {}",
+                container_id, err
+            );
+        }
+
+        self.containers.remove(container_id);
+        self.storage.remove_container(container_id).await?;
+        state::remove(container_id)?;
+
+        if let Err(err) =
+            crate::runtime::environment::env_manager().clear_container_env(container_id)
+        {
+            warn!(
+                "Failed to clear environment for container {}: {}",
+                container_id, err
+            );
+        }
+
+        Ok(())
+    }
+
+    fn native_config_from_persisted_state(state: &ContainerState) -> NativeContainerConfig {
+        NativeContainerConfig {
+            image: state.config.image.clone(),
+            name: state.config.name.clone(),
+            ports: state
+                .config
+                .ports
+                .iter()
+                .map(|port| format!("{}:{}", port.host_port, port.container_port))
+                .collect(),
+            env: state
+                .config
+                .env
+                .iter()
+                .map(|(key, value)| format!("{}={}", key, value))
+                .collect(),
+            volumes: state
+                .config
+                .volumes
+                .iter()
+                .map(|volume| {
+                    if volume.readonly {
+                        format!("{}:{}:ro", volume.source, volume.destination)
+                    } else {
+                        format!("{}:{}", volume.source, volume.destination)
+                    }
+                })
+                .collect(),
+            detach: state.config.detach,
+            rm: false,
+            command: Some(state.config.command.clone()),
+            entrypoint: None,
+            working_dir: state.config.working_dir.clone(),
+            user: state.config.user.clone(),
+            hostname: state.config.hostname.clone(),
+            cpus: None,
+            memory: None,
+            network: Some("bridge".to_string()),
+            cap_add: vec![],
+            cap_drop: vec![],
+            privileged: state.config.privileged,
+            tty: state.config.tty,
+            interactive: false,
+            readonly_rootfs: state.config.readonly_rootfs,
+            pids_limit: state
+                .config
+                .resource_limits
+                .as_ref()
+                .and_then(|limits| limits.pids_limit),
+            seccomp: state.config.seccomp.clone(),
+            gpu_config: None,
+            cpu_affinity: None,
+            workload_hint: None,
+        }
     }
 
     /// Resolve a container reference (id or `--name`) to its stored id.
@@ -643,6 +960,48 @@ impl BoltNativeRuntime {
 
         info!("✅ Image built successfully");
         Ok(())
+    }
+
+    /// Push an image with the native registry client.
+    pub async fn push_image_native(&self, image: &str) -> Result<()> {
+        info!("⬆️  Pushing image with native client: {}", image);
+        self.storage.push_image(image).await?;
+        Ok(())
+    }
+
+    pub fn list_images_native(&self) -> Vec<(String, ImageMetadata)> {
+        self.storage.list_cached_images()
+    }
+
+    pub async fn prune_images_native(&mut self, dry_run: bool) -> Result<ImageGcReport> {
+        let protected = self
+            .containers
+            .values()
+            .map(|container| normalize_reference(&container.config.image))
+            .collect();
+        let mut protected_container_ids: std::collections::HashSet<String> =
+            self.containers.keys().cloned().collect();
+        let mut protected_digests = self
+            .containers
+            .values()
+            .filter_map(|container| container.image_digest.clone())
+            .collect::<std::collections::HashSet<_>>();
+        if let Ok(snapshot_manager) = crate::capsules::snapshots::SnapshotManager::new().await
+            && let Ok(generations) = snapshot_manager.list_generations().await
+        {
+            for generation in generations {
+                protected_digests.extend(generation.image_digests);
+                protected_container_ids.extend(generation.container_ids);
+            }
+        }
+        self.storage
+            .prune_images(
+                &protected,
+                &protected_digests,
+                &protected_container_ids,
+                dry_run,
+            )
+            .await
     }
 
     // Helper methods
@@ -752,6 +1111,10 @@ impl BoltNativeRuntime {
             gaming_config: None, // Will be set later if needed
             detach: config.detach,
             hostname: config.hostname.clone(),
+            network_mode: config
+                .network
+                .clone()
+                .unwrap_or_else(|| "bridge".to_string()),
             privileged: config.privileged,
             tty: config.tty,
             readonly_rootfs: config.readonly_rootfs,
@@ -1029,9 +1392,11 @@ impl BoltNativeRuntime {
         pid_ns.set_typ(LinuxNamespaceType::Pid);
         namespaces.push(pid_ns);
 
-        let mut net_ns = LinuxNamespace::default();
-        net_ns.set_typ(LinuxNamespaceType::Network);
-        namespaces.push(net_ns);
+        if config.network_mode != "host" {
+            let mut net_ns = LinuxNamespace::default();
+            net_ns.set_typ(LinuxNamespaceType::Network);
+            namespaces.push(net_ns);
+        }
 
         let mut mount_ns = LinuxNamespace::default();
         mount_ns.set_typ(LinuxNamespaceType::Mount);
@@ -1196,7 +1561,15 @@ impl BoltNativeRuntime {
             }
 
             if !linux_devices.is_empty() {
+                let mut resources = match linux.resources() {
+                    Some(r) => r.clone(),
+                    None => oci_spec::runtime::LinuxResources::default(),
+                };
+                let mut device_rules = resources.devices().clone().unwrap_or_default();
+                device_rules.extend(linux_devices.iter().map(LinuxDeviceCgroup::from));
+                resources.set_devices(Some(device_rules));
                 linux.set_devices(Some(linux_devices));
+                linux.set_resources(Some(resources));
             }
         }
 
@@ -1334,19 +1707,19 @@ impl BoltNativeRuntime {
     }
 
     fn validate_run_options(config: &NativeContainerConfig) -> Result<()> {
-        if config.rm {
+        if config.rm && config.detach {
             return Err(anyhow!(
-                "`bolt run --rm` is not supported by the native runtime yet; remove the container explicitly with `bolt rm`"
+                "`bolt run --rm --detach` is not supported by the native runtime yet; run attached with `--rm` or remove the detached container explicitly with `bolt rm`"
             )
             .into());
         }
 
         if let Some(ref network) = config.network {
             match network.as_str() {
-                "bridge" | "bolt" => {}
+                "bridge" | "bolt" | "host" | "none" => {}
                 _ => {
                     return Err(anyhow!(
-                        "`--network {}` is not supported by the native runtime yet (supported: bridge, bolt)",
+                        "`--network {}` is not supported by the native runtime yet (supported: bridge, bolt, host, none)",
                         network
                     )
                     .into());
@@ -1605,13 +1978,8 @@ impl BoltNativeRuntime {
         info!("📦 Resolving named volume: {}", source);
 
         // Use our volume manager to get the volume path
-        let volume_manager = crate::volume::VolumeManager::new_async(
-            self.runtime_dir
-                .parent()
-                .unwrap_or(&self.runtime_dir)
-                .join("volumes"),
-        )
-        .await?;
+        let volume_manager =
+            crate::volume::VolumeManager::new_async(self.volume_storage_root()).await?;
 
         if let Some(mount_path) = volume_manager.get_volume_mount_path(source) {
             let path_str = mount_path.to_string_lossy().to_string();
@@ -1628,6 +1996,45 @@ impl BoltNativeRuntime {
         }
     }
 
+    fn volume_storage_root(&self) -> PathBuf {
+        self.runtime_dir
+            .parent()
+            .unwrap_or(&self.runtime_dir)
+            .to_path_buf()
+    }
+
+    async fn mark_container_volumes_attached(&self, state: &ContainerState) -> Result<()> {
+        let mut volume_manager =
+            crate::volume::VolumeManager::new_async(self.volume_storage_root()).await?;
+        for volume in &state.config.volumes {
+            if volume.source.starts_with('/') {
+                continue;
+            }
+            volume_manager
+                .attach_volume_async(&volume.source, &state.id)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn mark_container_volumes_detached(
+        &self,
+        container_id: &str,
+        volumes: &[crate::runtime::oci::VolumeMount],
+    ) -> Result<()> {
+        let mut volume_manager =
+            crate::volume::VolumeManager::new_async(self.volume_storage_root()).await?;
+        for volume in volumes {
+            if volume.source.starts_with('/') {
+                continue;
+            }
+            volume_manager
+                .detach_volume_async(&volume.source, container_id)
+                .await?;
+        }
+        Ok(())
+    }
+
     /// Setup container networking with advanced optimization
     async fn setup_container_networking(
         &mut self,
@@ -1642,36 +2049,41 @@ impl BoltNativeRuntime {
             return Ok(());
         }
 
+        match config.network.as_deref().unwrap_or("bridge") {
+            "host" => {
+                info!(
+                    "🌐 Using host networking for container {}; skipping private namespace setup",
+                    container_id
+                );
+                self.container_network_modes
+                    .insert(container_id.to_string(), "host".to_string());
+                return Ok(());
+            }
+            "none" => {
+                info!(
+                    "🌐 Network disabled for container {}; no interfaces will be attached",
+                    container_id
+                );
+                self.container_network_modes
+                    .insert(container_id.to_string(), "none".to_string());
+                return Ok(());
+            }
+            "bridge" | "bolt" => {}
+            other => {
+                return Err(anyhow!("unsupported network mode '{}'", other).into());
+            }
+        }
+
         info!(
             "🌐 Setting up advanced networking for container: {}",
             container_id
         );
 
-        // Ensure a dedicated network namespace exists for the container
-        oci::setup_network_namespace(container_id).await?;
-
         let port_mappings = config
             .ports
             .iter()
-            .map(|port_str| {
-                let parts: Vec<&str> = port_str.split(':').collect();
-                if parts.len() == 2 {
-                    NetworkPortMapping {
-                        host_port: parts[0].parse().unwrap_or(8080),
-                        container_port: parts[1].parse().unwrap_or(8080),
-                        protocol: NetworkProtocol::Tcp,
-                        quic_enabled: self.gaming_mode,
-                    }
-                } else {
-                    NetworkPortMapping {
-                        host_port: 8080,
-                        container_port: 8080,
-                        protocol: NetworkProtocol::Tcp,
-                        quic_enabled: self.gaming_mode,
-                    }
-                }
-            })
-            .collect();
+            .map(|port| self.parse_network_port_mapping(port))
+            .collect::<Result<Vec<_>>>()?;
 
         let network_config = ContainerNetworkConfig {
             port_mappings,
@@ -1708,8 +2120,39 @@ impl BoltNativeRuntime {
 
         self.container_networks
             .insert(container_id.to_string(), network_id);
+        self.container_network_modes
+            .insert(container_id.to_string(), "bridge".to_string());
 
         Ok(())
+    }
+
+    fn parse_network_port_mapping(&self, value: &str) -> Result<NetworkPortMapping> {
+        let (host, container_proto) = value.split_once(':').ok_or_else(|| {
+            anyhow!(
+                "invalid port mapping '{}'; expected host:container[/proto]",
+                value
+            )
+        })?;
+        let (container, proto) = container_proto
+            .split_once('/')
+            .map_or((container_proto, "tcp"), |(port, proto)| (port, proto));
+        let protocol = match proto.to_ascii_lowercase().as_str() {
+            "tcp" => NetworkProtocol::Tcp,
+            "udp" => NetworkProtocol::Udp,
+            "quic" => NetworkProtocol::Quic,
+            other => return Err(anyhow!("unsupported port protocol '{}'", other).into()),
+        };
+
+        Ok(NetworkPortMapping {
+            host_port: host
+                .parse()
+                .with_context(|| format!("invalid host port in '{}'", value))?,
+            container_port: container
+                .parse()
+                .with_context(|| format!("invalid container port in '{}'", value))?,
+            protocol,
+            quic_enabled: self.gaming_mode || proto.eq_ignore_ascii_case("quic"),
+        })
     }
 
     async fn teardown_container_networking(&mut self, container_id: &str) -> Result<()> {
@@ -1737,6 +2180,7 @@ impl BoltNativeRuntime {
         }
 
         self.container_networks.remove(container_id);
+        self.container_network_modes.remove(container_id);
 
         Ok(())
     }
@@ -1874,6 +2318,7 @@ impl BoltNativeRuntime {
     ) -> Result<String> {
         let gpu_config = GpuConfig {
             enabled: true,
+            devices: Some("all".to_string()),
             workload_type: GpuWorkloadType::Gaming {
                 dlss_enabled,
                 raytracing_enabled,
@@ -1929,6 +2374,7 @@ impl BoltNativeRuntime {
     ) -> Result<String> {
         let gpu_config = GpuConfig {
             enabled: true,
+            devices: Some("all".to_string()),
             workload_type: GpuWorkloadType::AiMl {
                 cuda_cache_mb: Some(4096),
                 tensor_cores_enabled: tensor_cores,
@@ -1982,6 +2428,22 @@ impl BoltNativeRuntime {
     async fn finalize_container_networking(&self, container_id: &str, pid: i32) -> Result<()> {
         if self.rootless {
             return Ok(());
+        }
+
+        match self
+            .container_network_modes
+            .get(container_id)
+            .map(String::as_str)
+            .unwrap_or("bridge")
+        {
+            "host" => return Ok(()),
+            "none" => {
+                self.network_manager
+                    .configure_loopback_only_namespace(pid)
+                    .await?;
+                return Ok(());
+            }
+            _ => {}
         }
 
         let network_id = match self.container_networks.get(container_id) {
@@ -2066,7 +2528,7 @@ impl BoltNativeRuntime {
         }
 
         if rootless {
-            let candidates = [dirs::runtime_dir(), dirs::data_dir(), Some(env::temp_dir())];
+            let candidates = [dirs::runtime_dir(), dirs::data_dir()];
 
             for base in candidates.into_iter().flatten() {
                 let path = base.join("bolt").join("runtime");
@@ -2117,7 +2579,8 @@ fn describe_gpu_allocation(gpu: &GpuConfig) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oci_spec::runtime::Capability;
+    use crate::runtime::gpu_integration::CdiDeviceNode;
+    use oci_spec::runtime::{Capability, LinuxNamespaceType};
 
     fn test_config() -> NativeContainerConfig {
         NativeContainerConfig {
@@ -2214,6 +2677,58 @@ mod tests {
         assert_eq!(cpu.quota(), Some(150_000));
     }
 
+    #[tokio::test]
+    async fn host_networking_omits_oci_network_namespace() {
+        let mut config = test_config();
+        config.network = Some("bridge".to_string());
+        let bridge = spec_for(&config).await;
+        assert!(
+            bridge
+                .linux()
+                .as_ref()
+                .and_then(|linux| linux.namespaces().as_ref())
+                .expect("bridge namespaces")
+                .iter()
+                .any(|ns| ns.typ() == LinuxNamespaceType::Network)
+        );
+
+        config.network = Some("host".to_string());
+        let host = spec_for(&config).await;
+        assert!(
+            !host
+                .linux()
+                .as_ref()
+                .and_then(|linux| linux.namespaces().as_ref())
+                .expect("host namespaces")
+                .iter()
+                .any(|ns| ns.typ() == LinuxNamespaceType::Network)
+        );
+    }
+
+    #[tokio::test]
+    async fn native_port_mapping_parses_protocols_and_rejects_bad_input() {
+        let runtime = BoltNativeRuntime::new()
+            .await
+            .expect("native runtime should initialize for parser test");
+
+        let tcp = runtime
+            .parse_network_port_mapping("8080:80")
+            .expect("tcp port mapping");
+        assert_eq!(tcp.host_port, 8080);
+        assert_eq!(tcp.container_port, 80);
+        assert!(matches!(tcp.protocol, NetworkProtocol::Tcp));
+        assert!(!tcp.quic_enabled);
+
+        let quic = runtime
+            .parse_network_port_mapping("4433:4433/quic")
+            .expect("quic port mapping");
+        assert!(matches!(quic.protocol, NetworkProtocol::Quic));
+        assert!(quic.quic_enabled);
+
+        assert!(runtime.parse_network_port_mapping("bad").is_err());
+        assert!(runtime.parse_network_port_mapping("8080:80/sctp").is_err());
+    }
+
     async fn spec_for(config: &NativeContainerConfig) -> oci_spec::runtime::Spec {
         let runtime = BoltNativeRuntime::new()
             .await
@@ -2254,8 +2769,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cdi_devices_are_added_to_spec_and_cgroup_allowlist() {
+        let runtime = BoltNativeRuntime::new()
+            .await
+            .expect("native runtime should initialize for spec-only test");
+        let native_config = test_config();
+        let container_config = runtime
+            .create_container_config("bolt-test", &native_config)
+            .await
+            .expect("container config should build");
+        let device = CdiDeviceNode {
+            path: "/dev/null".to_string(),
+            device_type: Some("c".to_string()),
+            major: Some(1),
+            minor: Some(3),
+            file_mode: Some(0o666),
+            uid: Some(0),
+            gid: Some(0),
+        };
+        let applied = AppliedCdiSpec {
+            env: vec![],
+            device_nodes: vec![device],
+            mounts: vec![],
+            hooks: vec![],
+        };
+
+        let spec = runtime
+            .create_oci_spec("bolt-test", &container_config, Some(&applied), None)
+            .await
+            .expect("oci spec should build");
+
+        let linux = spec.linux().as_ref().expect("linux config should be set");
+        let devices = linux.devices().as_ref().expect("devices should be set");
+        assert!(devices.iter().any(|device| {
+            device.path() == &PathBuf::from("/dev/null")
+                && device.major() == 1
+                && device.minor() == 3
+        }));
+
+        let resources = linux.resources().as_ref().expect("resources should be set");
+        let cgroup_devices = resources
+            .devices()
+            .as_ref()
+            .expect("device cgroup rules should be set");
+        assert!(cgroup_devices.iter().any(|rule| {
+            rule.allow()
+                && rule.major() == Some(1)
+                && rule.minor() == Some(3)
+                && rule.access().as_deref() == Some("rwm")
+        }));
+    }
+
+    #[tokio::test]
     async fn seccomp_profile_attached_from_file() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = scratch_tempdir();
         let profile_path = dir.path().join("seccomp.json");
         std::fs::write(&profile_path, r#"{"defaultAction":"SCMP_ACT_ALLOW"}"#)
             .expect("write profile");
@@ -2285,7 +2852,7 @@ mod tests {
 
     #[tokio::test]
     async fn privileged_container_skips_seccomp() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = scratch_tempdir();
         let profile_path = dir.path().join("seccomp.json");
         std::fs::write(&profile_path, r#"{"defaultAction":"SCMP_ACT_ALLOW"}"#)
             .expect("write profile");
@@ -2296,6 +2863,11 @@ mod tests {
         let spec = spec_for(&config).await;
         let linux = spec.linux().as_ref().expect("linux config should be set");
         assert!(linux.seccomp().is_none());
+    }
+
+    fn scratch_tempdir() -> tempfile::TempDir {
+        std::fs::create_dir_all(".scratch").expect("create repo-local scratch directory");
+        tempfile::tempdir_in(".scratch").expect("create repo-local scratch tempdir")
     }
 
     #[tokio::test]
@@ -2328,9 +2900,9 @@ mod tests {
         assert!(err.to_string().contains("--rm"));
 
         config.rm = false;
-        config.network = Some("host".to_string());
+        config.network = Some("container:abc".to_string());
         let err = BoltNativeRuntime::validate_run_options(&config)
             .expect_err("unsupported network mode should be rejected");
-        assert!(err.to_string().contains("--network host"));
+        assert!(err.to_string().contains("--network container:abc"));
     }
 }

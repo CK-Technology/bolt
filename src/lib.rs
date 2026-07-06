@@ -24,6 +24,7 @@ pub mod optimizations;
 pub mod orchestration;
 pub mod plugins;
 pub mod profiles;
+pub mod project;
 pub mod registry;
 pub mod runtime;
 pub mod snapshots;
@@ -239,36 +240,29 @@ impl BoltRuntime {
 
     /// Push an image
     pub async fn push_image(&self, image: &str) -> Result<()> {
-        runtime::push_image(image).await
+        let runtime = self.unified_runtime().await?;
+        runtime.push_image(image).await
     }
 
     /// List images
     pub async fn list_images(&self) -> Result<Vec<ImageInfo>> {
-        // Query container images from the image store
-        // For now, return cached/known images
-        Ok(vec![
-            ImageInfo {
-                id: "sha256:c1aabb73d233791e9d654f3e8b2e9e4a5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f"
-                    .to_string(),
-                name: "alpine:latest".to_string(),
-                size: 7 * 1024 * 1024, // 7 MB
-                created: Some("2024-01-15".to_string()),
-            },
-            ImageInfo {
-                id: "sha256:f7a7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7"
-                    .to_string(),
-                name: "nvidia/cuda:12.3.0-base".to_string(),
-                size: 1420 * 1024 * 1024, // 1420 MB
-                created: Some("2024-01-10".to_string()),
-            },
-            ImageInfo {
-                id: "sha256:d8e9a2b1c4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1"
-                    .to_string(),
-                name: "pytorch/pytorch:latest".to_string(),
-                size: 8900 * 1024 * 1024, // 8900 MB
-                created: Some("2024-01-05".to_string()),
-            },
-        ])
+        let runtime = self.unified_runtime().await?;
+        let images = runtime.list_images().await?;
+        Ok(images
+            .into_iter()
+            .map(|(reference, metadata)| ImageInfo {
+                id: metadata.digest,
+                name: reference,
+                size: metadata.size,
+                created: Some(metadata.created.to_rfc3339()),
+            })
+            .collect())
+    }
+
+    /// Prune unused native images.
+    pub async fn prune_images(&self, dry_run: bool) -> Result<runtime::storage::ImageGcReport> {
+        let runtime = self.unified_runtime().await?;
+        runtime.prune_images(dry_run).await
     }
 
     /// List containers
@@ -326,8 +320,15 @@ impl BoltRuntime {
 
     /// Stop a container
     pub async fn stop_container(&self, container: &str) -> Result<()> {
+        self.stop_container_with_timeout(container, 10).await
+    }
+
+    /// Stop a container with a graceful timeout before force kill.
+    pub async fn stop_container_with_timeout(&self, container: &str, timeout: u64) -> Result<()> {
         let runtime = self.unified_runtime().await?;
-        runtime.stop_container(container).await
+        runtime
+            .stop_container_with_timeout(container, timeout)
+            .await
     }
 
     /// Remove a container
@@ -338,7 +339,8 @@ impl BoltRuntime {
 
     /// Restart a container
     pub async fn restart_container(&self, container: &str, timeout: u64) -> Result<()> {
-        runtime::restart_container(container, timeout).await
+        let runtime = self.unified_runtime().await?;
+        runtime.restart_container(container, timeout).await
     }
 
     /// Start Surge orchestration with native runtime

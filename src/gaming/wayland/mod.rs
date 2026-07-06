@@ -36,7 +36,7 @@ impl Default for WaylandGamingConfig {
     fn default() -> Self {
         Self {
             display_name: "bolt-gaming".to_string(),
-            socket_path: PathBuf::from("/tmp/bolt-wayland"),
+            socket_path: bolt_wayland_socket_path(),
             enable_vsync: false, // Disabled for gaming
             target_fps: Some(144),
             enable_vrr: true,
@@ -47,6 +47,18 @@ impl Default for WaylandGamingConfig {
             compositor_threads: 4,
         }
     }
+}
+
+fn bolt_wayland_socket_path() -> PathBuf {
+    if let Some(runtime_dir) = std::env::var_os("XDG_RUNTIME_DIR") {
+        return PathBuf::from(runtime_dir).join("bolt-wayland");
+    }
+
+    if let Some(uid) = std::env::var_os("UID") {
+        return PathBuf::from("/run/user").join(uid).join("bolt-wayland");
+    }
+
+    PathBuf::from(".bolt/run/bolt-wayland")
 }
 
 #[derive(Debug)]

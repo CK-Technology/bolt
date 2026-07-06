@@ -235,6 +235,7 @@ pub enum GpuIsolationLevel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GpuConfig {
     pub enabled: bool,
+    pub devices: Option<String>,
     pub workload_type: GpuWorkloadType,
     pub isolation_level: GpuIsolationLevel,
     pub memory_limit: Option<String>,
@@ -880,7 +881,10 @@ impl BoltGpuIntegration {
         applied_cdi: &AppliedCdiSpec,
     ) -> Result<()> {
         let device_paths = applied_cdi.device_paths();
-        let assigned_devices = if device_paths.is_empty() {
+        let requested_devices = gpu_config.devices.as_deref().unwrap_or("all");
+        let assigned_devices = if requested_devices != "all" {
+            requested_devices.to_string()
+        } else if device_paths.is_empty() {
             "all".to_string()
         } else {
             device_paths.join(",")
@@ -904,7 +908,9 @@ impl BoltGpuIntegration {
             .await?;
 
         // Map CDI devices to NVIDIA runtime expectations
-        let nvidia_visible = if !device_paths.is_empty()
+        let nvidia_visible = if requested_devices != "all" {
+            requested_devices.to_string()
+        } else if !device_paths.is_empty()
             && device_paths.iter().all(|device| !device.contains('/'))
         {
             assigned_devices.clone()
@@ -1807,5 +1813,53 @@ mod tests {
                 .iter()
                 .any(|node| node.path == "/dev/nvidiactl")
         );
+    }
+
+    #[tokio::test]
+    async fn gpu_environment_honors_requested_visible_devices() {
+        let integration = BoltGpuIntegration {
+            nvidia_manager: None,
+            containers: Arc::new(RwLock::new(HashMap::new())),
+            fallback_mode: true,
+            amd_backend: None,
+            amd_monitor: None,
+        };
+        let container_id = "gpu-visible-test";
+        crate::runtime::environment::env_manager()
+            .clear_container_env(container_id)
+            .expect("clear test env");
+
+        let config = GpuConfig {
+            enabled: true,
+            devices: Some("0,1".to_string()),
+            workload_type: GpuWorkloadType::General,
+            isolation_level: GpuIsolationLevel::Shared,
+            memory_limit: None,
+            snapshot_support: false,
+            quick_sync: None,
+        };
+        let applied = AppliedCdiSpec {
+            env: Vec::new(),
+            device_nodes: vec![CdiDeviceNode::new("/dev/nvidia0")],
+            mounts: Vec::new(),
+            hooks: Vec::new(),
+        };
+
+        integration
+            .setup_gpu_environment(container_id, &config, &applied)
+            .await
+            .expect("gpu env setup");
+
+        let env = crate::runtime::environment::env_manager()
+            .get_container_env(container_id)
+            .expect("read test env");
+        assert_eq!(env.get("BOLT_GPU_DEVICES").map(String::as_str), Some("0,1"));
+        assert_eq!(
+            env.get("NVIDIA_VISIBLE_DEVICES").map(String::as_str),
+            Some("0,1")
+        );
+        crate::runtime::environment::env_manager()
+            .clear_container_env(container_id)
+            .expect("clear test env");
     }
 }

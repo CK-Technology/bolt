@@ -1,11 +1,13 @@
 # Snapshots
 
-Bolt provides automated BTRFS/ZFS snapshot management.
+Bolt provides BTRFS/ZFS snapshot management with explicit capability checks,
+dry-run delete/cleanup paths, and rollback safeguards.
 
 ## Requirements
 
 - BTRFS or ZFS filesystem
 - Root or appropriate permissions
+- `btrfs`, `zfs`, and `findmnt` available as appropriate for the backend
 
 ## Quick Start
 
@@ -13,15 +15,18 @@ Bolt provides automated BTRFS/ZFS snapshot management.
 # Create snapshot
 bolt snapshot create --name "before-update"
 
+# Check backend support
+bolt snapshot preflight
+
 # List snapshots
 bolt snapshot list
 
-# Rollback
-bolt snapshot rollback before-update
+# Rollback requires --force and creates a rescue snapshot first
+bolt snapshot rollback before-update --force
 
 # Cleanup old snapshots
 bolt snapshot cleanup --dry-run
-bolt snapshot cleanup
+bolt snapshot cleanup --force
 ```
 
 ## Commands
@@ -39,12 +44,13 @@ bolt snapshot list --verbose
 
 ### Rollback
 ```bash
-bolt snapshot rollback my-snapshot
+bolt snapshot rollback my-snapshot --force
 ```
 
 ### Delete
 ```bash
-bolt snapshot delete my-snapshot
+bolt snapshot delete my-snapshot --dry-run
+bolt snapshot delete my-snapshot --force
 ```
 
 ### Cleanup
@@ -53,8 +59,38 @@ bolt snapshot delete my-snapshot
 bolt snapshot cleanup --dry-run
 
 # Execute cleanup
-bolt snapshot cleanup
+bolt snapshot cleanup --force
 ```
+
+## Rollback Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI as bolt snapshot rollback
+    participant Snap as SnapshotManager
+    participant FS as BTRFS/ZFS
+
+    User->>CLI: rollback <name> --force
+    CLI->>Snap: rollback_to_snapshot_checked(force=true)
+    Snap->>FS: create pre-rollback rescue snapshot
+    FS-->>Snap: rescue created
+    Snap->>FS: replace container state from target snapshot
+    FS-->>Snap: rollback complete
+    Snap-->>CLI: success
+```
+
+## Metadata
+
+`snapshot show` prints generation-oriented metadata:
+
+- Bolt data root
+- container state path
+- container IDs captured with the snapshot
+- image digests referenced by the snapshot
+
+This metadata is the foundation for future `bolt generations` rollback and GC
+roots.
 
 ## Boltfile Configuration
 
@@ -154,6 +190,9 @@ zfs snapshot tank/data@manual
 
 ### Snapshot Failed
 ```bash
+# Run Bolt's preflight first
+bolt snapshot preflight
+
 # Check filesystem type
 df -T /path/to/data
 
@@ -171,6 +210,9 @@ bolt snapshot list --verbose
 
 # Check snapshot exists
 bolt snapshot list | grep my-snapshot
+
+# Rollback requires explicit confirmation
+bolt snapshot rollback my-snapshot --force
 ```
 
 ### Cleanup Not Working

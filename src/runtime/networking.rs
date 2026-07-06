@@ -578,6 +578,10 @@ impl BoltNetworkManager {
         Ok(())
     }
 
+    pub async fn configure_loopback_only_namespace(&self, pid: i32) -> Result<()> {
+        Self::run_ns_command(pid, &["ip", "link", "set", "lo", "up"]).await
+    }
+
     fn interface_suffix(container_id: &str) -> String {
         let cleaned: String = container_id
             .chars()

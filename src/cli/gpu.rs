@@ -3,12 +3,13 @@
 use crate::Result;
 use bolt::runtime::gpu_scheduler::{GpuScheduler, GpuState};
 use clap::{Parser, Subcommand};
+use std::path::Path;
 use tracing::info;
 
 #[derive(Parser)]
 pub struct GpuCommand {
     #[command(subcommand)]
-    command: GpuSubcommand,
+    pub command: GpuSubcommand,
 }
 
 #[derive(Subcommand)]
@@ -33,6 +34,9 @@ pub enum GpuSubcommand {
         #[arg(short, long, default_value = "1")]
         interval: u64,
     },
+
+    /// Check host GPU readiness for native container passthrough
+    Preflight,
 
     /// Configure GPU scheduler
     Config {
@@ -63,6 +67,7 @@ impl GpuCommand {
                 container,
                 interval,
             } => self.show_metrics(container.as_deref(), *interval).await,
+            GpuSubcommand::Preflight => self.preflight().await,
             GpuSubcommand::Config { strategy } => {
                 self.configure_scheduler(strategy.as_deref()).await
             }
@@ -97,6 +102,30 @@ impl GpuCommand {
         println!("╚═══════╩══════════════════════╩════════════╩═══════╩═════════╝\n");
 
         Ok(())
+    }
+
+    async fn preflight(&self) -> Result<()> {
+        info!("Checking host GPU readiness...");
+
+        let report = GpuPreflightReport::run().await;
+        println!("\nGPU native runtime preflight\n");
+        for check in &report.checks {
+            let status = if check.ok { "OK" } else { "FAIL" };
+            println!("{:<5} {}", status, check.name);
+            if let Some(detail) = &check.detail {
+                println!("      {}", detail);
+            }
+        }
+
+        if report.ok() {
+            println!("\nGPU preflight passed");
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "GPU preflight failed; fix the failed checks above before relying on native GPU passthrough"
+            )
+            .into())
+        }
     }
 
     async fn show_status(&self, detailed: bool) -> Result<()> {
@@ -267,5 +296,106 @@ fn truncate(s: &str, max_len: usize) -> String {
         format!("{:width$}", s, width = max_len)
     } else {
         format!("{}...", &s[..max_len - 3])
+    }
+}
+
+#[derive(Debug)]
+struct GpuPreflightReport {
+    checks: Vec<GpuPreflightCheck>,
+}
+
+impl GpuPreflightReport {
+    async fn run() -> Self {
+        let checks = vec![
+            check_path("/dev/nvidiactl", "NVIDIA control device"),
+            check_any_nvidia_device(),
+            check_path("/dev/dri", "DRM device directory"),
+            check_command("nvidia-smi", &["-L"]).await,
+        ];
+
+        Self { checks }
+    }
+
+    fn ok(&self) -> bool {
+        self.checks.iter().all(|check| check.ok)
+    }
+}
+
+#[derive(Debug)]
+struct GpuPreflightCheck {
+    name: &'static str,
+    ok: bool,
+    detail: Option<String>,
+}
+
+fn check_path(path: &'static str, name: &'static str) -> GpuPreflightCheck {
+    let ok = Path::new(path).exists();
+    GpuPreflightCheck {
+        name,
+        ok,
+        detail: if ok {
+            Some(path.to_string())
+        } else {
+            Some(format!("missing {}", path))
+        },
+    }
+}
+
+fn check_any_nvidia_device() -> GpuPreflightCheck {
+    let found = std::fs::read_dir("/dev")
+        .ok()
+        .map(|entries| {
+            entries.flatten().any(|entry| {
+                entry.file_name().to_str().is_some_and(|name| {
+                    name.starts_with("nvidia") && name[6..].parse::<u32>().is_ok()
+                })
+            })
+        })
+        .unwrap_or(false);
+
+    GpuPreflightCheck {
+        name: "NVIDIA GPU device node",
+        ok: found,
+        detail: if found {
+            Some("found /dev/nvidia<N>".to_string())
+        } else {
+            Some("missing /dev/nvidia<N> device nodes".to_string())
+        },
+    }
+}
+
+async fn check_command(command: &'static str, args: &[&str]) -> GpuPreflightCheck {
+    match tokio::process::Command::new(command)
+        .args(args)
+        .output()
+        .await
+    {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let first_line = stdout.lines().next().unwrap_or("command succeeded");
+            GpuPreflightCheck {
+                name: "nvidia-smi",
+                ok: true,
+                detail: Some(first_line.to_string()),
+            }
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            GpuPreflightCheck {
+                name: "nvidia-smi",
+                ok: false,
+                detail: Some(format!(
+                    "{} exited with status {}: {}",
+                    command,
+                    output.status,
+                    stderr.trim()
+                )),
+            }
+        }
+        Err(err) => GpuPreflightCheck {
+            name: "nvidia-smi",
+            ok: false,
+            detail: Some(format!("failed to execute {}: {}", command, err)),
+        },
     }
 }

@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Version is held at 0.1.0 (no release tags yet). Entries below are dated.
 
+## 2026-07-06
+
+### Added
+- Project control-plane commands:
+  - `bolt plan [--json]`
+  - `bolt apply [-d|--detach] [--force-recreate] [--locked] [SERVICE...]`
+  - `bolt destroy [--force] [--volumes] [SERVICE...]`
+  - `bolt lock [--check]`
+  - `bolt drift [--json]`
+  - `bolt doctor [--json]`
+  - `bolt import compose|container|image`
+  - `bolt inspect service|container|image|volume|network`
+- `Boltfile.lock` with Boltfile hashes, service config hashes, cached image
+  digests, build context hashes, and volume/network config hashes.
+- Snapshot-backed generations via `bolt generations list [--verbose]`.
+- Service discovery registry foundation with `<service>.<project>.bolt` names.
+- Bridge networking preflight via `bolt network preflight`.
+- Volume metadata attach/detach APIs and local volume `mode`/`uid`/`gid`
+  creation options.
+- QUIC service registry state for endpoint, protocol, health, reconnect, and
+  backpressure tracking.
+- New operations and internals docs, including volumes, generations, networking,
+  garbage collection, and architecture diagrams.
+
+### Changed
+- `bolt apply` now prepares declared volumes and networks before invoking Surge,
+  writes service discovery metadata, honors `depends_on` ordering, and updates
+  `Boltfile.lock`.
+- `bolt destroy` now plans destructive actions and uses reverse dependency
+  ordering.
+- Image garbage collection protects digests and container roots referenced by
+  snapshot generations.
+- Native volume resolution now uses the correct Bolt storage root, and volume
+  usage metadata updates on container create/remove instead of relying only on
+  reconciliation.
+- Bridge network creation now performs real host preflight and gated `ip`
+  command execution instead of silently logging placeholder success.
+- Active scratch/cache code paths were moved to repo-local `.scratch` patterns
+  where scratch space is unavoidable.
+
+### Fixed
+- Volume usage reconciliation no longer clears `used_by` metadata when no
+  container state directory exists.
+- Snapshot metadata now records Boltfile provenance and remains backward
+  compatible with older `snapshot.json` files.
+- Several native runtime, networking, GPU, Wayland, registry, and storage paths
+  were hardened with focused tests and clearer failure behavior.
+
 ## 2026-06-13
 
 ### Added

@@ -7,6 +7,7 @@ use tracing::{info, warn};
 
 use super::gpu_integration::GpuConfig;
 use super::native::{BoltNativeRuntime, NativeContainerConfig, NativeContainerInfo};
+use super::storage::{ImageGcReport, ImageMetadata};
 
 #[derive(Debug, Clone, Default)]
 pub struct ContainerRunOptions {
@@ -194,13 +195,20 @@ impl UnifiedRuntime {
 
     /// Stop a container
     pub async fn stop_container(&self, id: &str) -> Result<()> {
+        self.stop_container_with_timeout(id, 10).await
+    }
+
+    /// Stop a container with a graceful timeout before force kill.
+    pub async fn stop_container_with_timeout(&self, id: &str, timeout: u64) -> Result<()> {
         match &self.mode {
             RuntimeMode::Native => {
                 let native = self.native_runtime()?;
                 let mut native = native.write().await;
-                native.stop_container(id).await
+                native.stop_container_with_timeout(id, timeout).await
             }
-            RuntimeMode::Delegate(runtime) => super::stop_container_delegate(runtime, id).await,
+            RuntimeMode::Delegate(runtime) => {
+                super::stop_container_delegate_with_timeout(runtime, id, timeout).await
+            }
         }
     }
 
@@ -214,6 +222,20 @@ impl UnifiedRuntime {
             }
             RuntimeMode::Delegate(runtime) => {
                 super::remove_container_delegate(runtime, id, force).await
+            }
+        }
+    }
+
+    /// Restart a container.
+    pub async fn restart_container(&self, id: &str, timeout: u64) -> Result<()> {
+        match &self.mode {
+            RuntimeMode::Native => {
+                let native = self.native_runtime()?;
+                let mut native = native.write().await;
+                native.restart_container(id, timeout).await
+            }
+            RuntimeMode::Delegate(runtime) => {
+                super::restart_container_delegate(runtime, id, timeout).await
             }
         }
     }
@@ -258,6 +280,48 @@ impl UnifiedRuntime {
             RuntimeMode::Delegate(runtime) => {
                 super::build_image_delegate(runtime, context, tag, dockerfile).await
             }
+        }
+    }
+
+    /// Push an image.
+    pub async fn push_image(&self, image: &str) -> Result<()> {
+        match &self.mode {
+            RuntimeMode::Native => {
+                let native = self.native_runtime()?;
+                let native = native.read().await;
+                native.push_image_native(image).await
+            }
+            RuntimeMode::Delegate(runtime) => super::push_image_delegate(runtime, image).await,
+        }
+    }
+
+    /// List native cached images.
+    pub async fn list_images(&self) -> Result<Vec<(String, ImageMetadata)>> {
+        match &self.mode {
+            RuntimeMode::Native => {
+                let native = self.native_runtime()?;
+                let native = native.read().await;
+                Ok(native.list_images_native())
+            }
+            RuntimeMode::Delegate(_) => Err(anyhow!(
+                "native image listing is unavailable while delegated to Docker/Podman"
+            )
+            .into()),
+        }
+    }
+
+    /// Prune native cached images not referenced by any persisted container.
+    pub async fn prune_images(&self, dry_run: bool) -> Result<ImageGcReport> {
+        match &self.mode {
+            RuntimeMode::Native => {
+                let native = self.native_runtime()?;
+                let mut native = native.write().await;
+                native.prune_images_native(dry_run).await
+            }
+            RuntimeMode::Delegate(_) => Err(anyhow!(
+                "native image GC is unavailable while delegated to Docker/Podman"
+            )
+            .into()),
         }
     }
 

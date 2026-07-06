@@ -9,10 +9,13 @@ use quinn::{
 use rcgen::generate_simple_self_signed;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, error, info, warn};
 
@@ -27,6 +30,8 @@ pub struct RealQUICServer {
     stats: Arc<RwLock<QUICServerStats>>,
     shutdown_tx: Option<mpsc::Sender<()>>,
     connection_pool: Arc<RwLock<QUICConnectionPool>>,
+    network_allocations: Arc<RwLock<HashMap<(String, String), String>>>,
+    services: Arc<RwLock<HashMap<String, QuicServiceEntry>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -37,6 +42,21 @@ pub struct QUICConnectionInfo {
     pub established_at: std::time::Instant,
     pub bytes_sent: u64,
     pub bytes_received: u64,
+    pub reconnect_attempts: u32,
+    pub backpressure: bool,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuicServiceEntry {
+    pub service_name: String,
+    pub container_id: String,
+    pub endpoint: SocketAddr,
+    pub protocol: String,
+    pub healthy: bool,
+    pub last_seen: SystemTime,
+    pub reconnect_attempts: u32,
+    pub backpressure: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -189,16 +209,14 @@ impl QUICConnectionPool {
     fn get_connection_infos(&self) -> Vec<ConnectionInfo> {
         self.pool
             .iter()
-            .map(|((remote_addr, container_id), pooled)| {
-                ConnectionInfo {
-                    remote_addr: remote_addr
-                        .parse()
-                        .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap()),
-                    container_id: container_id.clone(),
-                    use_count: pooled.use_count,
-                    idle_time: pooled.last_used.elapsed(),
-                    rtt_ms: 1.0, // Placeholder - would need to query connection stats
-                }
+            .map(|((remote_addr, container_id), pooled)| ConnectionInfo {
+                remote_addr: remote_addr
+                    .parse()
+                    .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap()),
+                container_id: container_id.clone(),
+                use_count: pooled.use_count,
+                idle_time: pooled.last_used.elapsed(),
+                rtt_ms: pooled.connection.rtt().as_secs_f64() * 1000.0,
             })
             .collect()
     }
@@ -224,6 +242,8 @@ impl RealQUICServer {
                 100,                     // max 100 pooled connections
                 Duration::from_secs(60), // 60s idle timeout
             ))),
+            network_allocations: Arc::new(RwLock::new(HashMap::new())),
+            services: Arc::new(RwLock::new(HashMap::new())),
         };
 
         // Initialize QUIC endpoint
@@ -354,6 +374,9 @@ impl RealQUICServer {
             established_at: std::time::Instant::now(),
             bytes_sent: 0,
             bytes_received: 0,
+            reconnect_attempts: 0,
+            backpressure: false,
+            last_error: None,
         };
 
         // Store connection
@@ -651,6 +674,68 @@ impl RealQUICServer {
         stats_clone
     }
 
+    pub async fn register_service(
+        &self,
+        service_name: impl Into<String>,
+        container_id: impl Into<String>,
+        endpoint: SocketAddr,
+        protocol: impl Into<String>,
+    ) -> QuicServiceEntry {
+        let entry = QuicServiceEntry {
+            service_name: service_name.into(),
+            container_id: container_id.into(),
+            endpoint,
+            protocol: protocol.into(),
+            healthy: true,
+            last_seen: SystemTime::now(),
+            reconnect_attempts: 0,
+            backpressure: false,
+        };
+        self.services
+            .write()
+            .await
+            .insert(entry.service_name.clone(), entry.clone());
+        entry
+    }
+
+    pub async fn lookup_service(&self, service_name: &str) -> Option<QuicServiceEntry> {
+        self.services.read().await.get(service_name).cloned()
+    }
+
+    pub async fn list_services(&self) -> Vec<QuicServiceEntry> {
+        let mut services: Vec<_> = self.services.read().await.values().cloned().collect();
+        services.sort_by(|a, b| a.service_name.cmp(&b.service_name));
+        services
+    }
+
+    pub async fn mark_service_health(&self, service_name: &str, healthy: bool) -> Result<()> {
+        let mut services = self.services.write().await;
+        let service = services
+            .get_mut(service_name)
+            .ok_or_else(|| anyhow::anyhow!("QUIC service '{}' not found", service_name))?;
+        service.healthy = healthy;
+        service.last_seen = SystemTime::now();
+        Ok(())
+    }
+
+    pub async fn mark_service_backpressure(
+        &self,
+        service_name: &str,
+        backpressure: bool,
+    ) -> Result<()> {
+        let mut services = self.services.write().await;
+        let service = services
+            .get_mut(service_name)
+            .ok_or_else(|| anyhow::anyhow!("QUIC service '{}' not found", service_name))?;
+        service.backpressure = backpressure;
+        service.last_seen = SystemTime::now();
+        Ok(())
+    }
+
+    pub async fn unregister_service(&self, service_name: &str) -> Option<QuicServiceEntry> {
+        self.services.write().await.remove(service_name)
+    }
+
     /// Get the QUIC endpoint for accepting connections (used by gRPC-over-QUIC)
     pub fn get_endpoint(&self) -> Option<Endpoint> {
         self.endpoint.clone()
@@ -676,9 +761,12 @@ impl RealQUICServer {
             container_id, network_id
         );
 
-        // Assign an IP address from the network subnet
-        // For now, return a placeholder IP
-        let assigned_ip = format!("172.18.0.{}", (container_id.len() % 254) + 2);
+        let mut allocations = self.network_allocations.write().await;
+        let assigned_ip = allocate_container_ip(&allocations, container_id, network_id);
+        allocations.insert(
+            (network_id.to_string(), container_id.to_string()),
+            assigned_ip.clone(),
+        );
 
         info!(
             "✅ Container {} connected to network {} with IP {}",
@@ -694,8 +782,10 @@ impl RealQUICServer {
             container_id, network_id
         );
 
-        // Remove any connection state
-        // For now, this is a placeholder
+        self.network_allocations
+            .write()
+            .await
+            .remove(&(network_id.to_string(), container_id.to_string()));
 
         info!(
             "✅ Container {} disconnected from network {}",
@@ -846,6 +936,28 @@ impl RealQUICServer {
     }
 }
 
+fn allocate_container_ip(
+    allocations: &HashMap<(String, String), String>,
+    container_id: &str,
+    network_id: &str,
+) -> String {
+    let mut hasher = DefaultHasher::new();
+    network_id.hash(&mut hasher);
+    container_id.hash(&mut hasher);
+    let start = (hasher.finish() % 253) as u8 + 2;
+    for offset in 0..253_u16 {
+        let octet = ((start as u16 - 2 + offset) % 253 + 2) as u8;
+        let candidate = format!("172.18.0.{octet}");
+        if !allocations
+            .iter()
+            .any(|((network, _), ip)| network == network_id && ip == &candidate)
+        {
+            return candidate;
+        }
+    }
+    "172.18.0.254".to_string()
+}
+
 impl Default for QUICServerConfig {
     fn default() -> Self {
         Self {
@@ -978,5 +1090,29 @@ impl ServerCertVerifier for InsecureServerCertVerifier {
             SignatureScheme::ED25519,
             SignatureScheme::ED448,
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quic_ip_allocator_is_deterministic_and_avoids_collisions() {
+        let allocations = HashMap::new();
+        let first = allocate_container_ip(&allocations, "container-a", "bolt0");
+        assert_eq!(
+            first,
+            allocate_container_ip(&allocations, "container-a", "bolt0")
+        );
+        assert!(first.starts_with("172.18.0."));
+
+        let mut allocations = HashMap::new();
+        allocations.insert(
+            ("bolt0".to_string(), "container-a".to_string()),
+            first.clone(),
+        );
+        let second = allocate_container_ip(&allocations, "container-a", "bolt0");
+        assert_ne!(first, second);
     }
 }

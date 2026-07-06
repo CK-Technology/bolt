@@ -169,6 +169,12 @@ pub enum Commands {
         image: String,
     },
 
+    /// Manage native images
+    Image {
+        #[command(subcommand)]
+        command: ImageCommands,
+    },
+
     /// List containers
     Ps {
         /// Show all containers (including stopped)
@@ -181,6 +187,10 @@ pub enum Commands {
         /// Container names or IDs
         #[arg(required = true)]
         containers: Vec<String>,
+
+        /// Timeout for graceful stop before force kill (seconds)
+        #[arg(short, long, default_value = "10")]
+        timeout: u64,
     },
 
     /// Execute command in running container
@@ -222,6 +232,85 @@ pub enum Commands {
     Surge {
         #[command(subcommand)]
         command: SurgeCommands,
+    },
+
+    /// Show the Boltfile execution plan
+    Plan {
+        /// Emit JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Converge local state to Boltfile.toml
+    Apply {
+        /// Services to apply (default: all)
+        services: Vec<String>,
+
+        /// Run services in detached mode
+        #[arg(short, long)]
+        detach: bool,
+
+        /// Recreate existing containers
+        #[arg(long)]
+        force_recreate: bool,
+
+        /// Require Boltfile.lock to match Boltfile.toml
+        #[arg(long)]
+        locked: bool,
+    },
+
+    /// Destroy Boltfile-managed services
+    Destroy {
+        /// Services to destroy (default: all)
+        services: Vec<String>,
+
+        /// Remove volumes too
+        #[arg(short, long)]
+        volumes: bool,
+
+        /// Execute after reviewing the plan
+        #[arg(short, long)]
+        force: bool,
+    },
+
+    /// Generate or check Boltfile.lock
+    Lock {
+        /// Check that Boltfile.lock matches Boltfile.toml
+        #[arg(long)]
+        check: bool,
+    },
+
+    /// Detect drift between Boltfile.toml and local state
+    Drift {
+        /// Emit JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Check host/runtime readiness
+    Doctor {
+        /// Emit JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Import existing Docker/Bolt resources into Boltfile.toml
+    Import {
+        #[command(subcommand)]
+        command: ImportCommands,
+    },
+
+    /// Inspect Bolt resources
+    Inspect {
+        /// Resource kind: service, container, image, volume, network
+        kind: String,
+
+        /// Resource name or ID
+        name: String,
+
+        /// Emit JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// Gaming-specific commands
@@ -272,6 +361,12 @@ pub enum Commands {
         command: SnapshotCommands,
     },
 
+    /// Snapshot-backed generation inspection
+    Generations {
+        #[command(subcommand)]
+        command: GenerationCommands,
+    },
+
     /// Hardware detection and optimization
     Hardware {
         #[command(subcommand)]
@@ -295,6 +390,57 @@ pub enum Commands {
         /// Port to run dashboard on
         #[arg(short, long, default_value = "3000")]
         port: u16,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ImageCommands {
+    /// List native cached images
+    List,
+
+    /// Prune native images not referenced by containers
+    Prune {
+        /// Show what would be removed without deleting anything
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Do not prompt before deleting
+        #[arg(short, long)]
+        force: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ImportCommands {
+    /// Convert Docker Compose YAML to Boltfile.toml
+    Compose {
+        /// Input compose file
+        #[arg(short, long, default_value = "docker-compose.yml")]
+        input: std::path::PathBuf,
+
+        /// Output Boltfile path
+        #[arg(short, long, default_value = "Boltfile.toml")]
+        output: std::path::PathBuf,
+    },
+
+    /// Import an existing container as a Boltfile service
+    Container {
+        /// Container name or ID
+        id: String,
+
+        /// Service name to write
+        #[arg(short, long)]
+        service: Option<String>,
+    },
+
+    /// Import an image reference as a Boltfile service
+    Image {
+        /// Image reference
+        image: String,
+
+        /// Service name to write
+        #[arg(short, long)]
+        service: Option<String>,
     },
 }
 
@@ -587,6 +733,9 @@ pub enum NetworkCommands {
         /// Network name
         name: String,
     },
+
+    /// Check host bridge networking support
+    Preflight,
 }
 
 #[derive(Subcommand)]
@@ -632,6 +781,10 @@ pub enum VolumeCommands {
 
     /// Prune unused volumes
     Prune {
+        /// Dry run - show what would be removed
+        #[arg(long)]
+        dry_run: bool,
+
         /// Don't prompt for confirmation
         #[arg(short, long)]
         force: bool,
@@ -689,6 +842,10 @@ pub enum SnapshotCommands {
         /// Snapshot ID or name to delete
         snapshot: String,
 
+        /// Dry run - show what would be deleted
+        #[arg(long)]
+        dry_run: bool,
+
         /// Force deletion without confirmation
         #[arg(short, long)]
         force: bool,
@@ -717,6 +874,20 @@ pub enum SnapshotCommands {
         /// Enable or disable automatic snapshots
         #[arg(value_enum)]
         action: AutoAction,
+    },
+
+    /// Check snapshot backend support
+    Preflight,
+}
+
+#[derive(Subcommand)]
+pub enum GenerationCommands {
+    /// List recorded generations
+    #[command(alias = "ls")]
+    List {
+        /// Show container IDs, image digests, and Boltfile provenance
+        #[arg(short, long)]
+        verbose: bool,
     },
 }
 

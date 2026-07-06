@@ -1,5 +1,6 @@
 use anyhow::Result;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info};
@@ -91,50 +92,11 @@ impl OutputManager {
     async fn detect_displays(&mut self) -> Result<()> {
         debug!("🔍 Detecting connected displays");
 
-        // In a real implementation, this would query DRM/KMS for connected displays
-        // For now, we'll simulate some common gaming display configurations
-
-        let displays = vec![
-            GameOutput {
-                id: 1,
-                name: "Primary Gaming Display".to_string(),
-                connector: "DP-1".to_string(),
-                width: 2560,
-                height: 1440,
-                refresh_rate: 144,
-                max_refresh_rate: 165,
-                vrr_capable: true,
-                vrr_enabled: false,
-                hdr_capable: true,
-                hdr_enabled: false,
-                gsync_compatible: true,
-                freesync_capable: true,
-                output_type: OutputType::DisplayPort,
-                color_depth: ColorDepth::Ten,
-                gaming_mode: false,
-            },
-            GameOutput {
-                id: 2,
-                name: "Secondary Display".to_string(),
-                connector: "HDMI-A-1".to_string(),
-                width: 1920,
-                height: 1080,
-                refresh_rate: 60,
-                max_refresh_rate: 75,
-                vrr_capable: false,
-                vrr_enabled: false,
-                hdr_capable: false,
-                hdr_enabled: false,
-                gsync_compatible: false,
-                freesync_capable: false,
-                output_type: OutputType::HDMI,
-                color_depth: ColorDepth::Eight,
-                gaming_mode: false,
-            },
-        ];
+        let displays = detect_drm_outputs_from(Path::new("/sys/class/drm"))?;
 
         {
             let mut outputs = self.outputs.write().await;
+            outputs.clear();
             for game_display in displays {
                 info!(
                     "  📺 Detected: {} ({}x{}@{}Hz, {})",
@@ -161,7 +123,7 @@ impl OutputManager {
         }
 
         // Set primary output
-        self.primary_output = Some(1);
+        self.primary_output = self.outputs.read().await.keys().min().copied();
 
         Ok(())
     }
@@ -369,6 +331,105 @@ impl OutputManager {
     }
 }
 
+fn detect_drm_outputs_from(root: &Path) -> Result<Vec<GameOutput>> {
+    let mut outputs = Vec::new();
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Ok(outputs);
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(connector) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !connector.contains('-') || connector.starts_with("card") && !connector.contains("-") {
+            continue;
+        }
+        if read_trimmed(path.join("status")).as_deref() != Some("connected") {
+            continue;
+        }
+
+        let (width, height, refresh_rate, max_refresh_rate) =
+            parse_modes(path.join("modes")).unwrap_or((0, 0, 0, 0));
+        let id = (outputs.len() + 1) as u32;
+        outputs.push(GameOutput {
+            id,
+            name: connector.to_string(),
+            connector: connector.to_string(),
+            width,
+            height,
+            refresh_rate,
+            max_refresh_rate,
+            vrr_capable: path.join("vrr_capable").exists(),
+            vrr_enabled: false,
+            hdr_capable: path.join("hdr_output_metadata").exists(),
+            hdr_enabled: false,
+            gsync_compatible: false,
+            freesync_capable: path.join("vrr_capable").exists(),
+            output_type: classify_output_type(connector),
+            color_depth: ColorDepth::Eight,
+            gaming_mode: false,
+        });
+    }
+
+    outputs.sort_by(|a, b| a.connector.cmp(&b.connector));
+    for (idx, output) in outputs.iter_mut().enumerate() {
+        output.id = (idx + 1) as u32;
+    }
+    Ok(outputs)
+}
+
+fn parse_modes(path: PathBuf) -> Option<(u32, u32, u32, u32)> {
+    let contents = std::fs::read_to_string(path).ok()?;
+    let mut best = None;
+    for line in contents.lines() {
+        let mode = line.trim();
+        let Some((resolution, refresh)) = mode.split_once('@') else {
+            continue;
+        };
+        let Some((width, height)) = resolution.split_once('x') else {
+            continue;
+        };
+        let width = width.parse::<u32>().ok()?;
+        let height = height.parse::<u32>().ok()?;
+        let refresh = refresh.trim_end_matches("Hz").parse::<u32>().ok()?;
+        if best
+            .map(|(_, _, _, max): (u32, u32, u32, u32)| refresh > max)
+            .unwrap_or(true)
+        {
+            best = Some((width, height, refresh, refresh));
+        }
+    }
+    best
+}
+
+fn classify_output_type(connector: &str) -> OutputType {
+    let connector = connector
+        .strip_prefix("card")
+        .and_then(|rest| rest.split_once('-').map(|(_, name)| name))
+        .unwrap_or(connector);
+
+    if connector.starts_with("HDMI") {
+        OutputType::HDMI
+    } else if connector.starts_with("DP") || connector.starts_with("DisplayPort") {
+        OutputType::DisplayPort
+    } else if connector.starts_with("DVI-D") {
+        OutputType::DVID
+    } else if connector.starts_with("VGA") {
+        OutputType::VGA
+    } else if connector.starts_with("eDP") || connector.starts_with("LVDS") {
+        OutputType::Internal
+    } else {
+        OutputType::UsbC
+    }
+}
+
+fn read_trimmed(path: PathBuf) -> Option<String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|value| value.trim().to_string())
+}
+
 #[derive(Debug, Clone)]
 pub struct GamingDisplayMetrics {
     pub primary_output: Option<GameOutput>,
@@ -376,4 +437,44 @@ pub struct GamingDisplayMetrics {
     pub vrr_enabled_count: usize,
     pub hdr_enabled_count: usize,
     pub gaming_mode_active: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch_tempdir() -> tempfile::TempDir {
+        std::fs::create_dir_all(".scratch").expect("create repo-local scratch directory");
+        tempfile::tempdir_in(".scratch").expect("create repo-local scratch tempdir")
+    }
+
+    #[test]
+    fn drm_output_detection_reads_connected_connectors() -> Result<()> {
+        let root = scratch_tempdir();
+        let hdmi = root.path().join("card0-HDMI-A-1");
+        let dp = root.path().join("card0-DP-1");
+        let disconnected = root.path().join("card0-DP-2");
+        std::fs::create_dir_all(&hdmi)?;
+        std::fs::create_dir_all(&dp)?;
+        std::fs::create_dir_all(&disconnected)?;
+        std::fs::write(hdmi.join("status"), "connected\n")?;
+        std::fs::write(hdmi.join("modes"), "1920x1080@60Hz\n2560x1440@144Hz\n")?;
+        std::fs::write(hdmi.join("vrr_capable"), "1\n")?;
+        std::fs::write(dp.join("status"), "connected\n")?;
+        std::fs::write(dp.join("modes"), "3840x2160@120Hz\n")?;
+        std::fs::write(disconnected.join("status"), "disconnected\n")?;
+
+        let outputs = detect_drm_outputs_from(root.path())?;
+        assert_eq!(outputs.len(), 2);
+        assert_eq!(outputs[0].connector, "card0-DP-1");
+        assert_eq!(outputs[0].width, 3840);
+        assert_eq!(outputs[0].height, 2160);
+        assert_eq!(outputs[0].refresh_rate, 120);
+        assert!(matches!(outputs[0].output_type, OutputType::DisplayPort));
+        assert_eq!(outputs[1].connector, "card0-HDMI-A-1");
+        assert_eq!(outputs[1].max_refresh_rate, 144);
+        assert!(matches!(outputs[1].output_type, OutputType::HDMI));
+        assert!(outputs[1].vrr_capable);
+        Ok(())
+    }
 }

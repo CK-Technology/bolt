@@ -55,78 +55,32 @@ impl ExecCommand {
             return Err(anyhow!("No command specified"));
         }
 
-        // Get container PID
-        let container_pid = self.get_container_pid(&self.container).await?;
-        debug!("Container PID: {}", container_pid);
+        let container = self.resolve_running_container(&self.container).await?;
+        debug!("Container ID: {}", container.id);
 
-        // Build nsenter command to enter container namespaces
-        let mut cmd = tokio::process::Command::new("nsenter");
+        let exit_code = bolt::runtime::oci::exec_runtime_container(
+            &container.id,
+            &self.command,
+            self.interactive,
+            self.tty,
+            self.detach,
+            self.workdir.as_deref(),
+            self.user.as_deref(),
+            &self.env,
+        )
+        .await?;
 
-        // Enter all namespaces
-        cmd.args([
-            "-t",
-            &container_pid.to_string(),
-            "-m", // mount namespace
-            "-u", // UTS namespace
-            "-i", // IPC namespace
-            "-n", // network namespace
-            "-p", // PID namespace
-        ]);
-
-        // Set user if specified
-        if let Some(ref user) = self.user {
-            if let Some((uid, gid)) = user.split_once(':') {
-                cmd.args(["--setuid", uid]);
-                cmd.args(["--setgid", gid]);
-            } else {
-                cmd.args(["--setuid", user]);
-            }
+        if exit_code != 0 {
+            std::process::exit(exit_code);
         }
 
-        // Set working directory
-        if let Some(ref workdir) = self.workdir {
-            cmd.current_dir(workdir);
-        }
-
-        // Set environment variables
-        for env_var in &self.env {
-            if let Some((key, value)) = env_var.split_once('=') {
-                cmd.env(key, value);
-            }
-        }
-
-        // Add the command to execute
-        cmd.args(&self.command);
-
-        // Setup TTY and interactive mode
-        if self.tty && self.interactive {
-            self.setup_interactive_tty(&mut cmd).await?;
-        } else if self.interactive {
-            cmd.stdin(std::process::Stdio::inherit());
-        }
-
-        cmd.stdout(std::process::Stdio::inherit());
-        cmd.stderr(std::process::Stdio::inherit());
-
-        // Execute the command
-        if self.detach {
-            // Spawn in background
-            let child = cmd.spawn()?;
-            println!("{}", child.id().unwrap_or(0));
-            Ok(())
-        } else {
-            // Wait for completion
-            let status = cmd.status().await?;
-
-            if !status.success() {
-                std::process::exit(status.code().unwrap_or(1));
-            }
-
-            Ok(())
-        }
+        Ok(())
     }
 
-    async fn get_container_pid(&self, container_id: &str) -> Result<u32> {
+    async fn resolve_running_container(
+        &self,
+        container_id: &str,
+    ) -> Result<bolt::runtime::oci::ContainerState> {
         use bolt::runtime::state;
 
         // Resolve the reference (id or --name) against persisted state so exec
@@ -147,45 +101,6 @@ impl ExecCommand {
             ));
         }
 
-        Ok(pid)
-    }
-
-    async fn setup_interactive_tty(&self, cmd: &mut tokio::process::Command) -> Result<()> {
-        use nix::sys::termios::{LocalFlags, SetArg, tcgetattr, tcsetattr};
-        use nix::unistd::isatty;
-        use std::os::fd::{AsRawFd, BorrowedFd};
-
-        let stdin = std::io::stdin();
-        let stdin_fd = stdin.as_raw_fd();
-
-        // Check if stdin is a TTY
-        if !isatty(&stdin).unwrap_or(false) {
-            return Ok(());
-        }
-
-        // Get current terminal settings
-        let stdin_borrowed = unsafe { BorrowedFd::borrow_raw(stdin_fd) };
-        let mut termios = tcgetattr(stdin_borrowed)?;
-
-        // Store original settings for restoration
-        let original_termios = termios.clone();
-
-        // Set raw mode (disable canonical mode and echo)
-        termios.local_flags &= !(LocalFlags::ICANON | LocalFlags::ECHO);
-
-        // Apply raw mode
-        tcsetattr(stdin_borrowed, SetArg::TCSANOW, &termios)?;
-
-        // Setup signal handler to restore terminal on exit
-        tokio::spawn(async move {
-            tokio::signal::ctrl_c().await.ok();
-            let stdin_borrowed_restore = unsafe { BorrowedFd::borrow_raw(stdin_fd) };
-            let _ = tcsetattr(stdin_borrowed_restore, SetArg::TCSANOW, &original_termios);
-            std::process::exit(0);
-        });
-
-        cmd.stdin(std::process::Stdio::inherit());
-
-        Ok(())
+        Ok(container)
     }
 }

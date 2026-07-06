@@ -5,7 +5,10 @@ use bolt::runtime::gpu_integration::{GpuConfig, GpuIsolationLevel, GpuWorkloadTy
 use bolt::runtime::unified::ContainerRunOptions;
 use bolt::{BoltConfig, BoltRuntime, gaming, surge};
 use clap::Parser;
-use cli::{Cli, Commands, GamingCommands, NetworkCommands, SurgeCommands, VolumeCommands, compat};
+use cli::{
+    Cli, Commands, GamingCommands, GenerationCommands, ImageCommands, ImportCommands,
+    NetworkCommands, SurgeCommands, VolumeCommands, compat,
+};
 use std::path::PathBuf;
 use tracing::info;
 
@@ -82,6 +85,7 @@ async fn main() -> Result<()> {
 
                 Some(GpuConfig {
                     enabled: true,
+                    devices: Some(normalize_gpu_device_request(&devices)),
                     workload_type: GpuWorkloadType::General,
                     isolation_level: GpuIsolationLevel::Shared,
                     memory_limit: None,
@@ -156,6 +160,84 @@ async fn main() -> Result<()> {
             runtime.push_image(&image).await?;
         }
 
+        Commands::Image { command } => match command {
+            ImageCommands::List => {
+                let images = runtime.list_images().await?;
+                if images.is_empty() {
+                    info!("No native images found");
+                    return Ok(());
+                }
+
+                println!(
+                    "{:<24} {:<64} {:>12} {:<25}",
+                    "REPOSITORY:TAG", "IMAGE ID", "SIZE", "CREATED"
+                );
+                for image in images {
+                    println!(
+                        "{:<24} {:<64} {:>12} {:<25}",
+                        image.name,
+                        image.id,
+                        format_bytes(image.size),
+                        image.created.unwrap_or_else(|| "-".to_string())
+                    );
+                }
+            }
+            ImageCommands::Prune { dry_run, force } => {
+                let preview_only = dry_run || !force;
+                let report = runtime.prune_images(preview_only).await?;
+                if report.candidates.is_empty() && report.roots.is_empty() {
+                    info!("No unused native image or runtime roots to prune");
+                    return Ok(());
+                }
+
+                println!(
+                    "{} native image(s), {} runtime root(s) {}:",
+                    report.candidates.len(),
+                    report.roots.len(),
+                    if preview_only {
+                        "would be removed"
+                    } else {
+                        "were removed"
+                    }
+                );
+                for candidate in &report.candidates {
+                    println!(
+                        "  {} ({}, {})",
+                        candidate.reference,
+                        candidate.digest,
+                        format_bytes(candidate.bytes)
+                    );
+                }
+                for candidate in &report.roots {
+                    println!(
+                        "  {}:{} ({})",
+                        candidate.kind,
+                        candidate.id,
+                        format_bytes(candidate.bytes)
+                    );
+                }
+                println!(
+                    "Total reclaimable: {}",
+                    format_bytes(report.reclaimed_bytes)
+                );
+
+                if dry_run {
+                    return Ok(());
+                }
+
+                if !force {
+                    println!("Re-run with --force to remove these images.");
+                    return Ok(());
+                }
+
+                info!(
+                    "Pruned {} native image(s), reclaimed {}",
+                    report.candidates.len(),
+                    format_bytes(report.reclaimed_bytes)
+                );
+            }
+        },
+
         Commands::Ps { all } => {
             let containers = runtime.list_containers(all).await?;
 
@@ -225,10 +307,15 @@ async fn main() -> Result<()> {
             );
         }
 
-        Commands::Stop { containers } => {
+        Commands::Stop {
+            containers,
+            timeout,
+        } => {
             for container in containers {
-                info!("Stopping container: {}", container);
-                runtime.stop_container(&container).await?;
+                info!("Stopping container: {} (timeout: {}s)", container, timeout);
+                runtime
+                    .stop_container_with_timeout(&container, timeout)
+                    .await?;
             }
         }
 
@@ -298,6 +385,129 @@ async fn main() -> Result<()> {
                 surge::scale(&bolt_config, &services).await?;
             }
         },
+
+        Commands::Plan { json } => {
+            let plan = bolt::project::plan(&bolt_config, &runtime).await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&plan)?);
+            } else {
+                bolt::project::print_plan(&plan);
+            }
+        }
+
+        Commands::Apply {
+            services,
+            detach,
+            force_recreate,
+            locked,
+        } => {
+            let plan = bolt::project::apply(
+                &bolt_config,
+                &runtime,
+                &services,
+                detach,
+                force_recreate,
+                locked,
+            )
+            .await?;
+            bolt::project::print_plan(&plan);
+            info!("✅ Apply completed and Boltfile.lock updated");
+        }
+
+        Commands::Destroy {
+            services,
+            volumes,
+            force,
+        } => {
+            let plan =
+                bolt::project::destroy(&bolt_config, &runtime, &services, volumes, force).await?;
+            bolt::project::print_plan(&plan);
+            if !force {
+                bolt::project::ensure_force(false, "destroy")?;
+            }
+            info!("✅ Destroy completed");
+        }
+
+        Commands::Lock { check } => {
+            if check {
+                bolt::project::check_lock(&bolt_config, &runtime).await?;
+                println!("Boltfile.lock is current");
+            } else {
+                let lock = bolt::project::write_lock(&bolt_config, &runtime).await?;
+                println!(
+                    "Wrote Boltfile.lock for project {} ({})",
+                    lock.project, lock.boltfile_hash
+                );
+            }
+        }
+
+        Commands::Drift { json } => {
+            let report = bolt::project::drift(&bolt_config, &runtime).await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else if report.drifted {
+                println!("Drift detected:");
+                for entry in report.entries {
+                    println!(
+                        "  {:?}.{} - {}",
+                        entry.resource_type, entry.name, entry.message
+                    );
+                }
+            } else {
+                println!("No drift detected");
+            }
+        }
+
+        Commands::Doctor { json } => {
+            let report = bolt::project::doctor(&bolt_config, &runtime).await;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("Doctor: {}", if report.ok { "ok" } else { "issues found" });
+                for check in &report.checks {
+                    println!(
+                        "  {:<18} {:<4} {}",
+                        check.name,
+                        if check.ok { "ok" } else { "fail" },
+                        check.message
+                    );
+                }
+            }
+        }
+
+        Commands::Import { command } => match command {
+            ImportCommands::Compose { input, output } => {
+                bolt::project::import_compose(&input, &output)?;
+                println!("Imported compose file into {}", output.display());
+            }
+            ImportCommands::Container { id, service } => {
+                bolt::project::import_container(&bolt_config, &runtime, &id, service.as_deref())
+                    .await?;
+                println!(
+                    "Imported container '{}' into {}",
+                    id,
+                    bolt_config.boltfile_path.display()
+                );
+            }
+            ImportCommands::Image { image, service } => {
+                bolt::project::import_image(&bolt_config, &image, service.as_deref())?;
+                println!(
+                    "Imported image '{}' into {}",
+                    image,
+                    bolt_config.boltfile_path.display()
+                );
+            }
+        },
+
+        Commands::Inspect { kind, name, json } => {
+            let kind = parse_inspect_kind(&kind)?;
+            let inspection = bolt::project::inspect(&bolt_config, &runtime, kind, &name).await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&inspection)?);
+            } else {
+                print_inspection(&inspection);
+            }
+        }
 
         Commands::Gaming { command } => match command {
             GamingCommands::Gpu { command } => {
@@ -478,6 +688,21 @@ async fn main() -> Result<()> {
                 .await?;
                 network_manager.remove_bolt_network(&name).await?;
             }
+            NetworkCommands::Preflight => {
+                let preflight = bolt::networking::bridge::BridgeManager::preflight();
+                println!("Bridge networking preflight:");
+                println!("  CAP_NET_ADMIN: {}", yes_no(preflight.cap_net_admin));
+                println!("  ip command: {}", yes_no(preflight.ip_available));
+                println!("  nft command: {}", yes_no(preflight.nft_available));
+                println!(
+                    "  iptables command: {}",
+                    yes_no(preflight.iptables_available)
+                );
+                println!("  Can manage links: {}", yes_no(preflight.can_manage_links));
+                if !preflight.reasons.is_empty() {
+                    println!("  Reasons: {}", preflight.reasons.join(", "));
+                }
+            }
         },
 
         Commands::Volume { command } => match command {
@@ -586,14 +811,26 @@ async fn main() -> Result<()> {
                 }
             }
 
-            VolumeCommands::Prune { force } => {
-                info!("Pruning unused volumes (force: {})", force);
+            VolumeCommands::Prune { dry_run, force } => {
+                info!(
+                    "Pruning unused volumes (dry_run: {}, force: {})",
+                    dry_run, force
+                );
                 let volumes = runtime.list_volumes().await?;
                 let unused_volumes: Vec<_> =
                     volumes.iter().filter(|v| v.used_by.is_empty()).collect();
 
                 if unused_volumes.is_empty() {
                     info!("No unused volumes to prune");
+                    return Ok(());
+                }
+
+                if dry_run {
+                    println!("The following volumes would be removed:");
+                    for volume in &unused_volumes {
+                        println!("  {}", volume.name);
+                    }
+                    info!("✅ Dry run completed - no volumes removed");
                     return Ok(());
                 }
 
@@ -709,6 +946,17 @@ async fn main() -> Result<()> {
                         if let Some(ref desc) = snap.description {
                             println!("Description: {}", desc);
                         }
+                        println!("Root:        {}", snap.metadata.root_path.display());
+                        println!("Containers:  {}", snap.metadata.containers_path.display());
+                        if !snap.metadata.container_ids.is_empty() {
+                            println!("Container IDs: {}", snap.metadata.container_ids.join(", "));
+                        }
+                        if !snap.metadata.image_digests.is_empty() {
+                            println!("Image digests:");
+                            for digest in &snap.metadata.image_digests {
+                                println!("  {}", digest);
+                            }
+                        }
 
                         // Show size if possible
                         if let Ok(metadata) = tokio::fs::metadata(&snap.path).await
@@ -725,18 +973,36 @@ async fn main() -> Result<()> {
 
                     let snapshot_manager =
                         bolt::capsules::snapshots::SnapshotManager::new().await?;
-                    snapshot_manager.rollback_to_snapshot(&snapshot).await?;
+                    snapshot_manager
+                        .rollback_to_snapshot_checked(&snapshot, force)
+                        .await?;
 
                     info!("✅ Rolled back to snapshot '{}' successfully", snapshot);
                 }
-                cli::SnapshotCommands::Delete { snapshot, force } => {
-                    info!("Deleting snapshot '{}' (force: {})", snapshot, force);
+                cli::SnapshotCommands::Delete {
+                    snapshot,
+                    dry_run,
+                    force,
+                } => {
+                    info!(
+                        "Deleting snapshot '{}' (dry_run: {}, force: {})",
+                        snapshot, dry_run, force
+                    );
 
                     let snapshot_manager =
                         bolt::capsules::snapshots::SnapshotManager::new().await?;
-                    snapshot_manager.delete_snapshot(&snapshot).await?;
+                    snapshot_manager
+                        .delete_snapshot_checked(&snapshot, force, dry_run)
+                        .await?;
 
-                    info!("✅ Snapshot '{}' deleted successfully", snapshot);
+                    if dry_run {
+                        info!(
+                            "✅ Dry run completed - snapshot '{}' was not deleted",
+                            snapshot
+                        );
+                    } else {
+                        info!("✅ Snapshot '{}' deleted successfully", snapshot);
+                    }
                 }
                 cli::SnapshotCommands::Cleanup { dry_run, force } => {
                     info!(
@@ -746,40 +1012,28 @@ async fn main() -> Result<()> {
 
                     let snapshot_manager =
                         bolt::capsules::snapshots::SnapshotManager::new().await?;
-                    let snapshots = snapshot_manager.list_snapshots().await?;
-
-                    // Keep only last 10 snapshots, or manual snapshots
-                    let mut auto_snapshots: Vec<_> = snapshots
-                        .iter()
-                        .filter(|s| {
-                            matches!(
-                                s.snapshot_type,
-                                bolt::capsules::snapshots::SnapshotType::Auto
-                                    | bolt::capsules::snapshots::SnapshotType::Daily
-                                    | bolt::capsules::snapshots::SnapshotType::Weekly
-                            )
-                        })
-                        .collect();
-
-                    auto_snapshots.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-
-                    let to_delete = auto_snapshots.iter().skip(10);
-                    let mut deleted = 0;
-
-                    for snapshot in to_delete {
-                        if dry_run {
-                            println!("Would delete: {} ({})", snapshot.name, snapshot.created_at);
-                        } else {
-                            snapshot_manager.delete_snapshot(&snapshot.name).await?;
-                            println!("Deleted: {}", snapshot.name);
-                            deleted += 1;
-                        }
-                    }
+                    let deleted = snapshot_manager
+                        .cleanup_old_snapshots(dry_run, force, 10)
+                        .await?;
 
                     if dry_run {
                         info!("✅ Dry run completed - no snapshots deleted");
                     } else {
                         info!("✅ Cleanup completed - {} snapshots deleted", deleted);
+                    }
+                }
+                cli::SnapshotCommands::Preflight => {
+                    let snapshot_manager =
+                        bolt::capsules::snapshots::SnapshotManager::new().await?;
+                    let report = snapshot_manager.preflight().await?;
+                    println!("Filesystem:      {}", report.filesystem);
+                    println!("Supported:       {}", report.supported);
+                    println!("BTRFS command:   {}", report.btrfs_available);
+                    println!("ZFS command:     {}", report.zfs_available);
+                    println!("Snapshot root:   {}", report.snapshot_root.display());
+                    println!("Containers path: {}", report.containers_path.display());
+                    if let Some(reason) = report.reason {
+                        println!("Reason:          {}", reason);
                     }
                 }
                 cli::SnapshotCommands::Config { verbose } => {
@@ -870,6 +1124,52 @@ keep_monthly = 3
                 }
             }
         }
+
+        Commands::Generations { command } => match command {
+            GenerationCommands::List { verbose } => {
+                let snapshot_manager = bolt::capsules::snapshots::SnapshotManager::new().await?;
+                let generations = snapshot_manager.list_generations().await?;
+                if generations.is_empty() {
+                    println!("No generations found");
+                    return Ok(());
+                }
+
+                println!(
+                    "{:<28} {:<24} {:<10} {:<10}",
+                    "GENERATION", "CREATED", "CONTAINERS", "IMAGES"
+                );
+                println!("{}", "-".repeat(78));
+                for generation in generations {
+                    println!(
+                        "{:<28} {:<24} {:<10} {:<10}",
+                        generation.id,
+                        generation.created_at,
+                        generation.container_ids.len(),
+                        generation.image_digests.len()
+                    );
+                    if verbose {
+                        if let Some(path) = &generation.boltfile_path {
+                            println!("  Boltfile: {}", path.display());
+                        }
+                        if let Some(hash) = &generation.boltfile_hash {
+                            println!("  Boltfile hash: {}", hash);
+                        }
+                        if let Some(revision) = &generation.boltfile_revision {
+                            println!("  Revision: {}", revision);
+                        }
+                        if !generation.container_ids.is_empty() {
+                            println!("  Containers: {}", generation.container_ids.join(", "));
+                        }
+                        if !generation.image_digests.is_empty() {
+                            println!("  Image digests:");
+                            for digest in &generation.image_digests {
+                                println!("    {}", digest);
+                            }
+                        }
+                    }
+                }
+            }
+        },
 
         Commands::Hardware { command } => {
             use bolt::runtime::hardware_detection::{
@@ -1149,9 +1449,8 @@ keep_monthly = 3
             }
         }
 
-        Commands::Gpu { command: _command } => {
-            println!("GPU management commands coming soon!");
-            println!("For now, use: bolt run --gpus all <image>");
+        Commands::Gpu { command } => {
+            cli::gpu::GpuCommand { command }.execute().await?;
         }
 
         Commands::Nv { command } => {
@@ -1196,4 +1495,111 @@ keep_monthly = 3
     }
 
     Ok(())
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+
+    if unit == 0 {
+        format!("{} {}", bytes, UNITS[unit])
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value { "yes" } else { "no" }
+}
+
+fn parse_inspect_kind(kind: &str) -> Result<bolt::project::InspectKind> {
+    match kind {
+        "service" | "svc" => Ok(bolt::project::InspectKind::Service),
+        "container" | "ctr" => Ok(bolt::project::InspectKind::Container),
+        "image" => Ok(bolt::project::InspectKind::Image),
+        "volume" | "vol" => Ok(bolt::project::InspectKind::Volume),
+        "network" | "net" => Ok(bolt::project::InspectKind::Network),
+        other => anyhow::bail!(
+            "unsupported inspect kind '{}'; use service, container, image, volume, or network",
+            other
+        ),
+    }
+}
+
+fn print_inspection(inspection: &bolt::project::Inspection) {
+    match inspection {
+        bolt::project::Inspection::Service(service) => {
+            println!("Service: {}", service.name);
+            println!("  Container: {}", service.container_name);
+            if let Some(image) = &service.desired.image {
+                println!("  Image: {}", image);
+            }
+            if let Some(discovery) = &service.discovery {
+                println!("  DNS: {}", discovery.dns_name);
+                println!("  Protocol: {}", discovery.protocol);
+            }
+            println!(
+                "  Runtime state: {}",
+                if service.container.is_some() {
+                    "present"
+                } else {
+                    "missing"
+                }
+            );
+        }
+        bolt::project::Inspection::Container(container) => {
+            println!("Container: {}", container.name);
+            println!("  ID: {}", container.id);
+            println!("  Image: {}", container.image);
+            println!("  Status: {}", container.status);
+        }
+        bolt::project::Inspection::Image(image) => {
+            println!("Image: {}", image.name);
+            println!("  ID: {}", image.id);
+            println!("  Size: {}", format_bytes(image.size));
+        }
+        bolt::project::Inspection::Volume(volume) => {
+            println!("Volume: {}", volume.name);
+            println!("  Driver: {}", volume.driver);
+            println!("  Mountpoint: {}", volume.mountpoint.display());
+            println!("  Used by: {}", volume.used_by.join(", "));
+        }
+        bolt::project::Inspection::Network(network) => {
+            println!("Network: {}", network.name);
+            println!("  ID: {}", network.id);
+            println!("  Driver: {}", network.driver);
+            if let Some(subnet) = &network.subnet {
+                println!("  Subnet: {}", subnet);
+            }
+        }
+    }
+}
+
+fn normalize_gpu_device_request(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("all") {
+        return "all".to_string();
+    }
+
+    trimmed
+        .strip_prefix("device=")
+        .unwrap_or(trimmed)
+        .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_gpu_device_request;
+
+    #[test]
+    fn gpu_device_request_normalizes_docker_device_syntax() {
+        assert_eq!(normalize_gpu_device_request("all"), "all");
+        assert_eq!(normalize_gpu_device_request(" device=0,1 "), "0,1");
+        assert_eq!(normalize_gpu_device_request("0"), "0");
+    }
 }

@@ -183,6 +183,7 @@ mod tests {
                 working_dir: None,
                 user: None,
                 hostname: None,
+                network_mode: "bridge".to_string(),
                 ports: vec![],
                 volumes: vec![],
                 capabilities: vec![],
@@ -207,7 +208,7 @@ mod tests {
     #[test]
     fn save_load_resolve_round_trip() {
         let _guard = env_guard();
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = scratch_tempdir();
         unsafe {
             std::env::set_var("BOLT_STORAGE_ROOT", tmp.path());
         }
@@ -231,6 +232,11 @@ mod tests {
         unsafe {
             std::env::remove_var("BOLT_STORAGE_ROOT");
         }
+    }
+
+    fn scratch_tempdir() -> tempfile::TempDir {
+        std::fs::create_dir_all(".scratch").expect("create repo-local scratch directory");
+        tempfile::tempdir_in(".scratch").expect("create repo-local scratch tempdir")
     }
 
     #[test]

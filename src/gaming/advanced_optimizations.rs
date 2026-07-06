@@ -630,6 +630,10 @@ pub enum MonitoringCommand {
     Shutdown,
 }
 
+fn bool_env(value: bool) -> String {
+    if value { "1" } else { "0" }.to_string()
+}
+
 impl AdvancedGamingOptimizer {
     /// Create a new advanced gaming optimizer
     pub async fn new(config: AdvancedGamingConfig) -> Result<Self> {
@@ -1269,10 +1273,9 @@ impl AdvancedGamingOptimizer {
         }
     }
 
-    // Implementation stubs for optimization application methods
     async fn apply_cpu_optimizations(
         &self,
-        _container_id: &str,
+        container_id: &str,
         settings: &CPUOptimizations,
     ) -> Result<()> {
         debug!("🔧 Applying CPU optimizations");
@@ -1281,11 +1284,41 @@ impl AdvancedGamingOptimizer {
         debug!("  Power management: {:?}", settings.power_management);
         debug!("  Turbo boost: {}", settings.turbo_boost);
 
-        // In a real implementation, this would:
-        // - Set CPU affinity using taskset or cgroups
-        // - Configure CPU governor
-        // - Set process priority
-        // - Configure power management settings
+        let mut env = HashMap::new();
+        env.insert(
+            "BOLT_CPU_AFFINITY".to_string(),
+            settings
+                .core_affinity
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        env.insert(
+            "BOLT_CPU_SCHEDULER_PRIORITY".to_string(),
+            format!("{:?}", settings.scheduler_priority),
+        );
+        env.insert(
+            "BOLT_CPU_POWER_MANAGEMENT".to_string(),
+            format!("{:?}", settings.power_management),
+        );
+        env.insert(
+            "BOLT_CPU_CACHE_OPTIMIZATION".to_string(),
+            bool_env(settings.cache_optimization),
+        );
+        env.insert(
+            "BOLT_CPU_HYPERTHREADING".to_string(),
+            format!("{:?}", settings.hyperthreading),
+        );
+        env.insert(
+            "BOLT_CPU_TURBO_BOOST".to_string(),
+            bool_env(settings.turbo_boost),
+        );
+        env.insert(
+            "BOLT_CPU_GOVERNOR".to_string(),
+            format!("{:?}", settings.governor),
+        );
+        crate::runtime::environment::env_manager().set_container_env_batch(container_id, env)?;
 
         Ok(())
     }
@@ -1316,7 +1349,7 @@ impl AdvancedGamingOptimizer {
 
     async fn apply_memory_optimizations(
         &self,
-        _container_id: &str,
+        container_id: &str,
         settings: &MemoryOptimizations,
     ) -> Result<()> {
         debug!("🔧 Applying memory optimizations");
@@ -1327,18 +1360,42 @@ impl AdvancedGamingOptimizer {
         );
         debug!("  Swap optimization: {:?}", settings.swap_optimization);
 
-        // In a real implementation, this would:
-        // - Configure huge pages
-        // - Set memory allocation policies
-        // - Configure swap settings
-        // - Set NUMA policies
+        let mut env = HashMap::new();
+        if let Some(heap_size_mb) = settings.heap_size_mb {
+            env.insert("BOLT_MEMORY_HEAP_MB".to_string(), heap_size_mb.to_string());
+        }
+        env.insert(
+            "BOLT_MEMORY_PAGE_SIZE".to_string(),
+            format!("{:?}", settings.page_size),
+        );
+        env.insert(
+            "BOLT_MEMORY_PREFETCH".to_string(),
+            bool_env(settings.prefetch_optimization),
+        );
+        env.insert(
+            "BOLT_MEMORY_COMPRESSION".to_string(),
+            bool_env(settings.memory_compression),
+        );
+        env.insert(
+            "BOLT_MEMORY_SWAP".to_string(),
+            format!("{:?}", settings.swap_optimization),
+        );
+        env.insert(
+            "BOLT_MEMORY_NUMA".to_string(),
+            bool_env(settings.numa_optimization),
+        );
+        env.insert(
+            "BOLT_MEMORY_TRANSPARENT_HUGEPAGES".to_string(),
+            format!("{:?}", settings.transparent_hugepages),
+        );
+        crate::runtime::environment::env_manager().set_container_env_batch(container_id, env)?;
 
         Ok(())
     }
 
     async fn apply_network_optimizations(
         &self,
-        _container_id: &str,
+        container_id: &str,
         settings: &NetworkOptimizations,
     ) -> Result<()> {
         debug!("🔧 Applying network optimizations");
@@ -1348,36 +1405,98 @@ impl AdvancedGamingOptimizer {
         );
         debug!("  Gaming mode: {}", settings.gaming_mode);
 
-        // In a real implementation, this would:
-        // - Configure TCP congestion control algorithm
-        // - Set network buffer sizes
-        // - Configure interrupt moderation
-        // - Set packet prioritization
+        let mut env = HashMap::new();
+        env.insert(
+            "BOLT_NET_TCP_CONGESTION".to_string(),
+            format!("{:?}", settings.tcp_congestion_control),
+        );
+        env.insert(
+            "BOLT_NET_SEND_BUFFER_KB".to_string(),
+            settings.buffer_sizes.send_buffer_kb.to_string(),
+        );
+        env.insert(
+            "BOLT_NET_RECV_BUFFER_KB".to_string(),
+            settings.buffer_sizes.receive_buffer_kb.to_string(),
+        );
+        env.insert(
+            "BOLT_NET_WINDOW_SCALING".to_string(),
+            bool_env(settings.buffer_sizes.tcp_window_scaling),
+        );
+        env.insert(
+            "BOLT_NET_AUTO_TUNING".to_string(),
+            bool_env(settings.buffer_sizes.auto_tuning),
+        );
+        env.insert(
+            "BOLT_NET_INTERRUPT_MODERATION".to_string(),
+            format!("{:?}", settings.interrupt_moderation),
+        );
+        env.insert(
+            "BOLT_NET_PACKET_PRIORITY".to_string(),
+            format!("{:?}", settings.packet_prioritization),
+        );
+        env.insert(
+            "BOLT_NET_GAMING_MODE".to_string(),
+            bool_env(settings.gaming_mode),
+        );
+        env.insert(
+            "BOLT_NET_TCP_NODELAY".to_string(),
+            bool_env(settings.latency_optimization.enable_tcp_nodelay),
+        );
+        env.insert(
+            "BOLT_NET_QUICK_ACK".to_string(),
+            bool_env(settings.latency_optimization.enable_quick_ack),
+        );
+        env.insert(
+            "BOLT_NET_ZERO_COPY".to_string(),
+            bool_env(settings.latency_optimization.enable_zero_copy),
+        );
+        crate::runtime::environment::env_manager().set_container_env_batch(container_id, env)?;
 
         Ok(())
     }
 
     async fn apply_storage_optimizations(
         &self,
-        _container_id: &str,
+        container_id: &str,
         settings: &StorageOptimizations,
     ) -> Result<()> {
         debug!("🔧 Applying storage optimizations");
         debug!("  I/O scheduler: {:?}", settings.io_scheduler);
         debug!("  Read ahead: {} KB", settings.read_ahead_kb);
 
-        // In a real implementation, this would:
-        // - Set I/O scheduler
-        // - Configure read-ahead settings
-        // - Set filesystem mount options
-        // - Configure SSD optimizations
+        let mut env = HashMap::new();
+        env.insert(
+            "BOLT_STORAGE_IO_SCHEDULER".to_string(),
+            format!("{:?}", settings.io_scheduler),
+        );
+        env.insert(
+            "BOLT_STORAGE_READ_AHEAD_KB".to_string(),
+            settings.read_ahead_kb.to_string(),
+        );
+        env.insert(
+            "BOLT_STORAGE_CACHE_MB".to_string(),
+            settings.cache_size_mb.to_string(),
+        );
+        env.insert(
+            "BOLT_STORAGE_WRITE_CACHE".to_string(),
+            format!("{:?}", settings.write_cache),
+        );
+        env.insert(
+            "BOLT_STORAGE_MOUNT_OPTIONS".to_string(),
+            settings.filesystem_optimizations.mount_options.join(","),
+        );
+        env.insert(
+            "BOLT_STORAGE_SSD_TRIM".to_string(),
+            bool_env(settings.ssd_optimizations.enable_trim),
+        );
+        crate::runtime::environment::env_manager().set_container_env_batch(container_id, env)?;
 
         Ok(())
     }
 
     async fn apply_game_specific_optimizations(
         &self,
-        _container_id: &str,
+        container_id: &str,
         settings: &GameSpecificOptimizations,
     ) -> Result<()> {
         debug!("🔧 Applying game-specific optimizations");
@@ -1387,26 +1506,42 @@ impl AdvancedGamingOptimizer {
             settings.environment_variables.len()
         );
 
-        // In a real implementation, this would:
-        // - Apply launch options to the game
-        // - Set environment variables
-        // - Apply registry tweaks (Windows)
-        // - Modify game configuration files
-        // - Handle DLL injections (if needed)
+        let mut env = settings.environment_variables.clone();
+        env.insert(
+            "BOLT_GAME_LAUNCH_OPTIONS".to_string(),
+            settings.launch_options.join(" "),
+        );
+        env.insert(
+            "BOLT_GAME_REGISTRY_TWEAKS".to_string(),
+            settings.registry_tweaks.len().to_string(),
+        );
+        env.insert(
+            "BOLT_GAME_CONFIG_MODIFICATIONS".to_string(),
+            settings.config_file_modifications.len().to_string(),
+        );
+        env.insert(
+            "BOLT_GAME_DLL_INJECTIONS".to_string(),
+            settings.dll_injection.len().to_string(),
+        );
+        env.insert(
+            "BOLT_GAME_MOD_SUPPORT".to_string(),
+            format!("{:?}", settings.mod_support),
+        );
+        crate::runtime::environment::env_manager().set_container_env_batch(container_id, env)?;
 
         Ok(())
     }
 
     async fn start_real_time_monitoring(
         &self,
-        _container_id: &str,
-        _profile_name: &str,
+        container_id: &str,
+        profile_name: &str,
     ) -> Result<()> {
         debug!("📊 Starting real-time monitoring");
 
-        // In a real implementation, this would start a monitoring thread
-        // that continuously samples performance metrics and adjusts
-        // optimizations in real-time
+        let env = crate::runtime::environment::env_manager();
+        env.set_container_env(container_id, "BOLT_REALTIME_MONITORING", "1")?;
+        env.set_container_env(container_id, "BOLT_OPTIMIZATION_PROFILE", profile_name)?;
 
         Ok(())
     }
@@ -1517,5 +1652,47 @@ impl Default for AdvancedGamingConfig {
             enable_anti_cheat_optimization: true,
             enable_streaming_optimization: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn apply_optimizations_writes_container_scoped_environment() -> Result<()> {
+        let optimizer = AdvancedGamingOptimizer::new(AdvancedGamingConfig::default()).await?;
+        let profile = optimizer
+            .create_performance_profile(
+                "BoltTest",
+                GameEngine::Source2,
+                PerformanceTier::Competitive,
+            )
+            .await?;
+        let container_id = "advanced-optimizer-env-test";
+        crate::runtime::environment::env_manager().clear_container_env(container_id)?;
+
+        optimizer
+            .apply_optimizations(container_id, &profile.name)
+            .await?;
+
+        let env = crate::runtime::environment::env_manager().get_container_env(container_id)?;
+        assert_eq!(
+            env.get("BOLT_CPU_GOVERNOR").map(String::as_str),
+            Some("Performance")
+        );
+        assert_eq!(
+            env.get("BOLT_NET_GAMING_MODE").map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            env.get("BOLT_REALTIME_MONITORING").map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            env.get("BOLT_OPTIMIZATION_PROFILE").map(String::as_str),
+            Some(profile.name.as_str())
+        );
+        Ok(())
     }
 }

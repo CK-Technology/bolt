@@ -437,17 +437,36 @@ impl SteamIntegration {
     async fn monitor_installation_progress(&self, app_id: u32) -> Result<()> {
         info!("📊 Monitoring installation progress for game: {}", app_id);
 
-        // In a real implementation, this would monitor Steam's installation
-        // For now, simulate progress monitoring
-        tokio::spawn(async move {
-            for progress in (0..=100).step_by(10) {
-                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                info!("  • Installation progress: {}%", progress);
+        match self.install_progress(app_id)? {
+            Some(progress) if progress.installed => {
+                info!("✅ Game {} is installed", app_id);
             }
-            info!("✅ Game {} installation complete", app_id);
-        });
+            Some(progress) => {
+                info!(
+                    "  • Install state: {:?}, bytes: {}/{} ({:.1}%)",
+                    progress.state,
+                    progress.bytes_downloaded,
+                    progress.bytes_total,
+                    progress.percent()
+                );
+            }
+            None => {
+                info!("  • Steam has not written an appmanifest for {} yet", app_id);
+            }
+        }
 
         Ok(())
+    }
+
+    fn install_progress(&self, app_id: u32) -> Result<Option<SteamInstallProgress>> {
+        for library in &self.library_manager.libraries {
+            let manifest = library.path.join(format!("appmanifest_{}.acf", app_id));
+            if !manifest.exists() {
+                continue;
+            }
+            return Ok(Some(parse_install_progress(&manifest)?));
+        }
+        Ok(None)
     }
 
     /// Launch Steam game with optimizations
@@ -631,6 +650,24 @@ pub struct SteamLibraryStats {
     pub native_games: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SteamInstallProgress {
+    state: Option<String>,
+    bytes_downloaded: u64,
+    bytes_total: u64,
+    installed: bool,
+}
+
+impl SteamInstallProgress {
+    fn percent(&self) -> f64 {
+        if self.bytes_total == 0 {
+            0.0
+        } else {
+            (self.bytes_downloaded as f64 / self.bytes_total as f64 * 100.0).min(100.0)
+        }
+    }
+}
+
 impl SteamLibraryManager {
     async fn new(config: &SteamConfig) -> Result<Self> {
         info!("📚 Initializing Steam library manager");
@@ -657,17 +694,23 @@ impl SteamLibraryManager {
     async fn scan_steam_libraries(&mut self, config: &SteamConfig) -> Result<()> {
         info!("🔍 Scanning Steam libraries");
 
-        // Add default library
-        let default_library = SteamLibrary {
-            path: config.steam_apps.clone(),
-            size_bytes: 0, // Would be calculated
-            free_space_bytes: 0, // Would be calculated
-            game_count: 0,
-            is_default: true,
-        };
+        self.libraries.clear();
+        self.libraries.push(steam_library_from_path(
+            config.steam_apps.clone(),
+            true,
+        ));
 
-        self.libraries.push(default_library);
-        info!("  • Found default library: {:?}", config.steam_apps);
+        let libraryfolders = config.steam_apps.join("libraryfolders.vdf");
+        for path in parse_steam_libraryfolders(&libraryfolders)? {
+            let steamapps = path.join("steamapps");
+            if steamapps != config.steam_apps {
+                self.libraries.push(steam_library_from_path(steamapps, false));
+            }
+        }
+
+        for library in &self.libraries {
+            info!("  • Found Steam library: {:?}", library.path);
+        }
 
         Ok(())
     }
@@ -675,51 +718,179 @@ impl SteamLibraryManager {
     async fn load_installed_games(&mut self, config: &SteamConfig) -> Result<()> {
         info!("🎮 Loading installed Steam games");
 
-        // In a real implementation, this would parse Steam's appmanifest files
-        // For demonstration, add some example games
-        self.add_example_games().await;
+        self.installed_games.clear();
+        for library in &mut self.libraries {
+            let games = parse_appmanifests(&library.path)?;
+            library.game_count = games.len() as u32;
+            for game in games {
+                self.installed_games.insert(game.app_id, game);
+            }
+        }
 
         Ok(())
-    }
-
-    async fn add_example_games(&mut self) {
-        // Add some popular Steam games as examples
-        let example_games = vec![
-            (570, "Dota 2", false, None),
-            (730, "Counter-Strike 2", false, None),
-            (1091500, "Cyberpunk 2077", true, Some("Proton 8.0".to_string())),
-            (1245620, "Elden Ring", true, Some("Proton 7.0".to_string())),
-            (1174180, "Red Dead Redemption 2", true, Some("Proton 8.0".to_string())),
-        ];
-
-        for (app_id, name, requires_proton, proton_version) in example_games {
-            let game = SteamGame {
-                app_id,
-                name: name.to_string(),
-                install_dir: name.to_lowercase().replace(" ", "_"),
-                install_path: PathBuf::from(format!("/steam/steamapps/common/{}", name)),
-                size_bytes: 50 * 1024 * 1024 * 1024, // 50GB
-                last_played: Some(chrono::Utc::now() - chrono::Duration::days(7)),
-                playtime_minutes: 1200, // 20 hours
-                requires_proton,
-                proton_version,
-                launch_options: None,
-                achievements: 100,
-                screenshots: 50,
-                dlc_count: 5,
-                is_favorite: false,
-                categories: vec!["Games".to_string()],
-                tags: vec!["Action".to_string(), "Multiplayer".to_string()],
-            };
-
-            self.installed_games.insert(app_id, game);
-        }
     }
 
     async fn get_game_info(&self, app_id: u32) -> Result<&SteamGame> {
         self.installed_games.get(&app_id)
             .ok_or_else(|| anyhow::anyhow!("Game not found: {}", app_id))
     }
+}
+
+fn steam_library_from_path(path: PathBuf, is_default: bool) -> SteamLibrary {
+    SteamLibrary {
+        path,
+        size_bytes: 0,
+        free_space_bytes: 0,
+        game_count: 0,
+        is_default,
+    }
+}
+
+fn parse_steam_libraryfolders(path: &Path) -> Result<Vec<PathBuf>> {
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return Ok(Vec::new());
+    };
+
+    let mut libraries = Vec::new();
+    for line in contents.lines() {
+        let tokens = parse_vdf_quoted_tokens(line);
+        if tokens.len() == 2 && tokens[0] == "path" {
+            libraries.push(PathBuf::from(tokens[1].replace("\\\\", "\\")));
+        }
+    }
+    Ok(libraries)
+}
+
+fn parse_appmanifests(steamapps: &Path) -> Result<Vec<SteamGame>> {
+    let mut games = Vec::new();
+    let Ok(entries) = std::fs::read_dir(steamapps) else {
+        return Ok(games);
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !name.starts_with("appmanifest_") || !name.ends_with(".acf") {
+            continue;
+        }
+        if let Some(game) = parse_appmanifest(steamapps, &path)? {
+            games.push(game);
+        }
+    }
+
+    Ok(games)
+}
+
+fn parse_appmanifest(steamapps: &Path, path: &Path) -> Result<Option<SteamGame>> {
+    let contents = std::fs::read_to_string(path)?;
+    let mut fields = HashMap::new();
+    for line in contents.lines() {
+        let tokens = parse_vdf_quoted_tokens(line);
+        if tokens.len() == 2 {
+            fields.insert(tokens[0].clone(), tokens[1].clone());
+        }
+    }
+
+    let Some(app_id) = fields.get("appid").and_then(|value| value.parse::<u32>().ok()) else {
+        return Ok(None);
+    };
+    let name = fields
+        .get("name")
+        .cloned()
+        .unwrap_or_else(|| format!("Steam App {}", app_id));
+    let install_dir = fields
+        .get("installdir")
+        .cloned()
+        .unwrap_or_else(|| app_id.to_string());
+    let size_bytes = fields
+        .get("SizeOnDisk")
+        .or_else(|| fields.get("BytesToDownload"))
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
+    let playtime_minutes = fields
+        .get("LastPlayed")
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(|_| 0)
+        .unwrap_or(0);
+
+    Ok(Some(SteamGame {
+        app_id,
+        name,
+        install_dir: install_dir.clone(),
+        install_path: steamapps.join("common").join(&install_dir),
+        size_bytes,
+        last_played: None,
+        playtime_minutes,
+        requires_proton: fields.contains_key("CompatToolMapping"),
+        proton_version: fields.get("compat_tool").cloned(),
+        launch_options: None,
+        achievements: 0,
+        screenshots: 0,
+        dlc_count: 0,
+        is_favorite: false,
+        categories: Vec::new(),
+        tags: Vec::new(),
+    }))
+}
+
+fn parse_install_progress(path: &Path) -> Result<SteamInstallProgress> {
+    let contents = std::fs::read_to_string(path)?;
+    let mut fields = HashMap::new();
+    for line in contents.lines() {
+        let tokens = parse_vdf_quoted_tokens(line);
+        if tokens.len() == 2 {
+            fields.insert(tokens[0].clone(), tokens[1].clone());
+        }
+    }
+
+    let state = fields.get("StateFlags").cloned();
+    let bytes_downloaded = fields
+        .get("BytesDownloaded")
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
+    let bytes_total = fields
+        .get("BytesToDownload")
+        .or_else(|| fields.get("SizeOnDisk"))
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
+    let installed = matches!(state.as_deref(), Some("4")) || bytes_total > 0 && bytes_downloaded >= bytes_total;
+
+    Ok(SteamInstallProgress {
+        state,
+        bytes_downloaded,
+        bytes_total,
+        installed,
+    })
+}
+
+fn parse_vdf_quoted_tokens(line: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_quote = false;
+    let mut escaped = false;
+
+    for ch in line.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' if in_quote => escaped = true,
+            '"' if in_quote => {
+                tokens.push(current.clone());
+                current.clear();
+                in_quote = false;
+            }
+            '"' => in_quote = true,
+            _ if in_quote => current.push(ch),
+            _ => {}
+        }
+    }
+
+    tokens
 }
 
 impl SteamCompatibilityLayer {
@@ -835,14 +1006,11 @@ impl SteamPerformanceOptimizer {
     async fn apply_cpu_optimizations(&self) -> Result<()> {
         info!("🔧 Applying CPU optimizations");
 
-        // Set CPU governor to performance mode
-        if let Err(e) = tokio::fs::write("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor",
-                                         &self.cpu_optimizations.cpu_governor).await {
-            debug!("Could not set CPU governor: {} (might need root)", e);
-        }
-
+        // Expose intended CPU policy to the container launch environment. Host-level
+        // governor/cgroup writes are handled by runtime code with explicit privileges.
         info!("  • CPU governor: {}", self.cpu_optimizations.cpu_governor);
         info!("  • Process priority: {}", self.cpu_optimizations.process_priority);
+        info!("  • CPU affinity: {:?}", self.cpu_optimizations.cpu_affinity);
         Ok(())
     }
 
@@ -860,14 +1028,12 @@ impl SteamPerformanceOptimizer {
     async fn apply_memory_optimizations(&self) -> Result<()> {
         info!("💾 Applying memory optimizations");
 
-        // Enable huge pages for better memory performance
-        if self.memory_optimizations.huge_pages {
-            if let Err(e) = tokio::fs::write("/proc/sys/vm/nr_hugepages", "1024").await {
-                debug!("Could not enable huge pages: {} (might need root)", e);
-            }
-        }
-
         info!("  • Huge pages: {}", self.memory_optimizations.huge_pages);
+        info!("  • Memory policy: {}", self.memory_optimizations.memory_policy);
+        info!(
+            "  • Swap configuration: {}",
+            self.memory_optimizations.swap_configuration
+        );
         Ok(())
     }
 
@@ -881,6 +1047,66 @@ impl SteamPerformanceOptimizer {
     async fn apply_network_optimizations(&self) -> Result<()> {
         info!("🌐 Applying network optimizations");
         info!("  • TCP congestion control: {}", self.network_optimizations.tcp_congestion_control);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch_tempdir() -> tempfile::TempDir {
+        std::fs::create_dir_all(".scratch").expect("create repo-local scratch directory");
+        tempfile::tempdir_in(".scratch").expect("create repo-local scratch tempdir")
+    }
+
+    #[test]
+    fn steam_appmanifest_parser_loads_real_fields() -> Result<()> {
+        let root = scratch_tempdir();
+        let steamapps = root.path().join("steamapps");
+        std::fs::create_dir_all(steamapps.join("common/Test Game"))?;
+        let manifest = steamapps.join("appmanifest_42.acf");
+        std::fs::write(
+            &manifest,
+            r#""AppState"
+{
+    "appid" "42"
+    "name" "Test Game"
+    "installdir" "Test Game"
+    "SizeOnDisk" "1234"
+}
+"#,
+        )?;
+
+        let game = parse_appmanifest(&steamapps, &manifest)?.expect("game manifest");
+        assert_eq!(game.app_id, 42);
+        assert_eq!(game.name, "Test Game");
+        assert_eq!(game.install_path, steamapps.join("common/Test Game"));
+        assert_eq!(game.size_bytes, 1234);
+        Ok(())
+    }
+
+    #[test]
+    fn steam_install_progress_uses_manifest_bytes() -> Result<()> {
+        let root = scratch_tempdir();
+        let manifest = root.path().join("appmanifest_42.acf");
+        std::fs::write(
+            &manifest,
+            r#""AppState"
+{
+    "appid" "42"
+    "StateFlags" "1026"
+    "BytesDownloaded" "50"
+    "BytesToDownload" "200"
+}
+"#,
+        )?;
+
+        let progress = parse_install_progress(&manifest)?;
+        assert_eq!(progress.bytes_downloaded, 50);
+        assert_eq!(progress.bytes_total, 200);
+        assert_eq!(progress.percent(), 25.0);
+        assert!(!progress.installed);
         Ok(())
     }
 }

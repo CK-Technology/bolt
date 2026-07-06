@@ -61,6 +61,22 @@ driver = "bolt"
 ## Commands
 
 ```bash
+# Preview changes like Terraform
+bolt plan
+
+# Converge Boltfile state like Terraform apply; writes Boltfile.lock
+bolt apply -d
+
+# Require the lockfile to match
+bolt apply --locked -d
+
+# Detect drift between Boltfile and runtime state
+bolt drift
+
+# Destroy in reverse dependency order after reviewing the plan
+bolt destroy
+bolt destroy --force
+
 # Start all services
 bolt surge up
 
@@ -77,6 +93,25 @@ bolt surge status
 bolt surge logs
 bolt surge logs api --follow
 ```
+
+`bolt apply` is the project-control command. It prepares declared volumes and
+networks, writes the service-discovery registry, orders services by
+`depends_on`, then uses Surge as the executor. `bolt surge up` remains the
+direct Compose-like entrypoint.
+
+## Lockfile and Discovery
+
+`Boltfile.lock` records the Boltfile hash, service config hashes, image digests
+when available, build context hashes, and network/volume config hashes.
+
+Bolt also writes a service-discovery registry under the Bolt data directory with
+entries like:
+
+```text
+web.my-app.bolt -> my-app_web
+```
+
+That registry is the local foundation for Bolt DNS and QUIC service discovery.
 
 ## Service Configuration
 

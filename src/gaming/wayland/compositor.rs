@@ -174,10 +174,7 @@ impl PerformanceMonitor {
     }
 
     pub async fn update_system_metrics(&mut self) -> Result<()> {
-        // Update GPU utilization (would integrate with actual GPU monitoring)
         self.gpu_utilization = self.get_gpu_utilization().await?;
-
-        // Update memory usage
         self.memory_usage = self.get_memory_usage().await?;
 
         self.last_update = Instant::now();
@@ -185,16 +182,57 @@ impl PerformanceMonitor {
     }
 
     async fn get_gpu_utilization(&self) -> Result<f64> {
-        // This would integrate with NVIDIA-ML or similar for real GPU metrics
-        // For now, return a simulated value
-        Ok(75.0)
+        read_nvidia_smi_utilization().await
     }
 
     async fn get_memory_usage(&self) -> Result<u64> {
-        // This would get actual memory usage from the system
-        // For now, return a simulated value in MB
-        Ok(1024)
+        read_process_rss_mb("/proc/self/status").await
     }
+}
+
+async fn read_nvidia_smi_utilization() -> Result<f64> {
+    let output = tokio::process::Command::new("nvidia-smi")
+        .args([
+            "--query-gpu=utilization.gpu",
+            "--format=csv,noheader,nounits",
+        ])
+        .output()
+        .await;
+
+    let Ok(output) = output else {
+        return Ok(0.0);
+    };
+    if !output.status.success() {
+        return Ok(0.0);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout
+        .lines()
+        .find_map(|line| line.trim().parse::<f64>().ok())
+        .unwrap_or(0.0)
+        .clamp(0.0, 100.0))
+}
+
+async fn read_process_rss_mb(path: &str) -> Result<u64> {
+    let Ok(status) = tokio::fs::read_to_string(path).await else {
+        return Ok(0);
+    };
+    Ok(parse_status_rss_mb(&status).unwrap_or(0))
+}
+
+fn parse_status_rss_mb(status: &str) -> Option<u64> {
+    for line in status.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix("VmRSS:") else {
+            continue;
+        };
+        let kb = rest
+            .split_whitespace()
+            .find_map(|part| part.parse::<u64>().ok())?;
+        return Some(kb.div_ceil(1024));
+    }
+    None
 }
 
 impl BoltCompositor {
@@ -268,13 +306,11 @@ impl BoltCompositor {
     async fn start_event_loop(&mut self) -> Result<()> {
         debug!("🔄 Starting compositor event loop");
 
-        // In a real implementation, this would start the main Wayland event loop
-        // For now, we'll simulate it
+        // Keep a lightweight compositor tick alive until the real Wayland backend
+        // takes over event source dispatch.
         tokio::spawn(async move {
-            // Compositor event loop would run here
             loop {
                 tokio::time::sleep(Duration::from_millis(1)).await;
-                // Process Wayland events, compose frames, etc.
             }
         });
 
@@ -423,5 +459,16 @@ impl BoltCompositor {
 
         info!("✅ Bolt compositor stopped");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_rss_parser_returns_megabytes() {
+        let status = "Name:\tbolt\nVmRSS:\t   1536 kB\nThreads:\t1\n";
+        assert_eq!(parse_status_rss_mb(status), Some(2));
     }
 }

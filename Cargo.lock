@@ -812,6 +812,7 @@ dependencies = [
  "walkdir",
  "warp",
  "wayland-client",
+ "xattr",
  "zstd",
 ]
 

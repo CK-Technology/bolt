@@ -26,7 +26,6 @@ bolt ps [OPTIONS]
 
 Options:
   -a, --all      Show all containers
-  -q, --quiet    Only show IDs
 ```
 
 ### bolt stop / rm / restart
@@ -85,20 +84,48 @@ bolt tools inspect <SERVICE>
 
 ### bolt surge
 ```bash
-bolt surge up [--detach]      # Start services from Boltfile.toml
+bolt surge up [-d|--detach]   # Start services from Boltfile.toml
 bolt surge down               # Stop services
 bolt surge status             # Show service status
 bolt surge logs [--follow]    # View logs
 ```
+
+### Boltfile Control Plane
+```bash
+bolt plan [--json]
+bolt apply [-d|--detach] [--force-recreate] [--locked] [SERVICE...]
+bolt destroy [--force] [--volumes] [SERVICE...]
+bolt lock [--check]
+bolt drift [--json]
+bolt doctor [--json]
+bolt import compose [-i docker-compose.yml] [-o Boltfile.toml]
+bolt import container <ID|NAME> [--service <NAME>]
+bolt import image <REF> [--service <NAME>]
+bolt inspect <service|container|image|volume|network> <NAME|ID> [--json]
+```
+
+`bolt apply` uses Surge as the executor, then writes `Boltfile.lock`.
+`bolt plan`, `bolt drift`, and `bolt doctor` are inspection commands.
+`bolt apply` creates declared volumes and networks before services, honors
+`depends_on` order, and writes `.bolt` service-discovery metadata under the Bolt
+data directory.
 
 ## Snapshots
 
 ```bash
 bolt snapshot create --name <NAME> [--description <DESC>]
 bolt snapshot list [--verbose]
-bolt snapshot rollback <NAME>
-bolt snapshot delete <NAME>
-bolt snapshot cleanup [--dry-run]
+bolt snapshot show <NAME>
+bolt snapshot preflight
+bolt snapshot rollback <NAME> --force
+bolt snapshot delete <NAME> [--dry-run] --force
+bolt snapshot cleanup [--dry-run] --force
+```
+
+## Generations
+
+```bash
+bolt generations list [--verbose]
 ```
 
 ## Networking
@@ -106,16 +133,17 @@ bolt snapshot cleanup [--dry-run]
 ```bash
 bolt network create <NAME> [--driver bolt] [--subnet <CIDR>]
 bolt network ls
+bolt network preflight
 bolt network rm <NAME>
 ```
 
 ## Volumes
 
 ```bash
-bolt volume create <NAME> [--size <SIZE>]
+bolt volume create <NAME> [--size <SIZE>] [--opt mode=0750] [--opt uid=1000] [--opt gid=1000]
 bolt volume ls
 bolt volume rm <NAME>
-bolt volume prune
+bolt volume prune [--dry-run] [--force]
 ```
 
 ## Images
@@ -125,6 +153,7 @@ bolt pull <IMAGE>
 bolt push <IMAGE>
 bolt build [--tag <TAG>] [--file <DOCKERFILE>] <PATH>
 bolt images
+bolt image prune [--dry-run] [--force]
 ```
 
 ## Examples
@@ -147,5 +176,5 @@ bolt tools inspect api
 bolt snapshot create --name "pre-update"
 apt update && apt upgrade -y
 # If something breaks:
-bolt snapshot rollback pre-update
+bolt snapshot rollback pre-update --force
 ```

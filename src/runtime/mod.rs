@@ -257,10 +257,21 @@ pub async fn run_oci_container_delegate_with_options(
 }
 
 pub async fn stop_container_delegate(runtime: &str, id: &str) -> Result<()> {
+    stop_container_delegate_with_timeout(runtime, id, 10).await
+}
+
+pub async fn stop_container_delegate_with_timeout(
+    runtime: &str,
+    id: &str,
+    timeout: u64,
+) -> Result<()> {
     info!("🛑 Stopping container: {}", id);
 
     let mut cmd = AsyncCommand::new(runtime);
-    cmd.arg("stop").arg(id);
+    cmd.arg("stop")
+        .arg("--time")
+        .arg(timeout.to_string())
+        .arg(id);
 
     let output = cmd.output().await?;
 
@@ -299,6 +310,30 @@ pub async fn remove_container_delegate(runtime: &str, id: &str, force: bool) -> 
     }
 
     info!("✅ Container removed: {}", id);
+    Ok(())
+}
+
+pub async fn restart_container_delegate(runtime: &str, id: &str, timeout: u64) -> Result<()> {
+    info!("🔄 Restarting container: {} (timeout: {}s)", id, timeout);
+
+    let mut cmd = AsyncCommand::new(runtime);
+    cmd.arg("restart")
+        .arg("--time")
+        .arg(timeout.to_string())
+        .arg(id);
+
+    let output = cmd.output().await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(BoltError::Runtime(
+            crate::error::RuntimeError::StartFailed {
+                reason: format!("Failed to restart container: {}", stderr),
+            },
+        ));
+    }
+
+    info!("✅ Container restarted: {}", id);
     Ok(())
 }
 
@@ -508,11 +543,10 @@ pub async fn pull_image(image: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn push_image(image: &str) -> Result<()> {
+pub async fn push_image_delegate(runtime: &str, image: &str) -> Result<()> {
     info!("⬆️  Pushing image: {}", image);
 
-    let runtime = detect_container_runtime().await?;
-    let mut cmd = AsyncCommand::new(&runtime);
+    let mut cmd = AsyncCommand::new(runtime);
     cmd.arg("push").arg(image);
 
     let output = cmd.output().await?;

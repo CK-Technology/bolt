@@ -8,7 +8,8 @@ use dirs::data_dir;
 use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fmt;
 use std::fs as stdfs;
@@ -25,12 +26,12 @@ use tracing::{debug, info, warn};
 #[cfg(test)]
 use {
     flate2::{Compression, write::GzEncoder},
-    tar::Builder,
+    tar::{Builder, EntryType, Header},
 };
 
 #[cfg(unix)]
 #[cfg(test)]
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
 // Boltfile TOML Configuration Structures
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -767,6 +768,30 @@ pub struct ImageConfig {
     pub exposed_ports: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageGcCandidate {
+    pub reference: String,
+    pub digest: String,
+    pub bytes: u64,
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RootGcCandidate {
+    pub kind: String,
+    pub id: String,
+    pub bytes: u64,
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ImageGcReport {
+    pub dry_run: bool,
+    pub candidates: Vec<ImageGcCandidate>,
+    pub roots: Vec<RootGcCandidate>,
+    pub reclaimed_bytes: u64,
+}
+
 struct StorageBootstrap {
     root: PathBuf,
     registry_endpoint: String,
@@ -874,6 +899,155 @@ impl StorageManager {
         Ok(image_path.exists())
     }
 
+    pub fn list_cached_images(&self) -> Vec<(String, ImageMetadata)> {
+        let mut images: Vec<_> = self
+            .images
+            .iter()
+            .map(|(reference, metadata)| (reference.clone(), metadata.clone()))
+            .collect();
+        images.sort_by(|a, b| a.0.cmp(&b.0));
+        images
+    }
+
+    pub async fn prune_images(
+        &mut self,
+        protected_references: &HashSet<String>,
+        protected_digests: &HashSet<String>,
+        protected_container_ids: &HashSet<String>,
+        dry_run: bool,
+    ) -> Result<ImageGcReport> {
+        let mut report = ImageGcReport {
+            dry_run,
+            ..ImageGcReport::default()
+        };
+
+        let mut candidates = Vec::new();
+        let mut candidate_paths = HashSet::new();
+        for (reference, metadata) in &self.images {
+            if protected_references.contains(reference) {
+                continue;
+            }
+            if image_metadata_is_protected(metadata, protected_digests) {
+                continue;
+            }
+            let path = self.get_image_path(reference);
+            candidate_paths.insert(path.clone());
+            candidates.push(ImageGcCandidate {
+                reference: reference.clone(),
+                digest: metadata.digest.clone(),
+                bytes: self
+                    .image_disk_usage(reference)
+                    .await
+                    .unwrap_or(metadata.size),
+                path,
+            });
+        }
+
+        let images_dir = self.storage_root.join("images");
+        if images_dir.exists() {
+            let mut entries = fs::read_dir(&images_dir)
+                .await
+                .context("Failed to read images directory for GC")?;
+            while let Some(entry) = entries
+                .next_entry()
+                .await
+                .context("Failed to iterate images directory for GC")?
+            {
+                if !entry.file_type().await?.is_dir() {
+                    continue;
+                }
+                let path = entry.path();
+                if candidate_paths.contains(&path) {
+                    continue;
+                }
+                let metadata_path = path.join("metadata.json");
+                if metadata_path.exists() {
+                    continue;
+                }
+                let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                    continue;
+                };
+                candidates.push(ImageGcCandidate {
+                    reference: format!("stale-image-dir:{name}"),
+                    digest: "unknown".to_string(),
+                    bytes: disk_usage(&path).await.unwrap_or(0),
+                    path,
+                });
+            }
+        }
+
+        let containers_dir = self.storage_root.join("containers");
+        if containers_dir.exists() {
+            let mut entries = fs::read_dir(&containers_dir)
+                .await
+                .context("Failed to read containers directory for GC")?;
+            while let Some(entry) = entries
+                .next_entry()
+                .await
+                .context("Failed to iterate containers directory for GC")?
+            {
+                if !entry.file_type().await?.is_dir() {
+                    continue;
+                }
+                let path = entry.path();
+                let Some(id) = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(ToOwned::to_owned)
+                else {
+                    continue;
+                };
+                if protected_container_ids.contains(&id) {
+                    continue;
+                }
+                report.roots.push(RootGcCandidate {
+                    kind: "stale-container-bundle".to_string(),
+                    id,
+                    bytes: disk_usage(&path).await.unwrap_or(0),
+                    path,
+                });
+            }
+        }
+
+        candidates.sort_by(|a, b| a.reference.cmp(&b.reference));
+        report.roots.sort_by(|a, b| a.id.cmp(&b.id));
+        report.reclaimed_bytes = candidates
+            .iter()
+            .map(|candidate| candidate.bytes)
+            .sum::<u64>()
+            + report
+                .roots
+                .iter()
+                .map(|candidate| candidate.bytes)
+                .sum::<u64>();
+
+        if !dry_run {
+            for candidate in &candidates {
+                if candidate.path.exists() {
+                    fs::remove_dir_all(&candidate.path).await.with_context(|| {
+                        format!("Failed to remove image at {}", candidate.path.display())
+                    })?;
+                }
+                self.images.remove(&candidate.reference);
+            }
+            for candidate in &report.roots {
+                if candidate.path.exists() {
+                    fs::remove_dir_all(&candidate.path).await.with_context(|| {
+                        format!("Failed to remove GC root at {}", candidate.path.display())
+                    })?;
+                }
+            }
+        }
+
+        report.candidates = candidates;
+        Ok(report)
+    }
+
+    async fn image_disk_usage(&self, reference: &str) -> Result<u64> {
+        let path = self.get_image_path(reference);
+        disk_usage(&path).await
+    }
+
     pub async fn pull_image(&mut self, image: &str) -> Result<ImageMetadata> {
         info!("⬇️  Pulling image: {}", image);
 
@@ -910,15 +1084,45 @@ impl StorageManager {
             let destination = layers_dir.join(&filename);
 
             let mut fetched_from_cache = false;
+            if destination.exists() {
+                match Self::verify_blob_digest(&destination, &layer.digest).await {
+                    Ok(()) => {
+                        debug!("Using verified local layer {}", layer.digest);
+                        layer_metadata.push(layer_meta);
+                        continue;
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Discarding invalid local layer {} at {}: {}",
+                            layer.digest,
+                            destination.display(),
+                            err
+                        );
+                        fs::remove_file(&destination).await.ok();
+                    }
+                }
+            }
+
             if let Some(store) = &self.object_store {
                 match store
                     .download_cached_layer(&resolved.repository, &layer.digest, &destination)
                     .await
                 {
-                    Ok(true) => {
-                        debug!("Layer {} fetched from object store cache", layer.digest);
-                        fetched_from_cache = true;
-                    }
+                    Ok(true) => match Self::verify_blob_digest(&destination, &layer.digest).await {
+                        Ok(()) => {
+                            debug!("Layer {} fetched from object store cache", layer.digest);
+                            fetched_from_cache = true;
+                        }
+                        Err(err) => {
+                            warn!(
+                                "Discarding invalid cached layer {} at {}: {}",
+                                layer.digest,
+                                destination.display(),
+                                err
+                            );
+                            fs::remove_file(&destination).await.ok();
+                        }
+                    },
                     Ok(false) => {}
                     Err(err) => {
                         warn!(
@@ -952,6 +1156,7 @@ impl StorageManager {
                 }
             }
 
+            Self::verify_blob_digest(&destination, &layer.digest).await?;
             layer_metadata.push(layer_meta);
         }
 
@@ -964,6 +1169,31 @@ impl StorageManager {
             )
             .await
             .with_context(|| format!("Failed to download config blob for {}", reference))?;
+        if let Err(err) =
+            Self::verify_blob_digest(&config_path, &resolved.manifest.config.digest).await
+        {
+            warn!(
+                "Discarding invalid cached config {} at {}: {}",
+                resolved.manifest.config.digest,
+                config_path.display(),
+                err
+            );
+            fs::remove_file(&config_path).await.ok();
+            self.registry
+                .download_blob_to(
+                    &resolved.repository,
+                    &resolved.manifest.config.digest,
+                    &config_path,
+                )
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to redownload config blob {} for {}",
+                        resolved.manifest.config.digest, reference
+                    )
+                })?;
+            Self::verify_blob_digest(&config_path, &resolved.manifest.config.digest).await?;
+        }
 
         let config_bytes = fs::read(&config_path)
             .await
@@ -1002,6 +1232,100 @@ impl StorageManager {
         Ok(metadata)
     }
 
+    pub async fn push_image(&self, image: &str) -> Result<()> {
+        let (source_reference, metadata, target_repository, target_reference) =
+            self.resolve_push_source(image)?;
+        let image_path = self.get_image_path(&source_reference);
+
+        let manifest_path = image_path.join("manifest.json");
+        let manifest_bytes = fs::read(&manifest_path).await.with_context(|| {
+            format!(
+                "Cannot push {}; missing persisted manifest at {}",
+                source_reference,
+                manifest_path.display()
+            )
+        })?;
+        let manifest: PackageManifest = serde_json::from_slice(&manifest_bytes)
+            .context("Failed to parse persisted manifest")?;
+
+        if let Some(metadata_config_digest) = metadata.config_digest.as_deref()
+            && metadata_config_digest != manifest.config.digest
+        {
+            return Err(anyhow!(
+                "Cannot push {}; metadata config digest {} does not match manifest config digest {}",
+                source_reference,
+                metadata_config_digest,
+                manifest.config.digest
+            )
+            .into());
+        }
+
+        let config_digest = manifest.config.digest.as_str();
+        let config_path = image_path.join("config.json");
+        Self::verify_blob_digest(&config_path, config_digest)
+            .await
+            .with_context(|| {
+                format!(
+                    "Cannot push {}; config digest verification failed",
+                    source_reference
+                )
+            })?;
+
+        info!(
+            "📤 Pushing image {} as {}:{}",
+            source_reference, target_repository, target_reference
+        );
+
+        for layer in &manifest.layers {
+            let layer_metadata = LayerMetadata {
+                digest: layer.digest.clone(),
+                size: layer.size,
+                media_type: layer.media_type.clone(),
+            };
+            let layer_path = image_path
+                .join("layers")
+                .join(Self::layer_filename(&layer_metadata));
+            Self::verify_blob_digest(&layer_path, &layer.digest)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Cannot push {}; layer {} failed digest verification",
+                        source_reference, layer.digest
+                    )
+                })?;
+            self.registry
+                .upload_blob_from_path(&target_repository, &layer.digest, &layer_path)
+                .await
+                .with_context(|| format!("Failed to push layer {}", layer.digest))?;
+        }
+
+        self.registry
+            .upload_blob_from_path(&target_repository, config_digest, &config_path)
+            .await
+            .with_context(|| format!("Failed to push config blob {}", config_digest))?;
+
+        self.registry
+            .upload_manifest_bytes(
+                &target_repository,
+                &target_reference,
+                &manifest_bytes,
+                &manifest.media_type,
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to push manifest for {}:{}",
+                    target_repository, target_reference
+                )
+            })?;
+
+        info!(
+            "✅ Image pushed successfully: {}:{}",
+            target_repository, target_reference
+        );
+        Ok(())
+    }
+
     pub async fn build_image(&mut self, context: &str, tag: &str, build_file: &str) -> Result<()> {
         info!("🔨 Building image: {} from {}", tag, context);
 
@@ -1012,6 +1336,21 @@ impl StorageManager {
             return Err(anyhow!("Build file not found: {}", build_file_path.display()).into());
         }
 
+        Err(anyhow!(
+            "native image build is not implemented yet; use prebuilt OCI images or delegate builds to an external builder"
+        )
+        .into())
+    }
+
+    #[allow(dead_code)]
+    async fn build_image_unimplemented_placeholder(
+        &mut self,
+        context: &str,
+        tag: &str,
+        build_file: &str,
+    ) -> Result<()> {
+        let context_path = Path::new(context);
+        let build_file_path = context_path.join(build_file);
         let image_metadata = if build_file.to_lowercase().contains("boltfile")
             || build_file.ends_with(".toml")
             || build_file == "Boltfile"
@@ -1370,6 +1709,40 @@ impl StorageManager {
         self.storage_root.join("containers").join(container_id)
     }
 
+    fn resolve_push_source(&self, image: &str) -> Result<(String, ImageMetadata, String, String)> {
+        let (target_repository, target_reference) = parse_image_reference(image);
+        let target_cache_reference = format!("{target_repository}:{target_reference}");
+
+        if let Some(metadata) = self.images.get(&target_cache_reference).cloned() {
+            return Ok((
+                target_cache_reference,
+                metadata,
+                target_repository,
+                target_reference,
+            ));
+        }
+
+        if let Some((registry, source_repository)) = target_repository.split_once('/')
+            && is_registry_prefix(registry)
+        {
+            let source_reference = normalize_reference(source_repository);
+            if let Some(metadata) = self.images.get(&source_reference).cloned() {
+                return Ok((
+                    source_reference,
+                    metadata,
+                    target_repository,
+                    target_reference,
+                ));
+            }
+        }
+
+        Err(anyhow!(
+            "No local image metadata for {}; pull or build it before pushing",
+            image
+        )
+        .into())
+    }
+
     pub async fn create_container_rootfs(
         &self,
         container_id: &str,
@@ -1475,6 +1848,8 @@ impl StorageManager {
 
     fn unpack_layer_archive<R: Read>(reader: R, rootfs: &Path) -> Result<()> {
         let mut archive = Archive::new(reader);
+        archive.set_unpack_xattrs(true);
+        archive.set_preserve_ownerships(Self::should_preserve_layer_ownerships());
         for entry in archive.entries().context("Failed to read layer entries")? {
             let mut entry = entry.context("Failed to read layer entry")?;
             let path = entry
@@ -1552,6 +1927,16 @@ impl StorageManager {
         Ok(false)
     }
 
+    #[cfg(all(unix, feature = "oci-runtime"))]
+    fn should_preserve_layer_ownerships() -> bool {
+        nix::unistd::Uid::effective().is_root()
+    }
+
+    #[cfg(not(all(unix, feature = "oci-runtime")))]
+    fn should_preserve_layer_ownerships() -> bool {
+        false
+    }
+
     async fn ensure_minimal_rootfs(&self, rootfs_path: &Path) -> Result<()> {
         for dir in [
             "bin", "etc", "lib", "tmp", "var", "usr", "dev", "proc", "sys",
@@ -1571,6 +1956,51 @@ impl StorageManager {
             name.push_str(".tar");
         }
         name
+    }
+
+    async fn verify_blob_digest(path: &Path, digest: &str) -> Result<()> {
+        let Some((algorithm, expected_hex)) = digest.split_once(':') else {
+            return Err(anyhow!("invalid digest '{}'", digest).into());
+        };
+
+        if !algorithm.eq_ignore_ascii_case("sha256") {
+            return Err(anyhow!("unsupported digest algorithm '{}'", algorithm).into());
+        }
+
+        let mut file = fs::File::open(path).await.with_context(|| {
+            format!(
+                "Failed to open blob for digest verification: {}",
+                path.display()
+            )
+        })?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0_u8; 64 * 1024];
+
+        loop {
+            let read = file.read(&mut buffer).await.with_context(|| {
+                format!(
+                    "Failed to read blob for digest verification: {}",
+                    path.display()
+                )
+            })?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+        }
+
+        let computed = format!("{:x}", hasher.finalize());
+        if computed != expected_hex {
+            return Err(anyhow!(
+                "digest mismatch for {} (expected {}, got sha256:{})",
+                path.display(),
+                digest,
+                computed
+            )
+            .into());
+        }
+
+        Ok(())
     }
 
     fn parse_image_config(config_bytes: &[u8]) -> Result<(ImageConfig, Option<DateTime<Utc>>)> {
@@ -1706,8 +2136,8 @@ impl StorageManager {
 
     #[cfg(test)]
     fn create_mock_layer(layer_dir: &Path, layer: &LayerMetadata) -> Result<u64> {
-        let temp_root =
-            tempfile::tempdir().context("Failed to allocate mock layer temp directory")?;
+        let temp_root = Self::storage_scratch_tempdir()
+            .context("Failed to allocate mock layer temp directory")?;
         let temp_path = temp_root.path();
 
         stdfs::create_dir_all(temp_path.join("etc"))
@@ -1756,6 +2186,14 @@ impl StorageManager {
             .len();
 
         Ok(size)
+    }
+
+    #[cfg(test)]
+    fn storage_scratch_tempdir() -> Result<tempfile::TempDir> {
+        stdfs::create_dir_all(".scratch")
+            .context("Failed to create repo-local scratch directory")?;
+        Ok(tempfile::tempdir_in(".scratch")
+            .context("Failed to create repo-local scratch temp directory")?)
     }
 
     async fn persist_image_metadata(&self, image: &str, metadata: &ImageMetadata) -> Result<()> {
@@ -1866,7 +2304,20 @@ impl StorageManager {
                     .await
                 {
                     Ok(true) => {
-                        restored = true;
+                        match Self::verify_blob_digest(&config_path, &config_digest).await {
+                            Ok(()) => {
+                                restored = true;
+                            }
+                            Err(err) => {
+                                warn!(
+                                    "Discarding invalid cached config {} at {}: {}",
+                                    config_digest,
+                                    config_path.display(),
+                                    err
+                                );
+                                fs::remove_file(&config_path).await.ok();
+                            }
+                        }
                     }
                     Ok(false) => {}
                     Err(err) => {
@@ -1880,7 +2331,7 @@ impl StorageManager {
 
             if !restored {
                 self.registry
-                    .download_config_to(&metadata.name, &config_digest, &config_path)
+                    .download_blob_to(&metadata.name, &config_digest, &config_path)
                     .await
                     .with_context(|| {
                         format!(
@@ -1889,6 +2340,15 @@ impl StorageManager {
                         )
                     })?;
             }
+
+            Self::verify_blob_digest(&config_path, &config_digest)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Hydrated config digest verification failed for {}",
+                        reference
+                    )
+                })?;
         }
 
         if metadata.reference.is_none() {
@@ -1992,25 +2452,116 @@ impl StorageManager {
     }
 }
 
-fn normalize_reference(image: &str) -> String {
-    if image.contains(':') {
-        image.to_string()
-    } else {
-        format!("{}:latest", image)
+fn image_metadata_is_protected(
+    metadata: &ImageMetadata,
+    protected_digests: &HashSet<String>,
+) -> bool {
+    protected_digests.contains(&metadata.digest)
+        || metadata
+            .config_digest
+            .as_ref()
+            .is_some_and(|digest| protected_digests.contains(digest))
+        || metadata
+            .layers
+            .iter()
+            .any(|layer| protected_digests.contains(&layer.digest))
+}
+
+pub(crate) fn normalize_reference(image: &str) -> String {
+    if image.contains('@') {
+        return image.to_string();
     }
+
+    let (repository, reference) = parse_image_reference(image);
+    format!("{repository}:{reference}")
+}
+
+async fn disk_usage(path: &Path) -> Result<u64> {
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || -> Result<u64> {
+        fn walk(path: &Path) -> Result<u64> {
+            if !path.exists() {
+                return Ok(0);
+            }
+            let metadata = stdfs::symlink_metadata(path)?;
+            if metadata.is_file() {
+                return Ok(metadata.len());
+            }
+            if metadata.is_dir() {
+                let mut total = 0;
+                for entry in stdfs::read_dir(path)? {
+                    total += walk(&entry?.path())?;
+                }
+                return Ok(total);
+            }
+            Ok(0)
+        }
+
+        walk(&path)
+    })
+    .await
+    .map_err(|err| anyhow!("Disk usage task failed: {err}"))?
+}
+
+fn parse_image_reference(image: &str) -> (String, String) {
+    let last_slash = image.rfind('/');
+    let last_colon = image.rfind(':');
+    if let Some(colon) = last_colon
+        && last_slash.is_none_or(|slash| colon > slash)
+    {
+        let repository = normalize_repository(&image[..colon]);
+        let reference = image[colon + 1..].to_string();
+        return (repository, reference);
+    }
+
+    (normalize_repository(image), "latest".to_string())
+}
+
+fn normalize_repository(repository: &str) -> String {
+    if let Some((registry, name)) = repository.split_once('/')
+        && is_registry_prefix(registry)
+    {
+        if is_docker_hub_registry(registry) && !name.contains('/') {
+            return format!("{registry}/library/{name}");
+        }
+        return repository.to_string();
+    }
+
+    if !repository.contains('/') {
+        format!("library/{repository}")
+    } else {
+        repository.to_string()
+    }
+}
+
+fn is_registry_prefix(component: &str) -> bool {
+    component == "localhost" || component.contains('.') || component.contains(':')
+}
+
+fn is_docker_hub_registry(registry: &str) -> bool {
+    matches!(
+        registry,
+        "docker.io" | "index.docker.io" | "registry-1.docker.io"
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::drift_integration::{BlobDescriptor, LayerDescriptor, PackageManifest};
+    use crate::registry::drift_integration::{
+        BlobDescriptor, DriftRegistryClient, LayerDescriptor, PackageManifest,
+    };
     use async_trait::async_trait;
     use chrono::Utc;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
-    use tempfile::tempdir;
 
     type DataStore = Arc<Mutex<HashMap<(String, String), Vec<u8>>>>;
+
+    fn scratch_tempdir() -> tempfile::TempDir {
+        stdfs::create_dir_all(".scratch").expect("create repo-local scratch directory");
+        tempfile::tempdir_in(".scratch").expect("create repo-local scratch tempdir")
+    }
 
     #[derive(Clone, Default)]
     struct TestObjectStore {
@@ -2127,7 +2678,7 @@ mod tests {
 
     #[tokio::test]
     async fn load_existing_images_hydrates_metadata_from_object_store() -> crate::Result<()> {
-        let temp_root = tempdir().expect("temp dir");
+        let temp_root = scratch_tempdir();
         let storage_root = temp_root.path().to_path_buf();
         fs::create_dir_all(storage_root.join("images")).await?;
 
@@ -2144,13 +2695,15 @@ mod tests {
         let reference = "library/bolt:latest".to_string();
         let repository = "library/bolt".to_string();
         let tag = "latest".to_string();
+        let config_bytes = br#"{"bolt":"config"}"#.to_vec();
+        let config_digest = format!("sha256:{:x}", Sha256::digest(&config_bytes));
         let manifest = PackageManifest {
             schema_version: 2,
             media_type: "application/vnd.oci.image.manifest.v1+json".to_string(),
             config: BlobDescriptor {
                 media_type: "application/vnd.oci.image.config.v1+json".to_string(),
-                size: 512,
-                digest: "sha256:testconfig".to_string(),
+                size: config_bytes.len() as u64,
+                digest: config_digest,
             },
             layers: vec![LayerDescriptor {
                 media_type: "application/vnd.oci.image.layer.v1.tar+gzip".to_string(),
@@ -2173,7 +2726,6 @@ mod tests {
             .expect("manifest store poisoned")
             .insert((repository.clone(), tag.clone()), manifest_bytes.clone());
 
-        let config_bytes = br#"{"bolt":"config"}"#.to_vec();
         object_store
             .configs
             .lock()
@@ -2245,7 +2797,7 @@ mod tests {
 
     #[test]
     fn layer_unpack_applies_file_and_opaque_whiteouts() -> crate::Result<()> {
-        let temp_root = tempdir().expect("temp dir");
+        let temp_root = scratch_tempdir();
         let rootfs = temp_root.path().join("rootfs");
         stdfs::create_dir_all(rootfs.join("etc/app"))?;
         stdfs::write(rootfs.join("etc/app/old.conf"), b"old")?;
@@ -2253,17 +2805,35 @@ mod tests {
         stdfs::create_dir_all(rootfs.join("var/cache"))?;
         stdfs::write(rootfs.join("var/cache/stale"), b"stale")?;
 
-        let layer_dir = temp_root.path().join("layer");
-        stdfs::create_dir_all(layer_dir.join("etc/app"))?;
-        stdfs::write(layer_dir.join("etc/app/.wh.old.conf"), b"")?;
-        stdfs::create_dir_all(layer_dir.join("var/cache"))?;
-        stdfs::write(layer_dir.join("var/cache/.wh..wh..opq"), b"")?;
-        stdfs::write(layer_dir.join("var/cache/fresh"), b"fresh")?;
-
         let mut layer_bytes = Vec::new();
         {
             let mut builder = Builder::new(&mut layer_bytes);
-            builder.append_dir_all(".", &layer_dir)?;
+
+            let mut remove_old = Header::new_gnu();
+            remove_old.set_entry_type(EntryType::Regular);
+            remove_old.set_path("etc/app/.wh.old.conf")?;
+            remove_old.set_mode(0o644);
+            remove_old.set_size(0);
+            remove_old.set_cksum();
+            builder.append(&remove_old, std::io::empty())?;
+
+            let mut opaque = Header::new_gnu();
+            opaque.set_entry_type(EntryType::Regular);
+            opaque.set_path("var/cache/.wh..wh..opq")?;
+            opaque.set_mode(0o644);
+            opaque.set_size(0);
+            opaque.set_cksum();
+            builder.append(&opaque, std::io::empty())?;
+
+            let fresh = b"fresh";
+            let mut fresh_header = Header::new_gnu();
+            fresh_header.set_entry_type(EntryType::Regular);
+            fresh_header.set_path("var/cache/fresh")?;
+            fresh_header.set_mode(0o644);
+            fresh_header.set_size(fresh.len() as u64);
+            fresh_header.set_cksum();
+            builder.append(&fresh_header, fresh.as_slice())?;
+
             builder.finish()?;
         }
 
@@ -2277,9 +2847,514 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn layer_unpack_preserves_links_and_modes() -> crate::Result<()> {
+        let temp_root = scratch_tempdir();
+        let rootfs = temp_root.path().join("rootfs");
+        stdfs::create_dir_all(&rootfs)?;
+
+        let mut layer_bytes = Vec::new();
+        {
+            let mut builder = Builder::new(&mut layer_bytes);
+
+            let mut opt_header = Header::new_gnu();
+            opt_header.set_entry_type(EntryType::Directory);
+            opt_header.set_path("opt")?;
+            opt_header.set_mode(0o755);
+            opt_header.set_size(0);
+            opt_header.set_cksum();
+            builder.append(&opt_header, std::io::empty())?;
+
+            let mut bin_header = Header::new_gnu();
+            bin_header.set_entry_type(EntryType::Directory);
+            bin_header.set_path("opt/bin")?;
+            bin_header.set_mode(0o750);
+            bin_header.set_size(0);
+            bin_header.set_cksum();
+            builder.append(&bin_header, std::io::empty())?;
+
+            let script = b"#!/bin/sh\nexit 0\n";
+            let mut script_header = Header::new_gnu();
+            script_header.set_entry_type(EntryType::Regular);
+            script_header.set_path("opt/bin/run")?;
+            script_header.set_mode(0o755);
+            script_header.set_size(script.len() as u64);
+            script_header.set_cksum();
+            builder.append(&script_header, script.as_slice())?;
+
+            let mut usr_header = Header::new_gnu();
+            usr_header.set_entry_type(EntryType::Directory);
+            usr_header.set_path("usr/bin")?;
+            usr_header.set_mode(0o755);
+            usr_header.set_size(0);
+            usr_header.set_cksum();
+            builder.append(&usr_header, std::io::empty())?;
+
+            let mut symlink_header = Header::new_gnu();
+            symlink_header.set_entry_type(EntryType::Symlink);
+            symlink_header.set_path("usr/bin/run-link")?;
+            symlink_header.set_link_name("../../opt/bin/run")?;
+            symlink_header.set_mode(0o777);
+            symlink_header.set_size(0);
+            symlink_header.set_cksum();
+            builder.append(&symlink_header, std::io::empty())?;
+
+            let mut hardlink_header = Header::new_gnu();
+            hardlink_header.set_entry_type(EntryType::Link);
+            hardlink_header.set_path("opt/bin/run-hard")?;
+            hardlink_header.set_link_name("opt/bin/run")?;
+            hardlink_header.set_mode(0o755);
+            hardlink_header.set_size(0);
+            hardlink_header.set_cksum();
+            builder.append(&hardlink_header, std::io::empty())?;
+
+            builder.finish()?;
+        }
+
+        StorageManager::unpack_layer_archive(layer_bytes.as_slice(), &rootfs)?;
+
+        let bin_mode = stdfs::metadata(rootfs.join("opt/bin"))?
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(bin_mode, 0o750);
+
+        let run_mode = stdfs::metadata(rootfs.join("opt/bin/run"))?
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(run_mode, 0o755);
+
+        assert_eq!(
+            stdfs::read_link(rootfs.join("usr/bin/run-link"))?,
+            PathBuf::from("../../opt/bin/run")
+        );
+
+        let run_meta = stdfs::metadata(rootfs.join("opt/bin/run"))?;
+        let hard_meta = stdfs::metadata(rootfs.join("opt/bin/run-hard"))?;
+        assert_eq!(run_meta.ino(), hard_meta.ino());
+        assert!(run_meta.nlink() >= 2);
+
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn layer_unpack_preserves_pax_xattrs_when_supported() -> crate::Result<()> {
+        let temp_root = scratch_tempdir();
+        let probe = temp_root.path().join("xattr-probe");
+        stdfs::write(&probe, b"probe")?;
+        if xattr::set(&probe, "user.bolt.probe", b"ok").is_err() {
+            return Ok(());
+        }
+
+        let rootfs = temp_root.path().join("rootfs");
+        stdfs::create_dir_all(&rootfs)?;
+
+        let mut layer_bytes = Vec::new();
+        {
+            let mut builder = Builder::new(&mut layer_bytes);
+
+            let xattr_record = pax_record("SCHILY.xattr.user.bolt.phase", "phase-b");
+            let mut pax_header = Header::new_ustar();
+            pax_header.set_entry_type(EntryType::XHeader);
+            pax_header.set_path("PaxHeaders.0/opt/data")?;
+            pax_header.set_mode(0o644);
+            pax_header.set_size(xattr_record.len() as u64);
+            pax_header.set_cksum();
+            builder.append(&pax_header, xattr_record.as_slice())?;
+
+            let data = b"with-xattr";
+            let mut data_header = Header::new_ustar();
+            data_header.set_entry_type(EntryType::Regular);
+            data_header.set_path("opt/data")?;
+            data_header.set_mode(0o644);
+            data_header.set_size(data.len() as u64);
+            data_header.set_cksum();
+            builder.append(&data_header, data.as_slice())?;
+
+            builder.finish()?;
+        }
+
+        StorageManager::unpack_layer_archive(layer_bytes.as_slice(), &rootfs)?;
+
+        assert_eq!(
+            xattr::get(rootfs.join("opt/data"), "user.bolt.phase")?,
+            Some(b"phase-b".to_vec())
+        );
+
+        Ok(())
+    }
+
+    #[cfg(all(unix, feature = "oci-runtime"))]
+    #[test]
+    fn layer_unpack_preserves_owners_only_when_effective_root() -> crate::Result<()> {
+        let temp_root = scratch_tempdir();
+        let rootfs = temp_root.path().join("rootfs");
+        stdfs::create_dir_all(&rootfs)?;
+
+        let current_uid = nix::unistd::getuid().as_raw();
+        let current_gid = nix::unistd::getgid().as_raw();
+        let preserve_owners = StorageManager::should_preserve_layer_ownerships();
+        let archive_uid = if preserve_owners {
+            123
+        } else {
+            current_uid + 1
+        };
+        let archive_gid = if preserve_owners {
+            124
+        } else {
+            current_gid + 1
+        };
+
+        let mut layer_bytes = Vec::new();
+        {
+            let mut builder = Builder::new(&mut layer_bytes);
+            let data = b"owned";
+            let mut header = Header::new_gnu();
+            header.set_entry_type(EntryType::Regular);
+            header.set_path("owned-file")?;
+            header.set_mode(0o644);
+            header.set_uid(archive_uid.into());
+            header.set_gid(archive_gid.into());
+            header.set_size(data.len() as u64);
+            header.set_cksum();
+            builder.append(&header, data.as_slice())?;
+            builder.finish()?;
+        }
+
+        StorageManager::unpack_layer_archive(layer_bytes.as_slice(), &rootfs)?;
+
+        let metadata = stdfs::metadata(rootfs.join("owned-file"))?;
+        if preserve_owners {
+            assert_eq!(metadata.uid(), archive_uid);
+            assert_eq!(metadata.gid(), archive_gid);
+        } else {
+            assert_eq!(metadata.uid(), current_uid);
+            assert_eq!(metadata.gid(), current_gid);
+        }
+
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    fn pax_record(key: &str, value: &str) -> Vec<u8> {
+        let body = format!("{key}={value}\n");
+        let mut len = body.len() + 3;
+        loop {
+            let record = format!("{len} {body}");
+            if record.len() == len {
+                return record.into_bytes();
+            }
+            len = record.len();
+        }
+    }
+
+    #[tokio::test]
+    async fn verify_blob_digest_accepts_matching_sha256() -> crate::Result<()> {
+        let temp_root = scratch_tempdir();
+        let blob_path = temp_root.path().join("blob");
+        fs::write(&blob_path, b"verified").await?;
+
+        let digest = format!("sha256:{:x}", Sha256::digest(b"verified"));
+        StorageManager::verify_blob_digest(&blob_path, &digest).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn verify_blob_digest_rejects_mismatch() -> crate::Result<()> {
+        let temp_root = scratch_tempdir();
+        let blob_path = temp_root.path().join("blob");
+        fs::write(&blob_path, b"corrupt").await?;
+
+        let digest = format!("sha256:{:x}", Sha256::digest(b"expected"));
+        let err = StorageManager::verify_blob_digest(&blob_path, &digest)
+            .await
+            .expect_err("mismatched digest should fail");
+
+        assert!(err.to_string().contains("digest mismatch"));
+        Ok(())
+    }
+
+    #[test]
+    fn image_reference_parser_handles_local_registry_ports() {
+        assert_eq!(
+            parse_image_reference("localhost:5000/bolt/app"),
+            ("localhost:5000/bolt/app".to_string(), "latest".to_string())
+        );
+        assert_eq!(
+            normalize_reference("localhost:5000/bolt/app"),
+            "localhost:5000/bolt/app:latest"
+        );
+    }
+
+    #[test]
+    fn resolve_push_source_can_target_registry_from_unqualified_local_image() -> crate::Result<()> {
+        let temp_root = scratch_tempdir();
+        let mut manager = StorageManager {
+            storage_root: temp_root.path().to_path_buf(),
+            images: HashMap::new(),
+            registry: DriftRegistryClient::new_test(None),
+            object_store: None,
+        };
+        let metadata = ImageMetadata {
+            name: "library/alpine".to_string(),
+            tag: "latest".to_string(),
+            reference: Some("library/alpine:latest".to_string()),
+            digest: "sha256:metadata".to_string(),
+            size: 0,
+            created: Utc::now(),
+            layers: vec![],
+            config: ImageConfig {
+                env: vec![],
+                cmd: None,
+                entrypoint: None,
+                working_dir: None,
+                user: None,
+                exposed_ports: vec![],
+            },
+            config_digest: Some(format!("sha256:{:x}", Sha256::digest(b"config"))),
+        };
+        manager
+            .images
+            .insert("library/alpine:latest".to_string(), metadata);
+
+        let (source, _, target_repo, target_ref) =
+            manager.resolve_push_source("localhost:5000/alpine:latest")?;
+
+        assert_eq!(source, "library/alpine:latest");
+        assert_eq!(target_repo, "localhost:5000/alpine");
+        assert_eq!(target_ref, "latest");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn push_rejects_metadata_manifest_config_digest_mismatch() -> crate::Result<()> {
+        let temp_root = scratch_tempdir();
+        let mut manager = StorageManager {
+            storage_root: temp_root.path().to_path_buf(),
+            images: HashMap::new(),
+            registry: DriftRegistryClient::new_test(None),
+            object_store: None,
+        };
+
+        let metadata_config_digest = format!("sha256:{:x}", Sha256::digest(b"metadata-config"));
+        let manifest_config_digest = format!("sha256:{:x}", Sha256::digest(b"manifest-config"));
+        let reference = "library/alpine:latest";
+        let metadata = ImageMetadata {
+            name: "library/alpine".to_string(),
+            tag: "latest".to_string(),
+            reference: Some(reference.to_string()),
+            digest: "sha256:metadata".to_string(),
+            size: 0,
+            created: Utc::now(),
+            layers: vec![],
+            config: ImageConfig {
+                env: vec![],
+                cmd: None,
+                entrypoint: None,
+                working_dir: None,
+                user: None,
+                exposed_ports: vec![],
+            },
+            config_digest: Some(metadata_config_digest.clone()),
+        };
+        manager.images.insert(reference.to_string(), metadata);
+
+        let image_path = manager.get_image_path(reference);
+        fs::create_dir_all(&image_path).await?;
+        let manifest = PackageManifest {
+            schema_version: 2,
+            media_type: "application/vnd.oci.image.manifest.v1+json".to_string(),
+            config: BlobDescriptor {
+                media_type: "application/vnd.oci.image.config.v1+json".to_string(),
+                size: 15,
+                digest: manifest_config_digest.clone(),
+            },
+            layers: vec![],
+            annotations: HashMap::new(),
+        };
+        fs::write(
+            image_path.join("manifest.json"),
+            serde_json::to_vec_pretty(&manifest)?,
+        )
+        .await?;
+
+        let err = manager
+            .push_image("alpine:latest")
+            .await
+            .expect_err("mismatched config digest should fail");
+
+        assert!(err.to_string().contains("metadata config digest"));
+        assert!(err.to_string().contains(&metadata_config_digest));
+        assert!(err.to_string().contains(&manifest_config_digest));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn prune_images_respects_protected_references_and_dry_run() -> crate::Result<()> {
+        let temp_root = scratch_tempdir();
+        let mut manager = StorageManager {
+            storage_root: temp_root.path().to_path_buf(),
+            images: HashMap::new(),
+            registry: DriftRegistryClient::new_test(None),
+            object_store: None,
+        };
+
+        let protected = "library/protected:latest".to_string();
+        let unused = "library/unused:latest".to_string();
+        for reference in [&protected, &unused] {
+            let image_path = manager.get_image_path(reference);
+            fs::create_dir_all(&image_path).await?;
+            fs::write(image_path.join("metadata.json"), b"metadata").await?;
+            manager.images.insert(
+                reference.clone(),
+                ImageMetadata {
+                    name: reference.trim_end_matches(":latest").to_string(),
+                    tag: "latest".to_string(),
+                    reference: Some(reference.clone()),
+                    digest: format!("sha256:{:x}", Sha256::digest(reference.as_bytes())),
+                    size: 8,
+                    created: Utc::now(),
+                    layers: vec![],
+                    config: ImageConfig {
+                        env: vec![],
+                        cmd: None,
+                        entrypoint: None,
+                        working_dir: None,
+                        user: None,
+                        exposed_ports: vec![],
+                    },
+                    config_digest: None,
+                },
+            );
+        }
+
+        let protected_refs = HashSet::from([protected.clone()]);
+        let dry_run = manager
+            .prune_images(&protected_refs, &HashSet::new(), &HashSet::new(), true)
+            .await?;
+        assert_eq!(dry_run.candidates.len(), 1);
+        assert_eq!(dry_run.candidates[0].reference, unused);
+        assert!(manager.get_image_path(&unused).exists());
+
+        let removed = manager
+            .prune_images(&protected_refs, &HashSet::new(), &HashSet::new(), false)
+            .await?;
+        assert_eq!(removed.candidates.len(), 1);
+        assert!(manager.get_image_path(&protected).exists());
+        assert!(!manager.get_image_path(&unused).exists());
+        assert!(manager.images.contains_key(&protected));
+        assert!(!manager.images.contains_key(&unused));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn prune_images_removes_stale_image_directories_without_metadata() -> crate::Result<()> {
+        let temp_root = scratch_tempdir();
+        let mut manager = StorageManager {
+            storage_root: temp_root.path().to_path_buf(),
+            images: HashMap::new(),
+            registry: DriftRegistryClient::new_test(None),
+            object_store: None,
+        };
+
+        let stale = temp_root.path().join("images").join("orphaned_bundle");
+        fs::create_dir_all(&stale).await?;
+        fs::write(stale.join("layer.blob"), b"orphaned").await?;
+
+        let dry_run = manager
+            .prune_images(&HashSet::new(), &HashSet::new(), &HashSet::new(), true)
+            .await?;
+        assert_eq!(dry_run.candidates.len(), 1);
+        assert_eq!(
+            dry_run.candidates[0].reference,
+            "stale-image-dir:orphaned_bundle"
+        );
+        assert!(stale.exists());
+
+        let removed = manager
+            .prune_images(&HashSet::new(), &HashSet::new(), &HashSet::new(), false)
+            .await?;
+        assert_eq!(removed.candidates.len(), 1);
+        assert!(!stale.exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn prune_images_reports_stale_container_bundles_but_protects_live_ids()
+    -> crate::Result<()> {
+        let temp_root = scratch_tempdir();
+        let mut manager = StorageManager {
+            storage_root: temp_root.path().to_path_buf(),
+            images: HashMap::new(),
+            registry: DriftRegistryClient::new_test(None),
+            object_store: None,
+        };
+
+        let stale = temp_root.path().join("containers").join("stale-container");
+        let live = temp_root.path().join("containers").join("live-container");
+        fs::create_dir_all(&stale).await?;
+        fs::create_dir_all(&live).await?;
+        fs::write(stale.join("state.json"), b"stale").await?;
+        fs::write(live.join("state.json"), b"live").await?;
+
+        let protected = HashSet::from(["live-container".to_string()]);
+        let dry_run = manager
+            .prune_images(&HashSet::new(), &HashSet::new(), &protected, true)
+            .await?;
+        assert_eq!(dry_run.roots.len(), 1);
+        assert_eq!(dry_run.roots[0].id, "stale-container");
+        assert!(stale.exists());
+        assert!(live.exists());
+
+        let removed = manager
+            .prune_images(&HashSet::new(), &HashSet::new(), &protected, false)
+            .await?;
+        assert_eq!(removed.roots.len(), 1);
+        assert!(!stale.exists());
+        assert!(live.exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn native_build_rejects_placeholder_builds() -> crate::Result<()> {
+        let temp_root = scratch_tempdir();
+        let context = temp_root.path().join("context");
+        let storage = temp_root.path().join("storage");
+        fs::create_dir_all(&context).await?;
+        fs::write(context.join("Dockerfile"), b"FROM scratch\n").await?;
+
+        let mut manager = StorageManager {
+            storage_root: storage,
+            images: HashMap::new(),
+            registry: DriftRegistryClient::new_test(None),
+            object_store: None,
+        };
+
+        let err = manager
+            .build_image(
+                context.to_str().expect("utf8 context path"),
+                "example:latest",
+                "Dockerfile",
+            )
+            .await
+            .expect_err("native build should be explicitly unsupported");
+
+        assert!(
+            err.to_string()
+                .contains("native image build is not implemented")
+        );
+        assert!(manager.images.is_empty());
+        Ok(())
+    }
+
     #[tokio::test]
     async fn missing_layer_file_fails_rootfs_creation() -> crate::Result<()> {
-        let temp_root = tempdir().expect("temp dir");
+        let temp_root = scratch_tempdir();
         let storage_root = temp_root.path().to_path_buf();
         let mut manager = StorageManager {
             storage_root,
@@ -2330,7 +3405,7 @@ mod tests {
 
     #[tokio::test]
     async fn mock_image_fixture_is_test_scoped_and_unpackable() -> crate::Result<()> {
-        let temp_root = tempdir().expect("temp dir");
+        let temp_root = scratch_tempdir();
         let mut manager = StorageManager {
             storage_root: temp_root.path().to_path_buf(),
             images: HashMap::new(),
@@ -2341,7 +3416,7 @@ mod tests {
         let metadata = manager.create_mock_image("fixture:latest").await?;
         manager
             .images
-            .insert("fixture:latest".to_string(), metadata);
+            .insert("library/fixture:latest".to_string(), metadata);
 
         let rootfs = manager
             .create_container_rootfs("bolt-fixture", "fixture:latest")

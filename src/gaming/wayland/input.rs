@@ -1,5 +1,6 @@
 use anyhow::Result;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -130,47 +131,12 @@ impl InputManager {
     async fn detect_input_devices(&mut self) -> Result<()> {
         debug!("🔍 Detecting input devices");
 
-        // In a real implementation, this would scan /dev/input and libinput
-        // For now, simulate common gaming peripherals
-
-        let devices = vec![
-            InputDevice {
-                id: 1,
-                name: "Gaming Mouse".to_string(),
-                device_type: InputDeviceType::Mouse,
-                vendor_id: 0x046d, // Logitech
-                product_id: 0xc52b,
-                gaming_optimized: false,
-                polling_rate: 125, // Default polling rate
-                dpi: Some(800),
-                latency_ms: 8.0,
-            },
-            InputDevice {
-                id: 2,
-                name: "Mechanical Keyboard".to_string(),
-                device_type: InputDeviceType::Keyboard,
-                vendor_id: 0x04d9, // Holtek
-                product_id: 0x1203,
-                gaming_optimized: false,
-                polling_rate: 125,
-                dpi: None,
-                latency_ms: 5.0,
-            },
-            InputDevice {
-                id: 3,
-                name: "Gaming Controller".to_string(),
-                device_type: InputDeviceType::Gamepad,
-                vendor_id: 0x045e,  // Microsoft
-                product_id: 0x02ea, // Xbox Controller
-                gaming_optimized: false,
-                polling_rate: 125,
-                dpi: None,
-                latency_ms: 6.0,
-            },
-        ];
+        let devices =
+            discover_input_devices_from(Path::new("/dev/input"), Path::new("/sys/class/input"))?;
 
         {
             let mut device_map = self.devices.write().await;
+            device_map.clear();
             for device in devices {
                 info!(
                     "  🖱️  Detected: {} ({:?}, {}Hz)",
@@ -389,10 +355,135 @@ impl InputManager {
     }
 }
 
+fn discover_input_devices_from(dev_input: &Path, sys_input: &Path) -> Result<Vec<InputDevice>> {
+    let mut devices = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dev_input) else {
+        return Ok(devices);
+    };
+
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+        let Some(event_id) = name
+            .strip_prefix("event")
+            .and_then(|id| id.parse::<u32>().ok())
+        else {
+            continue;
+        };
+
+        let sys_device = sys_input.join(name).join("device");
+        let device_name = read_trimmed(sys_device.join("name"))
+            .unwrap_or_else(|| format!("Input device {}", name));
+        let vendor_id = read_hex_u16(sys_device.join("id/vendor")).unwrap_or(0);
+        let product_id = read_hex_u16(sys_device.join("id/product")).unwrap_or(0);
+        let device_type = classify_input_device(&device_name);
+
+        devices.push(InputDevice {
+            id: event_id,
+            name: device_name,
+            device_type,
+            vendor_id,
+            product_id,
+            gaming_optimized: false,
+            polling_rate: 125,
+            dpi: None,
+            latency_ms: 8.0,
+        });
+    }
+
+    devices.sort_by_key(|device| device.id);
+    Ok(devices)
+}
+
+fn read_trimmed(path: PathBuf) -> Option<String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn read_hex_u16(path: PathBuf) -> Option<u16> {
+    let value = read_trimmed(path)?;
+    u16::from_str_radix(value.trim_start_matches("0x"), 16).ok()
+}
+
+fn classify_input_device(name: &str) -> InputDeviceType {
+    let lower = name.to_ascii_lowercase();
+    if lower.contains("mouse") {
+        InputDeviceType::Mouse
+    } else if lower.contains("keyboard") || lower.contains("kbd") {
+        InputDeviceType::Keyboard
+    } else if lower.contains("gamepad")
+        || lower.contains("controller")
+        || lower.contains("xbox")
+        || lower.contains("dualshock")
+        || lower.contains("dualsense")
+    {
+        InputDeviceType::Gamepad
+    } else if lower.contains("joystick") {
+        InputDeviceType::Joystick
+    } else if lower.contains("touchpad") {
+        InputDeviceType::TouchPad
+    } else if lower.contains("tablet") {
+        InputDeviceType::Tablet
+    } else {
+        InputDeviceType::Other
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct InputLatencyStats {
     pub average_latency_ms: f64,
     pub optimized_devices: usize,
     pub total_devices: usize,
     pub gaming_mode: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch_tempdir() -> tempfile::TempDir {
+        std::fs::create_dir_all(".scratch").expect("create repo-local scratch directory");
+        tempfile::tempdir_in(".scratch").expect("create repo-local scratch tempdir")
+    }
+
+    #[test]
+    fn input_device_classification_uses_device_name() {
+        assert!(matches!(
+            classify_input_device("Logitech Gaming Mouse"),
+            InputDeviceType::Mouse
+        ));
+        assert!(matches!(
+            classify_input_device("Xbox Wireless Controller"),
+            InputDeviceType::Gamepad
+        ));
+        assert!(matches!(
+            classify_input_device("AT Translated Set 2 keyboard"),
+            InputDeviceType::Keyboard
+        ));
+    }
+
+    #[test]
+    fn input_discovery_reads_event_devices_from_sysfs() -> Result<()> {
+        let root = scratch_tempdir();
+        let dev_input = root.path().join("dev/input");
+        let sys_input = root.path().join("sys/class/input");
+        std::fs::create_dir_all(&dev_input)?;
+        std::fs::create_dir_all(sys_input.join("event7/device/id"))?;
+        std::fs::write(dev_input.join("event7"), b"")?;
+        std::fs::write(sys_input.join("event7/device/name"), "Xbox Controller\n")?;
+        std::fs::write(sys_input.join("event7/device/id/vendor"), "045e\n")?;
+        std::fs::write(sys_input.join("event7/device/id/product"), "02ea\n")?;
+
+        let devices = discover_input_devices_from(&dev_input, &sys_input)?;
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].id, 7);
+        assert_eq!(devices[0].vendor_id, 0x045e);
+        assert_eq!(devices[0].product_id, 0x02ea);
+        assert!(matches!(devices[0].device_type, InputDeviceType::Gamepad));
+        Ok(())
+    }
 }

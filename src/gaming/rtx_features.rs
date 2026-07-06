@@ -113,12 +113,24 @@ impl RTXFeatureConfig {
         env_vars.insert("__GL_SHADER_DISK_CACHE".to_string(), "1".to_string());
         env_vars.insert(
             "__GL_SHADER_DISK_CACHE_PATH".to_string(),
-            "/tmp/bolt_shader_cache".to_string(),
+            bolt_shader_cache_path().to_string_lossy().into_owned(),
         );
         env_vars.insert("__GL_THREADED_OPTIMIZATIONS".to_string(), "1".to_string());
 
         env_vars
     }
+}
+
+fn bolt_shader_cache_path() -> std::path::PathBuf {
+    if let Some(cache_home) = std::env::var_os("XDG_CACHE_HOME") {
+        return Path::new(&cache_home).join("bolt/shader-cache");
+    }
+
+    if let Some(home) = std::env::var_os("HOME") {
+        return Path::new(&home).join(".cache/bolt/shader-cache");
+    }
+
+    Path::new(".bolt/cache/shader-cache").to_path_buf()
 }
 
 impl RTXFeatureManager {

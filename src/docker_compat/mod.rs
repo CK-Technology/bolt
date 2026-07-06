@@ -205,7 +205,10 @@ impl DockerCompatLayer {
         let image = &args[0];
         info!("⬆️ Converting docker push to bolt push: {}", image);
 
-        crate::runtime::push_image(image)
+        let runtime = crate::runtime::detect_container_runtime()
+            .await
+            .map_err(|e| anyhow::anyhow!("Runtime detection error: {}", e))?;
+        crate::runtime::push_image_delegate(&runtime, image)
             .await
             .map_err(|e| anyhow::anyhow!("Push error: {}", e))
     }
@@ -490,9 +493,14 @@ impl DockerCompatLayer {
                 // Find compose file
                 let compose_file = self.find_compose_file().await?;
 
-                // Convert to Boltfile temporarily
-                let temp_boltfile = "/tmp/bolt-compose-converted.toml";
-                self.migrate_compose_file(&compose_file, Some(temp_boltfile))
+                // Convert to a workspace-local Boltfile for Surge.
+                let bolt_dir = std::env::current_dir()?.join(".bolt");
+                tokio::fs::create_dir_all(&bolt_dir).await?;
+                let converted_boltfile = bolt_dir.join("compose-converted.toml");
+                let converted_boltfile = converted_boltfile
+                    .to_str()
+                    .ok_or_else(|| anyhow::anyhow!("converted Boltfile path is not UTF-8"))?;
+                self.migrate_compose_file(&compose_file, Some(converted_boltfile))
                     .await?;
 
                 // Run with Bolt surge

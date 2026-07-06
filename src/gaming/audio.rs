@@ -161,7 +161,7 @@ impl AudioManager {
         }
 
         // Check for PipeWire socket
-        let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or("/tmp".to_string());
+        let runtime_dir = audio_runtime_dir();
         let pipewire_socket = format!("{}/pipewire-0", runtime_dir);
         tokio::fs::metadata(&pipewire_socket).await.is_ok()
     }
@@ -177,7 +177,7 @@ impl AudioManager {
         }
 
         // Check for PulseAudio socket
-        let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or("/tmp".to_string());
+        let runtime_dir = audio_runtime_dir();
         let pulse_socket = format!("{}/pulse/native", runtime_dir);
         tokio::fs::metadata(&pulse_socket).await.is_ok()
     }
@@ -316,7 +316,7 @@ impl AudioManager {
     }
 
     async fn setup_runtime_paths(subsystem: &AudioSubsystem) -> Result<AudioRuntimePaths> {
-        let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
+        let runtime_dir = audio_runtime_dir();
         let runtime_path = PathBuf::from(&runtime_dir);
 
         let paths = match subsystem {
@@ -421,7 +421,7 @@ impl AudioManager {
 
         // PipeWire socket and config mounts
         volumes.push(format!(
-            "{}:/tmp/pipewire-runtime:rw",
+            "{}:/run/bolt/pipewire-runtime:rw",
             paths.runtime_dir.to_string_lossy()
         ));
 
@@ -464,7 +464,7 @@ impl AudioManager {
 
         // PulseAudio socket mount
         volumes.push(format!(
-            "{}:/tmp/pulse-socket:rw",
+            "{}:/run/bolt/pulse-socket:rw",
             paths.socket_path.to_string_lossy()
         ));
 
@@ -640,6 +640,18 @@ impl AudioManager {
 
         Ok(metrics)
     }
+}
+
+fn audio_runtime_dir() -> String {
+    if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
+        return runtime_dir;
+    }
+
+    if let Ok(uid) = std::env::var("UID") {
+        return format!("/run/user/{uid}");
+    }
+
+    ".scratch/run".to_string()
 }
 
 #[derive(Debug, Clone)]

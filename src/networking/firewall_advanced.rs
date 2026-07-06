@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::path::Path;
 use std::process::Command;
 use tokio::process::Command as AsyncCommand;
 use tracing::{info, warn};
@@ -807,7 +808,10 @@ impl AdvancedFirewallManager {
         let temp_rules = self.generate_iptables_rules()?;
 
         // Write to temporary file
-        let temp_file = "/tmp/bolt-iptables-rules";
+        let temp_file = "/run/bolt/iptables-rules";
+        if let Some(parent) = Path::new(temp_file).parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
         tokio::fs::write(temp_file, temp_rules).await?;
 
         // Apply rules atomically
@@ -1105,7 +1109,10 @@ impl AdvancedFirewallManager {
         let nft_config = self.generate_nftables_config()?;
 
         // Write NFTables configuration
-        let nft_file = "/tmp/bolt-nftables.conf";
+        let nft_file = "/run/bolt/nftables.conf";
+        if let Some(parent) = Path::new(nft_file).parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
         tokio::fs::write(nft_file, nft_config).await?;
 
         // Apply NFTables configuration

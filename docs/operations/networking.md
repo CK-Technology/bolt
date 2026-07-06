@@ -142,6 +142,12 @@ flowchart LR
     QS --> CM
 ```
 
+## Focused Networking Docs
+
+- [Bridge networking](../networking/bridge.md) - bridge/veth/IPAM lifecycle and stats
+- [Host networking](../networking/host-networking.md) - no-network-namespace behavior
+- [QUIC networking](../networking/quic.md) - Quinn endpoint/proxy health model
+
 ## Environment Variables
 
 ```bash

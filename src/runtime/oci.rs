@@ -24,6 +24,8 @@ pub struct ContainerConfig {
     pub working_dir: Option<String>,
     pub user: Option<String>,
     pub hostname: Option<String>,
+    #[serde(default = "default_network_mode")]
+    pub network_mode: String,
     pub ports: Vec<PortMapping>,
     pub volumes: Vec<VolumeMount>,
     pub capabilities: Vec<String>,
@@ -38,6 +40,10 @@ pub struct ContainerConfig {
     /// OCI seccomp profile path, or "unconfined" to disable seccomp.
     #[serde(default)]
     pub seccomp: Option<String>,
+}
+
+fn default_network_mode() -> String {
+    "bridge".to_string()
 }
 
 /// Container runtime state
@@ -120,7 +126,7 @@ pub struct ExecutionResult {
 pub async fn execute_container(
     state: &ContainerState,
     spec: &oci_spec::runtime::Spec,
-) -> Result<u32> {
+) -> Result<ExecutionResult> {
     info!("🚀 Executing container: {}", state.id);
 
     // Write the OCI spec to the bundle directory
@@ -213,7 +219,10 @@ pub async fn execute_container(
         let pid = get_container_pid(&runtime, &state.id).await?;
 
         info!("✅ Container started with PID: {}", pid);
-        Ok(pid)
+        Ok(ExecutionResult {
+            pid: Some(pid),
+            exit_code: None,
+        })
     } else {
         // Run container in attached mode (like `docker run`)
         let mut run_cmd = Command::new(&runtime);
@@ -234,9 +243,86 @@ pub async fn execute_container(
         let exit_code = status.code().unwrap_or_default();
         info!("✅ Container {} exited with status {}", state.id, exit_code);
 
-        // Return a dummy PID for attached mode since we don't track it
-        Ok(0)
+        Ok(ExecutionResult {
+            pid: None,
+            exit_code: Some(exit_code),
+        })
     }
+}
+
+/// Delete the OCI runtime's bookkeeping for a container after Bolt has stopped
+/// or removed it. This is best-effort cleanup for runtimes like runc/crun that
+/// keep state outside Bolt's persisted JSON.
+pub async fn delete_runtime_container(id: &str) -> Result<()> {
+    let runtime = detect_oci_runtime().await?;
+    let output = timeout(
+        OCI_COMMAND_TIMEOUT,
+        Command::new(&runtime)
+            .arg("delete")
+            .arg("--force")
+            .arg(id)
+            .output(),
+    )
+    .await
+    .context("Timed out deleting OCI runtime container state")?
+    .context("Failed to delete OCI runtime container state")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!("OCI runtime delete failed: {}", stderr.trim()).into());
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn exec_runtime_container(
+    id: &str,
+    command: &[String],
+    interactive: bool,
+    tty: bool,
+    detach: bool,
+    workdir: Option<&str>,
+    user: Option<&str>,
+    env: &[String],
+) -> Result<i32> {
+    if command.is_empty() {
+        return Err(anyhow!("No command specified").into());
+    }
+
+    let runtime = detect_oci_runtime().await?;
+    let mut cmd = Command::new(&runtime);
+    cmd.arg("exec");
+
+    if detach {
+        cmd.arg("--detach");
+    }
+    if tty {
+        cmd.arg("--tty");
+    }
+    if let Some(workdir) = workdir {
+        cmd.arg("--cwd").arg(workdir);
+    }
+    if let Some(user) = user {
+        cmd.arg("--user").arg(user);
+    }
+    for env_var in env {
+        cmd.arg("--env").arg(env_var);
+    }
+
+    cmd.arg(id).args(command);
+
+    if interactive {
+        cmd.stdin(Stdio::inherit());
+    }
+    cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+
+    let status = timeout(OCI_COMMAND_TIMEOUT, cmd.status())
+        .await
+        .context("Timed out executing command in OCI container")?
+        .context("Failed to execute command in OCI container")?;
+
+    Ok(status.code().unwrap_or(1))
 }
 
 /// Detect available OCI runtime

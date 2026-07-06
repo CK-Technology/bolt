@@ -257,10 +257,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_model_cache_init() {
-        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_dir = scratch_tempdir();
         let cache = ModelCache::new_in(temp_dir.path().join("models"))
             .await
             .unwrap();
         assert!(cache.cache_dir.exists());
+    }
+
+    fn scratch_tempdir() -> tempfile::TempDir {
+        std::fs::create_dir_all(".scratch").expect("create repo-local scratch directory");
+        tempfile::tempdir_in(".scratch").expect("create repo-local scratch tempdir")
     }
 }

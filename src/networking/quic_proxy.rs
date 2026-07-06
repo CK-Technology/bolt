@@ -794,14 +794,15 @@ impl QUICSocketProxy {
                 }
             }
             HealthCheckMethod::ICMP => {
-                // Simplified ICMP check (would need proper ICMP implementation)
-                warn!("ICMP health check not implemented, assuming healthy");
-                Ok(true)
+                warn!("ICMP health check is not implemented; treating target as unhealthy");
+                Ok(false)
             }
-            HealthCheckMethod::Custom(_) => {
-                // Custom health check logic would go here
-                warn!("Custom health check not implemented, assuming healthy");
-                Ok(true)
+            HealthCheckMethod::Custom(ref command) => {
+                warn!(
+                    "Custom health check '{}' is not implemented; treating target as unhealthy",
+                    command
+                );
+                Ok(false)
             }
         }
     }
@@ -970,5 +971,34 @@ mod tests {
 
         let rules = proxy.proxy_rules.read().await;
         assert!(rules.contains_key("test-rule"));
+    }
+
+    #[tokio::test]
+    async fn unsupported_health_checks_fail_closed() {
+        let target = "127.0.0.1:9".parse().unwrap();
+        let health_check = HealthCheck {
+            enabled: true,
+            method: HealthCheckMethod::ICMP,
+            interval: Duration::from_secs(1),
+            timeout: Duration::from_millis(10),
+            healthy_threshold: 1,
+            unhealthy_threshold: 1,
+        };
+
+        assert!(
+            !QUICSocketProxy::perform_health_check(&target, &health_check)
+                .await
+                .unwrap()
+        );
+
+        let custom = HealthCheck {
+            method: HealthCheckMethod::Custom("check.sh".to_string()),
+            ..health_check
+        };
+        assert!(
+            !QUICSocketProxy::perform_health_check(&target, &custom)
+                .await
+                .unwrap()
+        );
     }
 }

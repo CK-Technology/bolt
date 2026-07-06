@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::process::Command;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info};
@@ -44,6 +45,16 @@ pub struct BridgeManager {
     interfaces: Arc<RwLock<HashMap<String, BridgeInterface>>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct BridgePreflight {
+    pub cap_net_admin: bool,
+    pub ip_available: bool,
+    pub nft_available: bool,
+    pub iptables_available: bool,
+    pub can_manage_links: bool,
+    pub reasons: Vec<String>,
+}
+
 impl Default for BridgeManager {
     fn default() -> Self {
         Self::new()
@@ -59,6 +70,33 @@ impl BridgeManager {
             bridges: Arc::new(RwLock::new(HashMap::new())),
             ip_allocation: Arc::new(RwLock::new(HashMap::new())),
             interfaces: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    pub fn preflight() -> BridgePreflight {
+        let cap_net_admin = has_cap_net_admin();
+        let ip_available = command_available("ip");
+        let nft_available = command_available("nft");
+        let iptables_available = command_available("iptables");
+        let mut reasons = Vec::new();
+
+        if !cap_net_admin {
+            reasons.push("missing CAP_NET_ADMIN".to_string());
+        }
+        if !ip_available {
+            reasons.push("missing ip command".to_string());
+        }
+        if !nft_available && !iptables_available {
+            reasons.push("missing nft or iptables command for NAT".to_string());
+        }
+
+        BridgePreflight {
+            cap_net_admin,
+            ip_available,
+            nft_available,
+            iptables_available,
+            can_manage_links: cap_net_admin && ip_available,
+            reasons,
         }
     }
 
@@ -127,11 +165,42 @@ impl BridgeManager {
     async fn create_bridge_interface(&self, config: &BridgeConfig) -> Result<()> {
         debug!("Creating bridge interface: {}", config.name);
 
-        // In a real implementation, this would use netlink to:
-        // 1. Create bridge interface
-        // 2. Set MTU
-        // 3. Configure IP addresses
-        // 4. Bring interface up
+        let preflight = Self::preflight();
+        if !preflight.can_manage_links {
+            anyhow::bail!(
+                "bridge networking requires CAP_NET_ADMIN and the ip command; preflight failed: {}",
+                preflight.reasons.join(", ")
+            );
+        }
+
+        if !link_exists(&config.name)? {
+            run_ip(["link", "add", "name", &config.name, "type", "bridge"])?;
+        }
+        run_ip([
+            "link",
+            "set",
+            "dev",
+            &config.name,
+            "mtu",
+            &config.mtu.to_string(),
+        ])?;
+        if let Some(gateway) = config.gateway_v4 {
+            let prefix = config
+                .subnet_v4
+                .map(|subnet| subnet.prefix_len())
+                .unwrap_or(24);
+            let cidr = format!("{gateway}/{prefix}");
+            let _ = run_ip(["addr", "replace", &cidr, "dev", &config.name]);
+        }
+        if let Some(gateway) = config.gateway_v6 {
+            let prefix = config
+                .subnet_v6
+                .map(|subnet| subnet.prefix_len())
+                .unwrap_or(64);
+            let cidr = format!("{gateway}/{prefix}");
+            let _ = run_ip(["-6", "addr", "replace", &cidr, "dev", &config.name]);
+        }
+        run_ip(["link", "set", "dev", &config.name, "up"])?;
 
         info!("  • Bridge interface: {}", config.name);
         info!("  • MTU: {}", config.mtu);
@@ -150,21 +219,11 @@ impl BridgeManager {
         debug!("Setting up NAT rules for bridge: {}", config.name);
 
         if let Some(subnet) = config.subnet_v4 {
-            // Setup IPv4 NAT
-            let nat_rule = format!(
-                "iptables -t nat -A POSTROUTING -s {} ! -d {} -j MASQUERADE",
-                subnet, subnet
-            );
-            debug!("IPv4 NAT rule: {}", nat_rule);
+            run_nat_rule("iptables", &subnet.to_string())?;
         }
 
         if let Some(subnet) = config.subnet_v6 {
-            // Setup IPv6 NAT
-            let nat_rule = format!(
-                "ip6tables -t nat -A POSTROUTING -s {} ! -d {} -j MASQUERADE",
-                subnet, subnet
-            );
-            debug!("IPv6 NAT rule: {}", nat_rule);
+            run_nat_rule("ip6tables", &subnet.to_string())?;
         }
 
         Ok(())
@@ -314,11 +373,28 @@ impl BridgeManager {
     ) -> Result<()> {
         debug!("Creating veth pair: {} <-> {}", host_veth, container_veth);
 
-        // In a real implementation, this would:
-        // 1. Create veth pair using netlink
-        // 2. Move container veth to container namespace
-        // 3. Connect host veth to bridge
-        // 4. Configure interfaces
+        let preflight = Self::preflight();
+        if !preflight.can_manage_links {
+            anyhow::bail!(
+                "bridge veth creation requires CAP_NET_ADMIN and the ip command; preflight failed: {}",
+                preflight.reasons.join(", ")
+            );
+        }
+
+        if !link_exists(host_veth)? {
+            run_ip([
+                "link",
+                "add",
+                host_veth,
+                "type",
+                "veth",
+                "peer",
+                "name",
+                container_veth,
+            ])?;
+        }
+        run_ip(["link", "set", host_veth, "master", bridge_name])?;
+        run_ip(["link", "set", host_veth, "up"])?;
 
         info!(
             "  • Created veth pair: {} <-> {}",
@@ -378,7 +454,9 @@ impl BridgeManager {
     async fn remove_veth_pair(&self, host_veth: &str) -> Result<()> {
         debug!("Removing veth pair: {}", host_veth);
 
-        // In a real implementation, this would delete the veth interface
+        if link_exists(host_veth)? {
+            run_ip(["link", "delete", host_veth])?;
+        }
         info!("  • Removed veth interface: {}", host_veth);
 
         Ok(())
@@ -406,7 +484,10 @@ impl BridgeManager {
             .ok_or_else(|| anyhow::anyhow!("Bridge not found: {}", network_name))?;
 
         let interfaces = self.interfaces.read().await;
-        let connected_containers = interfaces.len() as u32;
+        let connected_containers = interfaces
+            .values()
+            .filter(|interface| interface.bridge_name == network_name)
+            .count() as u32;
 
         let allocations = self.ip_allocation.read().await;
         let allocated_ips = if let Some(allocation) = allocations.get(network_name) {
@@ -430,6 +511,54 @@ impl BridgeManager {
     pub async fn list_bridges(&self) -> Vec<String> {
         let bridges = self.bridges.read().await;
         bridges.keys().cloned().collect()
+    }
+
+    #[cfg(test)]
+    async fn register_bridge_for_test(&self, config: BridgeConfig) -> Result<()> {
+        self.validate_bridge_config(&config)?;
+        let allocation = IPAllocation {
+            next_ip_v4: config
+                .subnet_v4
+                .map(|subnet| u32::from(subnet.addr()) + 2)
+                .unwrap_or_default(),
+            next_ip_v6: config
+                .subnet_v6
+                .map(|subnet| u128::from(subnet.addr()) + 2)
+                .unwrap_or_default(),
+            allocated_ips: HashMap::new(),
+        };
+        self.bridges
+            .write()
+            .await
+            .insert(config.name.clone(), config.clone());
+        self.ip_allocation
+            .write()
+            .await
+            .insert(config.name.clone(), allocation);
+        Ok(())
+    }
+
+    #[cfg(test)]
+    async fn register_container_interface_for_test(
+        &self,
+        container_id: &str,
+        network_name: &str,
+    ) -> Result<()> {
+        let (ip_v4, ip_v6) = self
+            .allocate_container_ips(network_name, container_id)
+            .await?;
+        self.interfaces.write().await.insert(
+            container_id.to_string(),
+            BridgeInterface {
+                name: "eth0".to_string(),
+                bridge_name: network_name.to_string(),
+                ip_v4,
+                ip_v6,
+                mac_address: self.generate_mac_address(),
+                veth_pair: (format!("veth-{}", &container_id[..8]), "eth0".to_string()),
+            },
+        );
+        Ok(())
     }
 
     /// Delete bridge network
@@ -462,12 +591,113 @@ impl BridgeManager {
             allocations.remove(network_name);
         }
 
-        // Delete bridge interface (would use netlink in real implementation)
+        if link_exists(network_name)? {
+            run_ip(["link", "delete", network_name])?;
+        }
         info!("  • Deleted bridge interface: {}", network_name);
 
         info!("✅ Bridge network deleted: {}", network_name);
         Ok(())
     }
+}
+
+fn command_available(command: &str) -> bool {
+    Command::new(command)
+        .arg("--version")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn has_cap_net_admin() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let Ok(status) = std::fs::read_to_string("/proc/self/status") else {
+            return false;
+        };
+        for line in status.lines() {
+            let Some(hex) = line.strip_prefix("CapEff:\t") else {
+                continue;
+            };
+            let Ok(bits) = u64::from_str_radix(hex.trim(), 16) else {
+                return false;
+            };
+            return bits & (1 << 12) != 0;
+        }
+        false
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
+fn link_exists(name: &str) -> Result<bool> {
+    Ok(Command::new("ip")
+        .args(["link", "show", "dev", name])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false))
+}
+
+fn run_ip<const N: usize>(args: [&str; N]) -> Result<()> {
+    let output = Command::new("ip").args(args).output()?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "ip command failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
+fn run_nat_rule(command: &str, subnet: &str) -> Result<()> {
+    if !command_available(command) {
+        anyhow::bail!("{command} is required for bridge NAT");
+    }
+    let args = [
+        "-t",
+        "nat",
+        "-C",
+        "POSTROUTING",
+        "-s",
+        subnet,
+        "!",
+        "-d",
+        subnet,
+        "-j",
+        "MASQUERADE",
+    ];
+    if Command::new(command)
+        .args(args)
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+    let output = Command::new(command)
+        .args([
+            "-t",
+            "nat",
+            "-A",
+            "POSTROUTING",
+            "-s",
+            subnet,
+            "!",
+            "-d",
+            subnet,
+            "-j",
+            "MASQUERADE",
+        ])
+        .output()?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "{command} NAT setup failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(())
 }
 
 /// Bridge network statistics
@@ -487,12 +717,51 @@ impl Default for BridgeConfig {
         Self {
             name: "bolt0".to_string(),
             subnet_v4: Some("172.17.0.0/16".parse().unwrap()),
-            subnet_v6: Some("fd00:bolt::/64".parse().unwrap()),
+            subnet_v6: Some("fd00:17::/64".parse().unwrap()),
             gateway_v4: Some(Ipv4Addr::new(172, 17, 0, 1)),
-            gateway_v6: Some("fd00:bolt::1".parse().unwrap()),
+            gateway_v6: Some("fd00:17::1".parse().unwrap()),
             mtu: 1500,
             enable_nat: true,
             enable_isolation: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn bridge_stats_count_only_requested_network_interfaces() -> Result<()> {
+        let manager = BridgeManager::new();
+        let mut first = BridgeConfig::default();
+        first.name = "bolt0".to_string();
+        first.subnet_v4 = Some("172.17.0.0/24".parse().unwrap());
+        let mut second = BridgeConfig::default();
+        second.name = "bolt1".to_string();
+        second.subnet_v4 = Some("172.18.0.0/24".parse().unwrap());
+
+        manager.register_bridge_for_test(first).await?;
+        manager.register_bridge_for_test(second).await?;
+        manager
+            .register_container_interface_for_test("container-a-1234", "bolt0")
+            .await?;
+        manager
+            .register_container_interface_for_test("container-b-1234", "bolt1")
+            .await?;
+
+        let stats = manager.get_bridge_stats("bolt0").await?;
+        assert_eq!(stats.connected_containers, 1);
+        assert_eq!(stats.allocated_ips, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn bridge_preflight_reports_state() {
+        let preflight = BridgeManager::preflight();
+        assert_eq!(
+            preflight.can_manage_links,
+            preflight.cap_net_admin && preflight.ip_available
+        );
     }
 }

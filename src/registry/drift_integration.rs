@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
-use reqwest::{Client, StatusCode, header::ACCEPT};
+use reqwest::{Client, StatusCode, Url, header::ACCEPT};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -206,6 +206,13 @@ pub struct ResolvedManifest {
     pub registry_digest: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BearerChallenge {
+    realm: String,
+    service: Option<String>,
+    scope: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageManifest {
     #[serde(rename = "schemaVersion")]
@@ -391,20 +398,155 @@ impl DriftRegistryClient {
         }
     }
 
+    fn with_registry_auth(
+        &self,
+        builder: reqwest::RequestBuilder,
+        token: Option<&str>,
+    ) -> reqwest::RequestBuilder {
+        if let Some(token) = token {
+            builder.bearer_auth(token)
+        } else {
+            self.with_auth(builder)
+        }
+    }
+
+    fn parse_bearer_challenge(header: &str) -> Option<BearerChallenge> {
+        let value = header.trim();
+        let params = value.strip_prefix("Bearer ")?;
+        let mut parsed = HashMap::new();
+
+        for field in Self::split_auth_params(params) {
+            let Some((key, value)) = field.split_once('=') else {
+                continue;
+            };
+            parsed.insert(
+                key.trim().to_ascii_lowercase(),
+                value.trim().trim_matches('"').to_string(),
+            );
+        }
+
+        let realm = parsed.remove("realm")?;
+        Some(BearerChallenge {
+            realm,
+            service: parsed.remove("service"),
+            scope: parsed.remove("scope"),
+        })
+    }
+
+    fn split_auth_params(params: &str) -> Vec<String> {
+        let mut fields = Vec::new();
+        let mut current = String::new();
+        let mut quoted = false;
+
+        for ch in params.chars() {
+            match ch {
+                '"' => {
+                    quoted = !quoted;
+                    current.push(ch);
+                }
+                ',' if !quoted => {
+                    if !current.trim().is_empty() {
+                        fields.push(current.trim().to_string());
+                    }
+                    current.clear();
+                }
+                _ => current.push(ch),
+            }
+        }
+
+        if !current.trim().is_empty() {
+            fields.push(current.trim().to_string());
+        }
+
+        fields
+    }
+
+    async fn get_bearer_token(
+        &self,
+        challenge: &BearerChallenge,
+        default_scope: &str,
+    ) -> Result<String> {
+        let mut url = Url::parse(&challenge.realm)
+            .with_context(|| format!("Invalid bearer token realm {}", challenge.realm))?;
+        {
+            let mut query = url.query_pairs_mut();
+            if let Some(service) = &challenge.service {
+                query.append_pair("service", service);
+            }
+            query.append_pair("scope", challenge.scope.as_deref().unwrap_or(default_scope));
+        }
+
+        let request = self.with_auth(self.client.get(url));
+        let response = request
+            .send()
+            .await
+            .context("Failed to request registry bearer token")?;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!(
+                "Failed to get registry bearer token: {}",
+                response.status()
+            ));
+        }
+
+        #[derive(Deserialize)]
+        struct TokenResponse {
+            token: Option<String>,
+            access_token: Option<String>,
+        }
+
+        let token_response: TokenResponse = response
+            .json()
+            .await
+            .context("Failed to parse registry bearer token response")?;
+
+        token_response
+            .token
+            .or(token_response.access_token)
+            .ok_or_else(|| anyhow::anyhow!("Registry token response did not contain a token"))
+    }
+
+    async fn bearer_token_from_unauthorized(
+        &self,
+        response: &reqwest::Response,
+        default_scope: &str,
+    ) -> Result<Option<String>> {
+        if response.status() != StatusCode::UNAUTHORIZED {
+            return Ok(None);
+        }
+
+        let Some(challenge_header) = response
+            .headers()
+            .get("WWW-Authenticate")
+            .and_then(|header| header.to_str().ok())
+        else {
+            return Ok(None);
+        };
+
+        let Some(challenge) = Self::parse_bearer_challenge(challenge_header) else {
+            return Ok(None);
+        };
+
+        self.get_bearer_token(&challenge, default_scope)
+            .await
+            .map(Some)
+    }
+
     fn parse_reference(image: &str) -> Result<(String, String)> {
         if let Some((repository, digest)) = image.split_once('@') {
             let normalized_repo = Self::normalize_repository(repository);
             return Ok((normalized_repo, digest.to_string()));
         }
 
-        if let Some((repository, tag)) = image.rsplit_once(':') {
-            if tag.contains('/') {
-                let normalized_repo = Self::normalize_repository(image);
-                Ok((normalized_repo, "latest".to_string()))
-            } else {
-                let normalized_repo = Self::normalize_repository(repository);
-                Ok((normalized_repo, tag.to_string()))
-            }
+        let last_slash = image.rfind('/');
+        let last_colon = image.rfind(':');
+        if let Some(colon) = last_colon
+            && last_slash.is_none_or(|slash| colon > slash)
+        {
+            let repository = &image[..colon];
+            let tag = &image[colon + 1..];
+            let normalized_repo = Self::normalize_repository(repository);
+            Ok((normalized_repo, tag.to_string()))
         } else {
             let normalized_repo = Self::normalize_repository(image);
             Ok((normalized_repo, "latest".to_string()))
@@ -413,12 +555,67 @@ impl DriftRegistryClient {
 
     /// Normalize repository name for Docker Hub (add library/ prefix for official images)
     fn normalize_repository(repository: &str) -> String {
-        // If no slash, it's an official Docker Hub image that needs library/ prefix
+        if let Some((registry, name)) = repository.split_once('/')
+            && Self::is_registry_prefix(registry)
+        {
+            if Self::is_docker_hub_registry(registry) && !name.contains('/') {
+                return format!("{registry}/library/{name}");
+            }
+            return repository.to_string();
+        }
+
         if !repository.contains('/') {
             format!("library/{}", repository)
         } else {
             repository.to_string()
         }
+    }
+
+    fn is_registry_prefix(component: &str) -> bool {
+        component == "localhost" || component.contains('.') || component.contains(':')
+    }
+
+    fn is_docker_hub_registry(registry: &str) -> bool {
+        matches!(
+            registry,
+            "docker.io" | "index.docker.io" | "registry-1.docker.io"
+        )
+    }
+
+    fn registry_endpoint_for_host(registry: &str) -> String {
+        if Self::is_docker_hub_registry(registry) {
+            "https://registry-1.docker.io".to_string()
+        } else if registry == "localhost"
+            || registry.starts_with("localhost:")
+            || registry.starts_with("127.")
+            || registry.starts_with("[::1]")
+        {
+            format!("http://{registry}")
+        } else {
+            format!("https://{registry}")
+        }
+    }
+
+    fn request_target(&self, repository: &str) -> (String, String, bool) {
+        if let Some((registry, name)) = repository.split_once('/')
+            && Self::is_registry_prefix(registry)
+        {
+            let endpoint = Self::registry_endpoint_for_host(registry);
+            let request_repository = if Self::is_docker_hub_registry(registry)
+                && !name.starts_with("library/")
+                && !name.contains('/')
+            {
+                format!("library/{name}")
+            } else {
+                name.to_string()
+            };
+            let is_docker_hub = Self::is_docker_hub_registry(registry);
+            return (endpoint, request_repository, is_docker_hub);
+        }
+
+        let is_docker_hub =
+            self.endpoint.contains("docker.io") || self.endpoint.contains("registry-1.docker.io");
+        (self.endpoint.clone(), repository.to_string(), is_docker_hub)
     }
 
     fn manifest_cache_key(repository: &str, reference: &str) -> String {
@@ -427,12 +624,10 @@ impl DriftRegistryClient {
 
     pub async fn resolve_manifest(&self, image: &str) -> Result<ResolvedManifest> {
         let (repository, reference) = Self::parse_reference(image)?;
+        let (endpoint, request_repository, is_docker_hub) = self.request_target(&repository);
 
-        // For Docker Hub, get bearer token first
-        let token = if self.endpoint.contains("docker.io")
-            || self.endpoint.contains("registry-1.docker.io")
-        {
-            Some(self.get_docker_hub_token(&repository).await?)
+        let token = if is_docker_hub {
+            Some(self.get_docker_hub_token(&request_repository).await?)
         } else {
             None
         };
@@ -481,24 +676,34 @@ impl DriftRegistryClient {
 
         let url = format!(
             "{}/v2/{}/manifests/{}",
-            self.endpoint, repository, reference
+            endpoint, request_repository, reference
         );
 
         debug!("Fetching manifest from {}", url);
 
         let accept_header = "application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json";
-        let mut request = self.client.get(&url).header(ACCEPT, accept_header);
-
-        if let Some(ref token_value) = token {
-            request = request.bearer_auth(token_value);
-        } else {
-            request = self.with_auth(request);
-        }
-
-        let response = request
+        let request = self.client.get(&url).header(ACCEPT, accept_header);
+        let mut response = self
+            .with_registry_auth(request, token.as_deref())
             .send()
             .await
             .with_context(|| format!("Failed to request manifest for {}", image))?;
+        if let Some(retry_token) = self
+            .bearer_token_from_unauthorized(
+                &response,
+                &format!("repository:{}:pull", request_repository),
+            )
+            .await?
+        {
+            response = self
+                .client
+                .get(&url)
+                .header(ACCEPT, accept_header)
+                .bearer_auth(retry_token)
+                .send()
+                .await
+                .with_context(|| format!("Failed to request manifest for {}", image))?;
+        }
 
         match response.status() {
             StatusCode::OK => {}
@@ -582,29 +787,37 @@ impl DriftRegistryClient {
                 .with_context(|| format!("Failed to prepare directory {}", parent.display()))?;
         }
 
-        // Get Docker Hub token if needed
-        let token = if self.endpoint.contains("docker.io")
-            || self.endpoint.contains("registry-1.docker.io")
-        {
-            Some(self.get_docker_hub_token(repository).await?)
+        let (endpoint, request_repository, is_docker_hub) = self.request_target(repository);
+        let token = if is_docker_hub {
+            Some(self.get_docker_hub_token(&request_repository).await?)
         } else {
             None
         };
 
-        let url = format!("{}/v2/{}/blobs/{}", self.endpoint, repository, digest);
+        let url = format!("{}/v2/{}/blobs/{}", endpoint, request_repository, digest);
         debug!("Downloading blob {} from {}", digest, url);
 
-        let mut request = self.client.get(&url);
-        if let Some(ref token_value) = token {
-            request = request.bearer_auth(token_value);
-        } else {
-            request = self.with_auth(request);
-        }
-
-        let response = request
+        let request = self.client.get(&url);
+        let mut response = self
+            .with_registry_auth(request, token.as_deref())
             .send()
             .await
             .with_context(|| format!("Failed to download blob {}", digest))?;
+        if let Some(retry_token) = self
+            .bearer_token_from_unauthorized(
+                &response,
+                &format!("repository:{}:pull", request_repository),
+            )
+            .await?
+        {
+            response = self
+                .client
+                .get(&url)
+                .bearer_auth(retry_token)
+                .send()
+                .await
+                .with_context(|| format!("Failed to download blob {}", digest))?;
+        }
 
         match response.status() {
             StatusCode::OK => {}
@@ -718,6 +931,216 @@ impl DriftRegistryClient {
         }
 
         Ok(())
+    }
+
+    pub async fn remote_blob_exists(&self, repository: &str, digest: &str) -> Result<bool> {
+        let (endpoint, request_repository, is_docker_hub) = self.request_target(repository);
+        let token = if is_docker_hub {
+            Some(self.get_docker_hub_token(&request_repository).await?)
+        } else {
+            None
+        };
+
+        let url = format!("{}/v2/{}/blobs/{}", endpoint, request_repository, digest);
+        let request = self.client.head(&url);
+        let mut response = self
+            .with_registry_auth(request, token.as_deref())
+            .send()
+            .await
+            .with_context(|| format!("Failed to check blob {} in {}", digest, repository))?;
+        if let Some(retry_token) = self
+            .bearer_token_from_unauthorized(
+                &response,
+                &format!("repository:{}:pull,push", request_repository),
+            )
+            .await?
+        {
+            response = self
+                .client
+                .head(&url)
+                .bearer_auth(retry_token)
+                .send()
+                .await
+                .with_context(|| format!("Failed to check blob {} in {}", digest, repository))?;
+        }
+
+        match response.status() {
+            StatusCode::OK => Ok(true),
+            StatusCode::NOT_FOUND => Ok(false),
+            status => Err(anyhow::anyhow!(
+                "Failed to check blob {} in {} (status: {})",
+                digest,
+                repository,
+                status
+            )),
+        }
+    }
+
+    pub async fn upload_blob_from_path(
+        &self,
+        repository: &str,
+        digest: &str,
+        source: &Path,
+    ) -> Result<()> {
+        if self.remote_blob_exists(repository, digest).await? {
+            debug!("Blob {} already exists in {}", digest, repository);
+            return Ok(());
+        }
+
+        let (endpoint, request_repository, is_docker_hub) = self.request_target(repository);
+        let token = if is_docker_hub {
+            Some(self.get_docker_hub_token(&request_repository).await?)
+        } else {
+            None
+        };
+
+        let start_url = format!("{}/v2/{}/blobs/uploads/", endpoint, request_repository);
+        let start = self.client.post(&start_url);
+        let mut response = self
+            .with_registry_auth(start, token.as_deref())
+            .send()
+            .await
+            .with_context(|| format!("Failed to start blob upload for {}", digest))?;
+        let mut upload_token = token;
+        if let Some(retry_token) = self
+            .bearer_token_from_unauthorized(
+                &response,
+                &format!("repository:{}:pull,push", request_repository),
+            )
+            .await?
+        {
+            response = self
+                .client
+                .post(&start_url)
+                .bearer_auth(&retry_token)
+                .send()
+                .await
+                .with_context(|| format!("Failed to start blob upload for {}", digest))?;
+            upload_token = Some(retry_token);
+        }
+
+        match response.status() {
+            StatusCode::ACCEPTED | StatusCode::CREATED => {}
+            status => {
+                return Err(anyhow::anyhow!(
+                    "Failed to start blob upload {} (status: {})",
+                    digest,
+                    status
+                ));
+            }
+        }
+
+        let location = response
+            .headers()
+            .get("Location")
+            .and_then(|header| header.to_str().ok())
+            .ok_or_else(|| anyhow::anyhow!("Registry did not return upload Location"))?;
+        let upload_url = Self::final_blob_upload_url(&endpoint, location, digest)?;
+        let bytes = fs::read(source)
+            .await
+            .with_context(|| format!("Failed to read blob source {}", source.display()))?;
+
+        let put = self.client.put(&upload_url).body(bytes.clone());
+        let mut response = self
+            .with_registry_auth(put, upload_token.as_deref())
+            .send()
+            .await
+            .with_context(|| format!("Failed to upload blob {}", digest))?;
+        if let Some(retry_token) = self
+            .bearer_token_from_unauthorized(
+                &response,
+                &format!("repository:{}:pull,push", request_repository),
+            )
+            .await?
+        {
+            response = self
+                .client
+                .put(&upload_url)
+                .bearer_auth(retry_token)
+                .body(bytes)
+                .send()
+                .await
+                .with_context(|| format!("Failed to upload blob {}", digest))?;
+        }
+
+        match response.status() {
+            StatusCode::CREATED | StatusCode::ACCEPTED | StatusCode::OK => Ok(()),
+            status => Err(anyhow::anyhow!(
+                "Failed to upload blob {} (status: {})",
+                digest,
+                status
+            )),
+        }
+    }
+
+    pub async fn upload_manifest_bytes(
+        &self,
+        repository: &str,
+        reference: &str,
+        manifest: &[u8],
+        media_type: &str,
+    ) -> Result<()> {
+        let (endpoint, request_repository, is_docker_hub) = self.request_target(repository);
+        let token = if is_docker_hub {
+            Some(self.get_docker_hub_token(&request_repository).await?)
+        } else {
+            None
+        };
+
+        let url = format!(
+            "{}/v2/{}/manifests/{}",
+            endpoint, request_repository, reference
+        );
+        let request = self
+            .client
+            .put(&url)
+            .header("Content-Type", media_type)
+            .body(manifest.to_vec());
+        let mut response = self
+            .with_registry_auth(request, token.as_deref())
+            .send()
+            .await
+            .with_context(|| format!("Failed to upload manifest {}:{}", repository, reference))?;
+        if let Some(retry_token) = self
+            .bearer_token_from_unauthorized(
+                &response,
+                &format!("repository:{}:pull,push", request_repository),
+            )
+            .await?
+        {
+            response = self
+                .client
+                .put(&url)
+                .header("Content-Type", media_type)
+                .bearer_auth(retry_token)
+                .body(manifest.to_vec())
+                .send()
+                .await
+                .with_context(|| {
+                    format!("Failed to upload manifest {}:{}", repository, reference)
+                })?;
+        }
+
+        match response.status() {
+            StatusCode::CREATED | StatusCode::ACCEPTED | StatusCode::OK => Ok(()),
+            status => Err(anyhow::anyhow!(
+                "Failed to upload manifest {}:{} (status: {})",
+                repository,
+                reference,
+                status
+            )),
+        }
+    }
+
+    fn final_blob_upload_url(endpoint: &str, location: &str, digest: &str) -> Result<String> {
+        let separator = if location.contains('?') { '&' } else { '?' };
+        if location.starts_with("http://") || location.starts_with("https://") {
+            Ok(format!("{location}{separator}digest={digest}"))
+        } else if location.starts_with('/') {
+            Ok(format!("{endpoint}{location}{separator}digest={digest}"))
+        } else {
+            Ok(format!("{endpoint}/{location}{separator}digest={digest}"))
+        }
     }
 
     /// Detect registry features by querying the API
@@ -857,10 +1280,6 @@ impl DriftRegistryClient {
     async fn pull_via_p2p(&self, package_ref: &str) -> Result<String> {
         debug!("🌐 Attempting P2P pull for: {}", package_ref);
 
-        // This would integrate with GhostWire's mesh networking
-        // For now, simulate the P2P pull logic
-
-        // Query mesh peers for the package
         let peers = self.discover_package_peers(package_ref).await?;
 
         if peers.is_empty() {
@@ -1014,10 +1433,45 @@ impl DriftRegistryClient {
         Ok(())
     }
 
-    // Implementation stubs for various helper methods
-    async fn discover_package_peers(&self, _package_ref: &str) -> Result<Vec<MeshPeer>> {
-        // Integrate with GhostWire mesh networking
-        Ok(vec![])
+    async fn discover_package_peers(&self, package_ref: &str) -> Result<Vec<MeshPeer>> {
+        let mut peers = Vec::new();
+        let package_name = p2p_package_filename(package_ref);
+
+        for peer in configured_p2p_peers() {
+            if let Some(path) = peer.strip_prefix("file://") {
+                let candidate = Path::new(path).join(&package_name);
+                if candidate.is_file() {
+                    peers.push(MeshPeer {
+                        address: peer,
+                        latency_ms: 1,
+                        bandwidth_mbps: 10_000,
+                        reliability_score: 1.0,
+                    });
+                }
+                continue;
+            }
+
+            if peer.starts_with("http://") || peer.starts_with("https://") {
+                peers.push(MeshPeer {
+                    address: peer,
+                    latency_ms: 50,
+                    bandwidth_mbps: 100,
+                    reliability_score: 0.75,
+                });
+            }
+        }
+
+        let local_share = p2p_share_dir().join(&package_name);
+        if local_share.is_file() {
+            peers.push(MeshPeer {
+                address: format!("file://{}", p2p_share_dir().display()),
+                latency_ms: 1,
+                bandwidth_mbps: 10_000,
+                reliability_score: 1.0,
+            });
+        }
+
+        Ok(peers)
     }
 
     async fn select_optimal_peer(&self, peers: &[MeshPeer]) -> Result<MeshPeer> {
@@ -1027,13 +1481,66 @@ impl DriftRegistryClient {
             .ok_or_else(|| anyhow::anyhow!("No peers available"))
     }
 
-    async fn download_from_peer(&self, _peer: &MeshPeer, _package_ref: &str) -> Result<String> {
-        // QUIC-based P2P download
-        Ok("/tmp/package".to_string())
+    async fn download_from_peer(&self, peer: &MeshPeer, package_ref: &str) -> Result<String> {
+        let package_name = p2p_package_filename(package_ref);
+        let cache_dir = p2p_share_dir().join("cache");
+        fs::create_dir_all(&cache_dir).await?;
+        let destination = cache_dir.join(&package_name);
+
+        if let Some(path) = peer.address.strip_prefix("file://") {
+            let source = Path::new(path).join(&package_name);
+            fs::copy(&source, &destination)
+                .await
+                .with_context(|| format!("copying P2P package from {}", source.display()))?;
+            return Ok(destination.display().to_string());
+        }
+
+        if peer.address.starts_with("http://") || peer.address.starts_with("https://") {
+            let url = format!(
+                "{}/packages/{}",
+                peer.address.trim_end_matches('/'),
+                package_name
+            );
+            let response = self
+                .client
+                .get(&url)
+                .send()
+                .await
+                .with_context(|| format!("requesting P2P package from {}", url))?;
+            if !response.status().is_success() {
+                return Err(anyhow::anyhow!(
+                    "P2P peer returned {} for {}",
+                    response.status(),
+                    package_ref
+                ));
+            }
+            let bytes = response.bytes().await?;
+            fs::write(&destination, &bytes).await?;
+            return Ok(destination.display().to_string());
+        }
+
+        Err(anyhow::anyhow!(
+            "Unsupported P2P peer address for {}: {}",
+            package_ref,
+            peer.address
+        ))
     }
 
-    async fn share_via_p2p(&self, _package_ref: &str, _path: &str) -> Result<()> {
-        // Share package via P2P mesh
+    async fn share_via_p2p(&self, package_ref: &str, path: &str) -> Result<()> {
+        let source = Path::new(path);
+        if !source.is_file() {
+            return Err(anyhow::anyhow!(
+                "P2P sharing expects a package file, got {}",
+                source.display()
+            ));
+        }
+
+        let share_dir = p2p_share_dir();
+        fs::create_dir_all(&share_dir).await?;
+        let destination = share_dir.join(p2p_package_filename(package_ref));
+        fs::copy(source, &destination)
+            .await
+            .with_context(|| format!("sharing package {} via P2P", package_ref))?;
         Ok(())
     }
 
@@ -1069,7 +1576,7 @@ impl DriftRegistryClient {
     }
 
     fn layer_cache_dir(repository: &str) -> PathBuf {
-        let mut path = std::env::temp_dir();
+        let mut path = PathBuf::from(".scratch");
         path.push("bolt");
         path.push("layers");
         path.push(repository.replace('/', "_"));
@@ -1140,6 +1647,36 @@ pub struct MeshPeer {
     pub latency_ms: u32,
     pub bandwidth_mbps: u32,
     pub reliability_score: f64,
+}
+
+fn configured_p2p_peers() -> Vec<String> {
+    std::env::var("BOLT_P2P_PEERS")
+        .ok()
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|peer| !peer.is_empty())
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn p2p_share_dir() -> PathBuf {
+    std::env::var("BOLT_P2P_SHARE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(".scratch/bolt-p2p"))
+}
+
+fn p2p_package_filename(package_ref: &str) -> String {
+    package_ref
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '.' | '_' | '-' => ch,
+            _ => '_',
+        })
+        .collect()
 }
 
 impl Default for DriftFeatures {
@@ -1259,10 +1796,12 @@ impl DriftRegistryClient {
             selected.digest, target_os, target_arch
         );
 
+        let (endpoint, request_repository, _) = self.request_target(repository);
+
         // Fetch the specific platform manifest by digest
         let url = format!(
             "{}/v2/{}/manifests/{}",
-            self.endpoint, repository, selected.digest
+            endpoint, request_repository, selected.digest
         );
 
         let mut request = self.client.get(&url).header(
@@ -1276,10 +1815,29 @@ impl DriftRegistryClient {
             request = self.with_auth(request);
         }
 
-        let response = request
+        let mut response = request
             .send()
             .await
             .context("Failed to fetch platform-specific manifest")?;
+        if let Some(retry_token) = self
+            .bearer_token_from_unauthorized(
+                &response,
+                &format!("repository:{}:pull", request_repository),
+            )
+            .await?
+        {
+            response = self
+                .client
+                .get(&url)
+                .header(
+                    ACCEPT,
+                    "application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json",
+                )
+                .bearer_auth(retry_token)
+                .send()
+                .await
+                .context("Failed to fetch platform-specific manifest")?;
+        }
 
         if !response.status().is_success() {
             return Err(anyhow::anyhow!(
@@ -1324,7 +1882,8 @@ mod tests {
     use crate::BoltError;
     use async_trait::async_trait;
     use std::sync::Mutex;
-    use tempfile::tempdir;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
     struct TestObjectStore {
         manifest: Mutex<Option<Vec<u8>>>,
@@ -1341,6 +1900,11 @@ mod tests {
     }
 
     type BoltResult<T> = crate::Result<T>;
+
+    fn scratch_tempdir() -> tempfile::TempDir {
+        std::fs::create_dir_all(".scratch").expect("create repo-local scratch directory");
+        tempfile::tempdir_in(".scratch").expect("create repo-local scratch tempdir")
+    }
 
     #[async_trait]
     impl ObjectStore for TestObjectStore {
@@ -1436,6 +2000,168 @@ mod tests {
         }
     }
 
+    #[test]
+    fn parse_reference_normalizes_docker_hub_official_images() {
+        assert_eq!(
+            DriftRegistryClient::parse_reference("alpine").expect("parse alpine"),
+            ("library/alpine".to_string(), "latest".to_string())
+        );
+        assert_eq!(
+            DriftRegistryClient::parse_reference("docker.io/alpine:3.20")
+                .expect("parse docker.io alpine"),
+            ("docker.io/library/alpine".to_string(), "3.20".to_string())
+        );
+    }
+
+    #[test]
+    fn request_target_routes_ghcr_and_local_registry_refs() {
+        let client = test_registry_client(None);
+
+        assert_eq!(
+            DriftRegistryClient::parse_reference("ghcr.io/ghostkellz/bolt:latest")
+                .expect("parse ghcr"),
+            ("ghcr.io/ghostkellz/bolt".to_string(), "latest".to_string())
+        );
+        assert_eq!(
+            client.request_target("ghcr.io/ghostkellz/bolt"),
+            (
+                "https://ghcr.io".to_string(),
+                "ghostkellz/bolt".to_string(),
+                false
+            )
+        );
+
+        assert_eq!(
+            DriftRegistryClient::parse_reference("localhost:5000/bolt/app:v1")
+                .expect("parse local registry"),
+            ("localhost:5000/bolt/app".to_string(), "v1".to_string())
+        );
+        assert_eq!(
+            client.request_target("localhost:5000/bolt/app"),
+            (
+                "http://localhost:5000".to_string(),
+                "bolt/app".to_string(),
+                false
+            )
+        );
+        assert_eq!(
+            DriftRegistryClient::parse_reference("localhost:5000/bolt/app")
+                .expect("parse untagged local registry"),
+            ("localhost:5000/bolt/app".to_string(), "latest".to_string())
+        );
+    }
+
+    #[test]
+    fn final_blob_upload_url_handles_relative_absolute_and_query_locations() {
+        assert_eq!(
+            DriftRegistryClient::final_blob_upload_url(
+                "http://localhost:5000",
+                "/v2/bolt/blobs/uploads/abc",
+                "sha256:deadbeef",
+            )
+            .expect("absolute path location"),
+            "http://localhost:5000/v2/bolt/blobs/uploads/abc?digest=sha256:deadbeef"
+        );
+        assert_eq!(
+            DriftRegistryClient::final_blob_upload_url(
+                "http://localhost:5000",
+                "v2/bolt/blobs/uploads/abc?state=1",
+                "sha256:deadbeef",
+            )
+            .expect("relative query location"),
+            "http://localhost:5000/v2/bolt/blobs/uploads/abc?state=1&digest=sha256:deadbeef"
+        );
+        assert_eq!(
+            DriftRegistryClient::final_blob_upload_url(
+                "http://localhost:5000",
+                "https://registry.example/uploads/abc",
+                "sha256:deadbeef",
+            )
+            .expect("absolute URL location"),
+            "https://registry.example/uploads/abc?digest=sha256:deadbeef"
+        );
+    }
+
+    #[test]
+    fn p2p_package_filename_is_filesystem_safe() {
+        assert_eq!(
+            p2p_package_filename("ghcr.io/ghostkellz/bolt:latest"),
+            "ghcr.io_ghostkellz_bolt_latest"
+        );
+    }
+
+    #[tokio::test]
+    async fn p2p_file_peer_download_copies_package_to_repo_cache() {
+        let temp = scratch_tempdir();
+        let peer_dir = temp.path().join("peer");
+        tokio::fs::create_dir_all(&peer_dir)
+            .await
+            .expect("create peer dir");
+        let package_ref = "local/bolt-p2p-test:download";
+        let package_name = p2p_package_filename(package_ref);
+        let source = peer_dir.join(&package_name);
+        tokio::fs::write(&source, b"package-bytes")
+            .await
+            .expect("write package");
+
+        let client = test_registry_client(None);
+        let peer = MeshPeer {
+            address: format!("file://{}", peer_dir.display()),
+            latency_ms: 1,
+            bandwidth_mbps: 1000,
+            reliability_score: 1.0,
+        };
+
+        let path = client
+            .download_from_peer(&peer, package_ref)
+            .await
+            .expect("download from file peer");
+        let bytes = tokio::fs::read(path).await.expect("read cached package");
+        assert_eq!(bytes, b"package-bytes");
+    }
+
+    #[tokio::test]
+    async fn p2p_share_makes_package_discoverable_locally() {
+        let temp = scratch_tempdir();
+        let package_ref = "local/bolt-p2p-test:share";
+        let source = temp.path().join("package.blob");
+        tokio::fs::write(&source, b"share-bytes")
+            .await
+            .expect("write source package");
+
+        let client = test_registry_client(None);
+        client
+            .share_via_p2p(package_ref, source.to_str().expect("utf8 path"))
+            .await
+            .expect("share package");
+
+        let peers = client
+            .discover_package_peers(package_ref)
+            .await
+            .expect("discover package peers");
+        assert!(peers.iter().any(|peer| peer.address.starts_with("file://")));
+    }
+
+    #[test]
+    fn parse_bearer_challenge_extracts_registry_token_fields() {
+        let challenge = DriftRegistryClient::parse_bearer_challenge(
+            r#"Bearer realm="https://auth.example/token",service="registry.example",scope="repository:ghost/bolt:pull,push""#,
+        )
+        .expect("parse bearer challenge");
+
+        assert_eq!(challenge.realm, "https://auth.example/token");
+        assert_eq!(challenge.service.as_deref(), Some("registry.example"));
+        assert_eq!(
+            challenge.scope.as_deref(),
+            Some("repository:ghost/bolt:pull,push")
+        );
+    }
+
+    #[test]
+    fn parse_bearer_challenge_rejects_non_bearer_headers() {
+        assert!(DriftRegistryClient::parse_bearer_challenge("Basic realm=registry").is_none());
+    }
+
     #[tokio::test]
     async fn resolve_manifest_uses_object_store_cache() {
         let manifest = PackageManifest {
@@ -1479,7 +2205,7 @@ mod tests {
             None,
             Some(b"cached-config".to_vec()),
         ))));
-        let temp = tempdir().expect("tempdir");
+        let temp = scratch_tempdir();
         let dest = temp.path().join("config.json");
 
         client
@@ -1489,5 +2215,147 @@ mod tests {
 
         let contents = tokio::fs::read(&dest).await.expect("read cached config");
         assert_eq!(contents, b"cached-config");
+    }
+
+    #[tokio::test]
+    async fn upload_blob_and_manifest_use_oci_registry_endpoints() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind registry test listener");
+        let addr = listener.local_addr().expect("registry listener addr");
+        let server_events = events.clone();
+
+        let server = tokio::spawn(async move {
+            for _ in 0..4 {
+                let (mut socket, _) = listener.accept().await.expect("accept request");
+                let events = server_events.clone();
+                tokio::spawn(async move {
+                    let (method, target, body) = read_http_request(&mut socket).await;
+                    events
+                        .lock()
+                        .unwrap()
+                        .push(format!("{} {}", method, target));
+
+                    if method == "HEAD" && target == "/v2/test/image/blobs/sha256:abc123" {
+                        write_response(&mut socket, "404 Not Found", &[], b"").await;
+                    } else if method == "POST" && target == "/v2/test/image/blobs/uploads/" {
+                        write_response(
+                            &mut socket,
+                            "202 Accepted",
+                            &[("Location", "/v2/test/image/blobs/uploads/upload-1")],
+                            b"",
+                        )
+                        .await;
+                    } else if method == "PUT"
+                        && target == "/v2/test/image/blobs/uploads/upload-1?digest=sha256:abc123"
+                    {
+                        assert_eq!(body, b"layer-bytes");
+                        write_response(&mut socket, "201 Created", &[], b"").await;
+                    } else if method == "PUT" && target == "/v2/test/image/manifests/latest" {
+                        assert_eq!(body, br#"{"schemaVersion":2}"#);
+                        write_response(&mut socket, "201 Created", &[], b"").await;
+                    } else {
+                        write_response(&mut socket, "500 Internal Server Error", &[], b"bad path")
+                            .await;
+                    }
+                });
+            }
+        });
+
+        let temp = scratch_tempdir();
+        let blob_path = temp.path().join("layer");
+        tokio::fs::write(&blob_path, b"layer-bytes")
+            .await
+            .expect("write blob");
+
+        let mut client = test_registry_client(None);
+        client.endpoint = format!("http://{}", addr);
+        client
+            .upload_blob_from_path("test/image", "sha256:abc123", &blob_path)
+            .await
+            .expect("upload blob");
+        client
+            .upload_manifest_bytes(
+                "test/image",
+                "latest",
+                br#"{"schemaVersion":2}"#,
+                "application/vnd.oci.image.manifest.v1+json",
+            )
+            .await
+            .expect("upload manifest");
+
+        server.await.expect("server task");
+        assert_eq!(
+            events.lock().unwrap().as_slice(),
+            [
+                "HEAD /v2/test/image/blobs/sha256:abc123",
+                "POST /v2/test/image/blobs/uploads/",
+                "PUT /v2/test/image/blobs/uploads/upload-1?digest=sha256:abc123",
+                "PUT /v2/test/image/manifests/latest",
+            ]
+        );
+    }
+
+    async fn read_http_request<S>(socket: &mut S) -> (String, String, Vec<u8>)
+    where
+        S: AsyncReadExt + Unpin,
+    {
+        let mut bytes = Vec::new();
+        let mut buf = [0_u8; 1024];
+        let header_end;
+        loop {
+            let n = socket.read(&mut buf).await.expect("read request");
+            assert!(n > 0, "request closed before headers");
+            bytes.extend_from_slice(&buf[..n]);
+            if let Some(pos) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+                header_end = pos + 4;
+                break;
+            }
+        }
+
+        let headers = String::from_utf8_lossy(&bytes[..header_end]);
+        let request_line = headers.lines().next().expect("request line");
+        let mut parts = request_line.split_whitespace();
+        let method = parts.next().expect("method").to_string();
+        let target = parts.next().expect("target").to_string();
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("Content-Length:")
+                    .or_else(|| line.strip_prefix("content-length:"))
+                    .and_then(|value| value.trim().parse::<usize>().ok())
+            })
+            .unwrap_or(0);
+
+        let mut body = bytes[header_end..].to_vec();
+        while body.len() < content_length {
+            let n = socket.read(&mut buf).await.expect("read request body");
+            assert!(n > 0, "request closed before body");
+            body.extend_from_slice(&buf[..n]);
+        }
+        body.truncate(content_length);
+
+        (method, target, body)
+    }
+
+    async fn write_response<S>(socket: &mut S, status: &str, headers: &[(&str, &str)], body: &[u8])
+    where
+        S: AsyncWriteExt + Unpin,
+    {
+        let mut response = format!(
+            "HTTP/1.1 {}\r\nContent-Length: {}\r\nConnection: close\r\n",
+            status,
+            body.len()
+        );
+        for (name, value) in headers {
+            response.push_str(&format!("{}: {}\r\n", name, value));
+        }
+        response.push_str("\r\n");
+        socket
+            .write_all(response.as_bytes())
+            .await
+            .expect("write response headers");
+        socket.write_all(body).await.expect("write response body");
     }
 }

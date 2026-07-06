@@ -12,8 +12,17 @@
 | [Gaming Workloads](workloads/gaming.md) | Gaming profiles and optimization |
 | [AI/ML Workloads](workloads/ai-ml.md) | Ollama, training, and inference |
 | [Surge Orchestration](operations/orchestration.md) | Multi-service Boltfile stacks |
-| [Networking](operations/networking.md) | QUIC networks, DNS, and ports |
-| [Snapshots](operations/snapshots.md) | BTRFS/ZFS automation |
+| [Networking Overview](operations/networking.md) | Network modes, DNS, and ports |
+| [Bridge Networking](networking/bridge.md) | Bridge/veth/IPAM lifecycle |
+| [Host Networking](networking/host-networking.md) | Shared host network mode |
+| [QUIC Networking](networking/quic.md) | Quinn endpoints, proxy health, RTT |
+| [Snapshots](operations/snapshots.md) | BTRFS/ZFS automation and rollback safety |
+| [Generations](operations/generations.md) | Snapshot-backed generation inspection and GC protection |
+| [Volumes](operations/volumes.md) | Named volume lifecycle, metadata, and usage tracking |
+| [Garbage Collection](operations/garbage-collection.md) | Native image/runtime-root GC |
+| [Architecture](internals/architecture.md) | Runtime subsystem map and lifecycle diagrams |
+| [Accepted Advisories](advisories/accepted.md) | Current accepted security risks |
+| [Resolved Advisories](advisories/resolved.md) | Fixed advisory evidence |
 
 ## Overview
 
@@ -77,12 +86,39 @@ flowchart TB
     CLI --> SNAP
 ```
 
+## Documentation Map
+
+```mermaid
+flowchart TD
+    Start["What are you doing?"] --> Run["Run containers"]
+    Start --> Net["Understand networking"]
+    Start --> Snap["Protect state"]
+    Start --> GPU["Use GPUs"]
+    Start --> API["Integrate Bolt"]
+
+    Run --> Quick["getting-started/quickstart.md"]
+    Run --> CLI["reference/cli.md"]
+    Net --> NetOverview["operations/networking.md"]
+    Net --> Bridge["networking/bridge.md"]
+    Net --> QUIC["networking/quic.md"]
+    Snap --> Snapshots["operations/snapshots.md"]
+    Snap --> Generations["operations/generations.md"]
+    Snap --> GC["operations/garbage-collection.md"]
+    Run --> Volumes["operations/volumes.md"]
+    GPU --> GPUOverview["gpu/overview.md"]
+    API --> Rust["reference/rust-api.md"]
+    API --> Arch["internals/architecture.md"]
+```
+
 ## Structure
 
 ```
 docs/
+├── advisories/
 ├── getting-started/
 ├── gpu/
+├── internals/
+├── networking/
 ├── operations/
 ├── reference/
 └── workloads/

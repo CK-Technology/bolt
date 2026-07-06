@@ -264,7 +264,7 @@ async fn configure_wine_version(winver: &str) -> Result<()> {
     let wine_prefix = std::env::var("WINEPREFIX").unwrap_or_else(|_| {
         dirs::home_dir()
             .map(|home| home.join(".wine").to_string_lossy().to_string())
-            .unwrap_or_else(|| "/tmp/wine".to_string())
+            .unwrap_or_else(|| ".scratch/wine".to_string())
     });
 
     info!("  📁 Wine prefix: {}", wine_prefix);
@@ -517,7 +517,6 @@ async fn launch_containerized_game(game_name: &str, args: &[String]) -> Result<(
         .arg("--network=gaming") // Use gaming-optimized network
         .arg("--device=/dev/dri") // GPU access
         .arg("--env=DISPLAY")
-        .arg("--volume=/tmp/.X11-unix:/tmp/.X11-unix")
         .arg("--volume=/dev/shm:/dev/shm")
         .arg(format!("bolt://games/{}", game_name));
 

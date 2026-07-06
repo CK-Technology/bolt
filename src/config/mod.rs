@@ -1300,7 +1300,7 @@ pub fn create_example_boltfile() -> BoltFile {
                     filesystem_roots: vec![
                         "/workspace".to_string(),
                         "/src".to_string(),
-                        "/tmp".to_string(),
+                        ".scratch".to_string(),
                     ],
                     shell_commands: vec![
                         "cargo".to_string(),
@@ -1450,7 +1450,6 @@ pub fn create_example_boltfile() -> BoltFile {
                         "/var/lib/bolt".to_string(),
                     ]),
                     exclude_paths: Some(vec![
-                        "/tmp".to_string(),
                         "/var/tmp".to_string(),
                         "/var/log".to_string(),
                         "/var/cache".to_string(),

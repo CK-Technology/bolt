@@ -177,8 +177,6 @@ impl NvidiaManager {
                     "[gpu:{}]/GPUMemoryTransferRateOffset[3]={}",
                     device_id, offset_mhz
                 ),
-                "--assign-server-socket",
-                "/tmp/.X11-unix/X0",
             ])
             .output()
             .context("Failed to execute nvidia-settings")?;
@@ -210,8 +208,6 @@ impl NvidiaManager {
                     "[gpu:{}]/GPUGraphicsClockOffset[3]={}",
                     device_id, offset_mhz
                 ),
-                "--assign-server-socket",
-                "/tmp/.X11-unix/X0",
             ])
             .output()
             .context("Failed to execute nvidia-settings")?;
