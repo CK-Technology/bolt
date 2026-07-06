@@ -3318,6 +3318,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn prune_images_respects_pinned_images() -> crate::Result<()> {
+        let temp_root = scratch_tempdir();
+        let mut manager = StorageManager {
+            storage_root: temp_root.path().to_path_buf(),
+            images: HashMap::new(),
+            registry: DriftRegistryClient::new_test(None),
+            object_store: None,
+        };
+
+        let pinned = "library/pinned:latest".to_string();
+        let unused = "library/unused:latest".to_string();
+        for reference in [&pinned, &unused] {
+            let image_path = manager.get_image_path(reference);
+            fs::create_dir_all(&image_path).await?;
+            fs::write(image_path.join("metadata.json"), b"metadata").await?;
+            manager.images.insert(
+                reference.clone(),
+                ImageMetadata {
+                    name: reference.trim_end_matches(":latest").to_string(),
+                    tag: "latest".to_string(),
+                    reference: Some(reference.clone()),
+                    digest: format!("sha256:{:x}", Sha256::digest(reference.as_bytes())),
+                    size: 8,
+                    created: Utc::now(),
+                    layers: vec![],
+                    config: ImageConfig {
+                        env: vec![],
+                        cmd: None,
+                        entrypoint: None,
+                        working_dir: None,
+                        user: None,
+                        exposed_ports: vec![],
+                    },
+                    config_digest: None,
+                },
+            );
+        }
+
+        manager.pin_image(&pinned).await?;
+        let dry_run = manager
+            .prune_images(&HashSet::new(), &HashSet::new(), &HashSet::new(), true)
+            .await?;
+        assert_eq!(dry_run.candidates.len(), 1);
+        assert_eq!(dry_run.candidates[0].reference, unused);
+        assert!(
+            dry_run
+                .protected_images
+                .iter()
+                .any(|entry| entry.contains(&pinned) && entry.contains("pinned"))
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn prune_images_removes_stale_image_directories_without_metadata() -> crate::Result<()> {
         let temp_root = scratch_tempdir();
         let mut manager = StorageManager {

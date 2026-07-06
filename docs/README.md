@@ -20,6 +20,7 @@
 | [Generations](operations/generations.md) | Snapshot-backed generation inspection and GC protection |
 | [Volumes](operations/volumes.md) | Named volume lifecycle, metadata, and usage tracking |
 | [Garbage Collection](operations/garbage-collection.md) | Native image/runtime-root GC |
+| [Production Readiness](operations/production-readiness.md) | Local gates, runtime gates, and known readiness gaps |
 | [Architecture](internals/architecture.md) | Runtime subsystem map and lifecycle diagrams |
 | [Accepted Advisories](advisories/accepted.md) | Current accepted security risks |
 | [Resolved Advisories](advisories/resolved.md) | Fixed advisory evidence |
@@ -105,6 +106,7 @@ flowchart TD
     Snap --> Generations["operations/generations.md"]
     Snap --> GC["operations/garbage-collection.md"]
     Run --> Volumes["operations/volumes.md"]
+    Run --> Ready["operations/production-readiness.md"]
     GPU --> GPUOverview["gpu/overview.md"]
     API --> Rust["reference/rust-api.md"]
     API --> Arch["internals/architecture.md"]

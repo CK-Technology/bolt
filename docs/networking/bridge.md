@@ -22,6 +22,10 @@ flowchart LR
 - `none` configures loopback-only networking.
 - `container:<id>` is rejected until namespace sharing is implemented.
 - Bridge stats count interfaces attached to the requested bridge only.
+- Project service discovery records live container status and published-port
+  loopback addresses after `bolt apply`. Unpublished bridge IPs are currently
+  tracked internally by the network manager but are not exported through
+  `ContainerInfo` yet.
 
 ## Safety Model
 

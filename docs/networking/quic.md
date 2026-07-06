@@ -36,6 +36,8 @@ flowchart LR
 ## Current Limits
 
 - Service discovery is still local runtime state, not a distributed catalog.
+- Project discovery entries now mark QUIC protocol intent when a service is
+  attached to a network whose name contains `quic`.
 - QUIC port forwarding exists as tracked rules, but full multi-host routing is
   not a Phase D exit criterion yet.
 - Backpressure and reconnect policy should be promoted before QUIC is described

@@ -181,15 +181,21 @@ async fn main() -> Result<()> {
                 }
 
                 println!(
-                    "{:<24} {:<64} {:>12} {:<25}",
-                    "REPOSITORY:TAG", "IMAGE ID", "SIZE", "CREATED"
+                    "{:<24} {:<64} {:>12} {:<8} {:<25}",
+                    "REPOSITORY:TAG", "IMAGE ID", "SIZE", "PINNED", "CREATED"
                 );
                 for image in images {
+                    let pinned = runtime
+                        .inspect_image(&image.name)
+                        .await
+                        .map(|(_, _, pinned)| pinned)
+                        .unwrap_or(false);
                     println!(
-                        "{:<24} {:<64} {:>12} {:<25}",
+                        "{:<24} {:<64} {:>12} {:<8} {:<25}",
                         image.name,
                         image.id,
                         format_bytes(image.size),
+                        yes_no(pinned),
                         image.created.unwrap_or_else(|| "-".to_string())
                     );
                 }
@@ -1688,7 +1694,30 @@ fn print_inspection(inspection: &bolt::project::Inspection) {
             }
             if let Some(discovery) = &service.discovery {
                 println!("  DNS: {}", discovery.dns_name);
+                println!(
+                    "  Address: {} ({})",
+                    discovery.address, discovery.address_source
+                );
                 println!("  Protocol: {}", discovery.protocol);
+                println!("  Healthy: {}", yes_no(discovery.healthy));
+            }
+            if service.gpu.requested {
+                println!("  GPU: requested");
+                if let Some(vendor) = &service.gpu.vendor {
+                    println!("    Vendor: {}", vendor);
+                }
+                if let Some(runtime) = &service.gpu.runtime {
+                    println!("    Runtime: {}", runtime);
+                }
+                if !service.gpu.devices.is_empty() {
+                    println!("    Devices: {}", service.gpu.devices.join(", "));
+                }
+                if let Some(profile) = &service.gpu.profile {
+                    println!("    Profile: {}", profile);
+                }
+                for note in &service.gpu.notes {
+                    println!("    Note: {}", note);
+                }
             }
             println!(
                 "  Runtime state: {}",
@@ -1741,12 +1770,32 @@ fn normalize_gpu_device_request(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_gpu_device_request;
+    use super::{Cli, normalize_gpu_device_request};
+    use clap::CommandFactory;
 
     #[test]
     fn gpu_device_request_normalizes_docker_device_syntax() {
         assert_eq!(normalize_gpu_device_request("all"), "all");
         assert_eq!(normalize_gpu_device_request(" device=0,1 "), "0,1");
         assert_eq!(normalize_gpu_device_request("0"), "0");
+    }
+
+    #[test]
+    fn cli_includes_release_readiness_commands() {
+        let command = Cli::command();
+        let names = command
+            .get_subcommands()
+            .map(|command| command.get_name().to_string())
+            .collect::<Vec<_>>();
+        for expected in [
+            "apply",
+            "validate",
+            "self-test",
+            "dns",
+            "completions",
+            "manpage",
+        ] {
+            assert!(names.iter().any(|name| name == expected), "{expected}");
+        }
     }
 }

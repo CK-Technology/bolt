@@ -864,7 +864,7 @@ impl BoltNativeRuntime {
             hostname: state.config.hostname.clone(),
             cpus: None,
             memory: None,
-            network: Some("bridge".to_string()),
+            network: Some(state.config.network_mode.clone()),
             cap_add: vec![],
             cap_drop: vec![],
             privileged: state.config.privileged,

@@ -24,6 +24,9 @@ Version is held at 0.1.0 (no release tags yet). Entries below are dated.
   - `bolt inspect service|container|image|volume|network`
   - `bolt completions <bash|zsh|fish>` and `bolt manpage`
 - Native image inspection and GC pins via `bolt image inspect|pin|unpin`.
+- Repo-local project lifecycle smoke script at `scripts/project-smoke.sh`.
+- Production readiness operations guide covering local gates, runtime gates, and
+  known gaps.
 - `Boltfile.lock` with Boltfile hashes, service config hashes, cached image
   digests, build context hashes, and volume/network config hashes.
 - Snapshot-backed generations via `bolt generations list [--verbose]`.
@@ -40,6 +43,17 @@ Version is held at 0.1.0 (no release tags yet). Entries below are dated.
 - `bolt apply` now prepares declared volumes and networks before invoking Surge,
   writes service discovery metadata, honors `depends_on` ordering, selectively
   applies changed services, and updates `Boltfile.lock`.
+- `bolt lock` now resolves tag-based images through the native registry path and
+  records digest-pinned image references without registry access.
+- `bolt validate` now checks service references, duplicate host ports, volume
+  mount syntax, supported network drivers, GPU request shape, dependency graph
+  validity, and lockfile digest state.
+- Service discovery is now written after project apply using live runtime state,
+  including container IDs, status, health, address, and address-source metadata.
+- `bolt inspect service` now reports service discovery address metadata and GPU
+  request intent.
+- Project plan actions now carry optional detail strings for GPU-enabled
+  services.
 - `bolt destroy` now plans destructive actions and uses reverse dependency
   ordering.
 - Image garbage collection protects digests and container roots referenced by
@@ -51,10 +65,14 @@ Version is held at 0.1.0 (no release tags yet). Entries below are dated.
   command execution instead of silently logging placeholder success.
 - Active scratch/cache code paths were moved to repo-local `.scratch` patterns
   where scratch space is unavoidable.
+- `scripts/local-smoke.sh` now defaults to repo-local `.scratch` instead of an
+  external cache path.
 
 ### Fixed
 - Volume usage reconciliation no longer clears `used_by` metadata when no
   container state directory exists.
+- Native restart reconstruction now preserves the container's original network
+  mode instead of forcing bridge.
 - Snapshot metadata now records Boltfile provenance and remains backward
   compatible with older `snapshot.json` files.
 - Several native runtime, networking, GPU, Wayland, registry, and storage paths

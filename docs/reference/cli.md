@@ -114,8 +114,25 @@ bolt manpage
 `bolt apply` uses Surge as the executor, then writes `Boltfile.lock`.
 `bolt plan`, `bolt drift`, and `bolt doctor` are inspection commands.
 `bolt apply` creates declared volumes and networks before services, honors
-`depends_on` order, and writes `.bolt` service-discovery metadata under the Bolt
-data directory.
+`depends_on` order, and writes service-discovery metadata under the Bolt data
+directory from live container state after the apply attempt.
+`bolt validate` checks service dependencies, duplicate host ports, mount syntax,
+service network/volume references, network drivers, GPU request shape, and
+lockfile digest state.
+`bolt lock` resolves tag-based image references through the native registry path
+so `Boltfile.lock` can pin immutable digests. `bolt lock --check` is
+side-effect free and verifies the existing lock against local runtime state.
+
+Project lifecycle smoke:
+
+```bash
+scripts/project-smoke.sh
+BOLT_PROJECT_SMOKE_APPLY=1 scripts/project-smoke.sh
+```
+
+The default smoke uses a digest-pinned fixture image and repo-local `.scratch`
+state so it does not require registry access. Set `BOLT_PROJECT_SMOKE_APPLY=1`
+to exercise real pull/apply/destroy behavior.
 
 ### Native Images
 

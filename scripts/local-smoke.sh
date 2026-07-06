@@ -12,17 +12,17 @@ if [[ -z "${BOLT_BIN:-}" ]]; then
   cargo build --manifest-path "$ROOT/Cargo.toml"
 fi
 
-# Ephemeral working dir under the user cache (XDG), created fresh and
-# removed on exit. Nothing is left in the repo or in /tmp. Override with
-# BOLT_SMOKE_ROOT to point at a caller-managed directory (not auto-removed).
+# Ephemeral working dir under repo-local .scratch, created fresh and
+# removed on exit. Override with BOLT_SMOKE_ROOT to point at a
+# caller-managed directory (not auto-removed).
 if [[ -n "${BOLT_SMOKE_ROOT:-}" ]]; then
   SMOKE_ROOT="$BOLT_SMOKE_ROOT"
   OWN_SMOKE_ROOT=0
   mkdir -p "$SMOKE_ROOT"
 else
-  CACHE_BASE="${XDG_CACHE_HOME:-$HOME/.cache}/bolt"
-  mkdir -p "$CACHE_BASE"
-  SMOKE_ROOT="$(mktemp -d "$CACHE_BASE/local-smoke.XXXXXX")"
+  SCRATCH_BASE="$ROOT/.scratch"
+  mkdir -p "$SCRATCH_BASE"
+  SMOKE_ROOT="$(mktemp -d "$SCRATCH_BASE/local-smoke.XXXXXX")"
   OWN_SMOKE_ROOT=1
 fi
 

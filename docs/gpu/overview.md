@@ -72,6 +72,30 @@ bolt nv doctor
 bolt run --gpu all nvidia/cuda:12.0-base nvidia-smi
 ```
 
+Project services can declare GPU intent in `Boltfile.toml`:
+
+```toml
+[services.ml]
+image = "nvidia/cuda:12.0-base"
+
+[services.ml.gaming]
+enabled = true
+gpu_passthrough = true
+performance_profile = "cuda"
+
+[services.ml.gaming.gpu]
+runtime = "nvbind"
+isolation_level = "shared"
+
+[services.ml.gaming.gpu.nvbind]
+devices = ["gpu:0"]
+```
+
+`bolt validate` checks the declared runtime, isolation level, and mutually
+exclusive vendor settings. `bolt inspect service <name>` reports the requested
+GPU vendor/runtime/devices/profile so project plans and inspections show GPU
+intent even on hosts without matching hardware.
+
 ## Detection Flow
 
 On a GPU request, Bolt scans for a vendor driver and routes to the matching

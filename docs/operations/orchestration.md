@@ -95,14 +95,16 @@ bolt surge logs api --follow
 ```
 
 `bolt apply` is the project-control command. It prepares declared volumes and
-networks, writes the service-discovery registry, orders services by
-`depends_on`, then uses Surge as the executor. `bolt surge up` remains the
-direct Compose-like entrypoint.
+networks, orders services by `depends_on`, uses Surge as the executor, then
+writes the service-discovery registry from live runtime state. `bolt surge up`
+remains the direct Compose-like entrypoint.
 
 ## Lockfile and Discovery
 
-`Boltfile.lock` records the Boltfile hash, service config hashes, image digests
-when available, build context hashes, and network/volume config hashes.
+`Boltfile.lock` records the Boltfile hash, service config hashes, image digests,
+build context hashes, and network/volume config hashes. `bolt lock` resolves
+tagged image references through the native registry path; digest-pinned image
+references are recorded directly. `bolt lock --check` does not pull images.
 
 Bolt also writes a service-discovery registry under the Bolt data directory with
 entries like:
@@ -111,7 +113,10 @@ entries like:
 web.my-app.bolt -> my-app_web
 ```
 
-That registry is the local foundation for Bolt DNS and QUIC service discovery.
+Each entry records the DNS name, protocol, container ID/status when present,
+health, loopback/published-port address metadata, and the source of that
+address. That registry is the local foundation for Bolt DNS and QUIC service
+discovery.
 
 ## Service Configuration
 
@@ -132,9 +137,16 @@ restart = "always"              # Restart policy
 image = "ollama/ollama"
 ports = ["11434:11434"]
 
-[services.ml-inference.gpu]
-devices = "all"
-profile = "ollama-medium"
+[services.ml-inference.gaming]
+enabled = true
+gpu_passthrough = true
+performance_profile = "ollama-medium"
+
+[services.ml-inference.gaming.gpu]
+runtime = "nvbind"
+
+[services.ml-inference.gaming.gpu.nvbind]
+devices = ["gpu:all"]
 ```
 
 ### Gaming Services
@@ -143,13 +155,19 @@ profile = "ollama-medium"
 image = "ghcr.io/games-on-whales/steam:latest"
 ports = ["8080:8080"]
 
-[services.steam.gpu]
-devices = "all"
-profile = "cyberpunk 2077"
-
 [services.steam.gaming]
+enabled = true
+gpu_passthrough = true
+performance_profile = "cyberpunk-2077"
+
+[services.steam.gaming.gpu]
+runtime = "nvbind"
+
+[services.steam.gaming.gpu.nvbind]
+devices = ["gpu:all"]
+
+[services.steam.gaming.gpu.gaming]
 wine_optimizations = true
-audio_system = "pipewire"
 ```
 
 ## Networks

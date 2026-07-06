@@ -23,6 +23,8 @@ pub struct ProjectAction {
     pub resource_type: ResourceType,
     pub name: String,
     pub reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -130,6 +132,12 @@ pub struct ServiceDiscoveryEntry {
     pub healthy: bool,
     #[serde(default = "localhost_ip")]
     pub address: Ipv4Addr,
+    #[serde(default)]
+    pub address_source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,6 +157,17 @@ pub struct ServiceInspection {
     pub desired: Service,
     pub discovery: Option<ServiceDiscoveryEntry>,
     pub container: Option<ContainerInfo>,
+    pub gpu: ServiceGpuInspection,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ServiceGpuInspection {
+    pub requested: bool,
+    pub vendor: Option<String>,
+    pub runtime: Option<String>,
+    pub devices: Vec<String>,
+    pub profile: Option<String>,
+    pub notes: Vec<String>,
 }
 
 pub async fn plan(config: &BoltConfig, runtime: &BoltRuntime) -> Result<ProjectPlan> {
@@ -172,7 +191,6 @@ pub async fn apply(
     let boltfile = config.load_boltfile()?;
     create_declared_volumes(runtime, &boltfile).await?;
     create_declared_networks(runtime, &boltfile).await?;
-    write_service_discovery(config, &boltfile)?;
     let ordered_services = selective_apply_services(&boltfile, &before, services, force_recreate)?;
     if !ordered_services.is_empty() {
         runtime
@@ -180,6 +198,8 @@ pub async fn apply(
             .await
             .context("failed to apply Boltfile through Surge")?;
     }
+    let containers = runtime.list_containers(true).await.unwrap_or_default();
+    write_service_discovery(config, &boltfile, &containers)?;
     write_lock(config, runtime).await?;
     Ok(before)
 }
@@ -203,7 +223,7 @@ pub async fn destroy(
 
 pub async fn write_lock(config: &BoltConfig, runtime: &BoltRuntime) -> Result<BoltLock> {
     let boltfile = config.load_boltfile()?;
-    let lock = build_lock(config, runtime, &boltfile).await?;
+    let lock = build_lock(config, runtime, &boltfile, true).await?;
     let path = lock_path(config);
     let json = serde_json::to_string_pretty(&lock)?;
     std::fs::write(&path, json).with_context(|| format!("failed to write {}", path.display()))?;
@@ -213,7 +233,7 @@ pub async fn write_lock(config: &BoltConfig, runtime: &BoltRuntime) -> Result<Bo
 pub async fn check_lock(config: &BoltConfig, runtime: &BoltRuntime) -> Result<()> {
     let existing = read_lock(config)?;
     let boltfile = config.load_boltfile()?;
-    let current = build_lock(config, runtime, &boltfile).await?;
+    let current = build_lock(config, runtime, &boltfile, false).await?;
     if existing.boltfile_hash != current.boltfile_hash {
         return Err(anyhow!(
             "Boltfile.lock is stale: expected {}, current {}",
@@ -227,6 +247,14 @@ pub async fn check_lock(config: &BoltConfig, runtime: &BoltRuntime) -> Result<()
         || existing.networks != current.networks
     {
         return Err(anyhow!("Boltfile.lock is stale: locked resource hashes differ").into());
+    }
+    let missing_digests = validate_locked_image_digests(config);
+    if !missing_digests.is_empty() {
+        return Err(anyhow!(
+            "Boltfile.lock is missing required image digests: {}",
+            missing_digests.join("; ")
+        )
+        .into());
     }
     Ok(())
 }
@@ -271,8 +299,9 @@ pub async fn drift(config: &BoltConfig, runtime: &BoltRuntime) -> Result<DriftRe
 pub fn write_service_discovery(
     config: &BoltConfig,
     boltfile: &BoltFile,
+    containers: &[ContainerInfo],
 ) -> Result<ServiceDiscoveryRegistry> {
-    let registry = service_discovery_registry(boltfile);
+    let registry = service_discovery_registry(boltfile, containers);
     fs::create_dir_all(&config.data_dir)?;
     let path = service_discovery_path(config);
     fs::write(&path, serde_json::to_string_pretty(&registry)?)
@@ -469,6 +498,42 @@ pub async fn validate(config: &BoltConfig, runtime: &BoltRuntime) -> ValidationR
             .map(|order| format!("{} service(s), dependency order valid", order.len()))
             .unwrap_or_else(|err| err.to_string()),
     });
+    let service_refs = validate_service_references(&boltfile);
+    checks.push(DoctorCheck {
+        name: "Service references".to_string(),
+        ok: service_refs.is_empty(),
+        message: validation_message(&service_refs),
+    });
+    let ports = validate_duplicate_ports(&boltfile);
+    checks.push(DoctorCheck {
+        name: "Ports".to_string(),
+        ok: ports.is_empty(),
+        message: validation_message(&ports),
+    });
+    let mounts = validate_volume_mounts(&boltfile);
+    checks.push(DoctorCheck {
+        name: "Volume mounts".to_string(),
+        ok: mounts.is_empty(),
+        message: validation_message(&mounts),
+    });
+    let drivers = validate_network_drivers(&boltfile);
+    checks.push(DoctorCheck {
+        name: "Network drivers".to_string(),
+        ok: drivers.is_empty(),
+        message: validation_message(&drivers),
+    });
+    let gpu_requests = validate_gpu_requests(&boltfile);
+    checks.push(DoctorCheck {
+        name: "GPU requests".to_string(),
+        ok: gpu_requests.is_empty(),
+        message: validation_message(&gpu_requests),
+    });
+    let missing_digests = validate_locked_image_digests(config);
+    checks.push(DoctorCheck {
+        name: "Locked digests".to_string(),
+        ok: missing_digests.is_empty(),
+        message: validation_message(&missing_digests),
+    });
     checks.push(DoctorCheck {
         name: "Lockfile".to_string(),
         ok: check_lock(config, runtime).await.is_ok(),
@@ -479,7 +544,9 @@ pub async fn validate(config: &BoltConfig, runtime: &BoltRuntime) -> ValidationR
     });
     checks.push(DoctorCheck {
         name: "Service discovery".to_string(),
-        ok: !service_discovery_registry(&boltfile).services.is_empty()
+        ok: !service_discovery_registry(&boltfile, &[])
+            .services
+            .is_empty()
             || boltfile.services.is_empty(),
         message: format!("{} service discovery entrie(s)", boltfile.services.len()),
     });
@@ -556,6 +623,7 @@ fn plan_from_state(
                 } else {
                     format!("container '{}' exists for {}", expected, image)
                 },
+                detail: gpu_action_detail(service),
             });
         } else {
             actions.push(ProjectAction {
@@ -563,6 +631,7 @@ fn plan_from_state(
                 resource_type: ResourceType::Service,
                 name: name.clone(),
                 reason: format!("container '{}' is missing", expected),
+                detail: gpu_action_detail(service),
             });
         }
         if let Some(image) = &service.image {
@@ -571,6 +640,7 @@ fn plan_from_state(
                 resource_type: ResourceType::Image,
                 name: image.clone(),
                 reason: "image must be present or pulled during apply".to_string(),
+                detail: None,
             });
         }
     }
@@ -582,6 +652,7 @@ fn plan_from_state(
                 resource_type: ResourceType::Volume,
                 name: name.clone(),
                 reason: "declared in Boltfile".to_string(),
+                detail: None,
             });
         }
     }
@@ -593,6 +664,7 @@ fn plan_from_state(
                 resource_type: ResourceType::Network,
                 name: name.clone(),
                 reason: "declared in Boltfile".to_string(),
+                detail: None,
             });
         }
     }
@@ -607,6 +679,7 @@ fn plan_from_state(
                 resource_type: ResourceType::Service,
                 name: service_name.to_string(),
                 reason: format!("container '{}' is not declared", name),
+                detail: None,
             });
         }
     }
@@ -640,6 +713,7 @@ fn destroy_actions(config: &BoltConfig, services: &[String]) -> Result<Vec<Proje
             resource_type: ResourceType::Service,
             reason: "destroy requested".to_string(),
             name,
+            detail: None,
         })
         .collect())
 }
@@ -648,6 +722,7 @@ async fn build_lock(
     config: &BoltConfig,
     runtime: &BoltRuntime,
     boltfile: &BoltFile,
+    resolve_images: bool,
 ) -> Result<BoltLock> {
     let image_digests = runtime
         .list_images()
@@ -659,16 +734,18 @@ async fn build_lock(
 
     let mut services = BTreeMap::new();
     for (name, service) in &boltfile.services {
+        let image_digest = if let Some(image) = service.image.as_deref() {
+            resolve_image_digest(runtime, &image_digests, image, resolve_images).await?
+        } else {
+            None
+        };
         services.insert(
             name.clone(),
             LockedService {
                 image: service.image.clone(),
                 build: service.build.clone(),
                 capsule: service.capsule.clone(),
-                image_digest: service
-                    .image
-                    .as_ref()
-                    .and_then(|image| image_digests.get(image).cloned()),
+                image_digest,
                 config_hash: service_config_hash(service)?,
                 build_context_hash: service
                     .build
@@ -727,6 +804,48 @@ async fn build_lock(
         volumes,
         networks,
     })
+}
+
+async fn resolve_image_digest(
+    runtime: &BoltRuntime,
+    cached_digests: &BTreeMap<String, String>,
+    image: &str,
+    resolve_remote: bool,
+) -> Result<Option<String>> {
+    if let Some(digest) = digest_from_image_reference(image) {
+        return Ok(Some(digest.to_string()));
+    }
+    if let Some(digest) = cached_digests.get(image) {
+        return Ok(Some(digest.clone()));
+    }
+    if let Ok((_, metadata, _)) = runtime.inspect_image(image).await {
+        return Ok(Some(metadata.digest));
+    }
+    if !resolve_remote || !is_tag_based_image_reference(image) {
+        return Ok(None);
+    }
+
+    runtime
+        .pull_image(image)
+        .await
+        .with_context(|| format!("failed to resolve image digest for '{}'", image))?;
+    let (_, metadata, _) = runtime
+        .inspect_image(image)
+        .await
+        .with_context(|| format!("failed to inspect resolved image '{}'", image))?;
+    Ok(Some(metadata.digest))
+}
+
+fn digest_from_image_reference(image: &str) -> Option<&str> {
+    image
+        .split_once("@sha256:")
+        .map(|(_, digest)| digest)
+        .filter(|digest| digest.len() == 64 && digest.chars().all(|ch| ch.is_ascii_hexdigit()))
+        .map(|digest| &image[image.len() - digest.len() - "sha256:".len()..])
+}
+
+fn is_tag_based_image_reference(image: &str) -> bool {
+    image.contains(':') && !image.contains("@sha256:")
 }
 
 fn read_lock(config: &BoltConfig) -> Result<BoltLock> {
@@ -935,18 +1054,277 @@ fn network_subnet(network: &Network) -> Option<String> {
         .and_then(|config| config.subnet.clone())
 }
 
-fn service_discovery_registry(boltfile: &BoltFile) -> ServiceDiscoveryRegistry {
+fn validate_service_references(boltfile: &BoltFile) -> Vec<String> {
+    let mut issues = Vec::new();
+    let networks = boltfile
+        .networks
+        .as_ref()
+        .map(|networks| networks.keys().cloned().collect::<BTreeSet<_>>())
+        .unwrap_or_default();
+    let volumes = boltfile
+        .volumes
+        .as_ref()
+        .map(|volumes| volumes.keys().cloned().collect::<BTreeSet<_>>())
+        .unwrap_or_default();
+
+    for (service_name, service) in &boltfile.services {
+        for network in service.networks.clone().unwrap_or_default() {
+            if !networks.contains(&network)
+                && !matches!(network.as_str(), "bridge" | "host" | "none" | "default")
+            {
+                issues.push(format!(
+                    "service '{}' references unknown network '{}'",
+                    service_name, network
+                ));
+            }
+        }
+        for mount in service.volumes.clone().unwrap_or_default() {
+            if let Some((source, _)) = mount.split_once(':')
+                && !source.starts_with('/')
+                && !source.starts_with('.')
+                && !source.starts_with('~')
+                && !volumes.contains(source)
+            {
+                issues.push(format!(
+                    "service '{}' references unknown named volume '{}'",
+                    service_name, source
+                ));
+            }
+        }
+    }
+    issues
+}
+
+fn validate_duplicate_ports(boltfile: &BoltFile) -> Vec<String> {
+    let mut seen = BTreeMap::<String, String>::new();
+    let mut issues = Vec::new();
+    for (service_name, service) in &boltfile.services {
+        for port in service.ports.clone().unwrap_or_default() {
+            if let Some(host) = port.split(':').next()
+                && !host.is_empty()
+                && host.chars().all(|ch| ch.is_ascii_digit())
+                && let Some(previous) = seen.insert(host.to_string(), service_name.clone())
+            {
+                issues.push(format!(
+                    "host port '{}' is used by '{}' and '{}'",
+                    host, previous, service_name
+                ));
+            }
+        }
+    }
+    issues
+}
+
+fn validate_volume_mounts(boltfile: &BoltFile) -> Vec<String> {
+    let mut issues = Vec::new();
+    for (service_name, service) in &boltfile.services {
+        for mount in service.volumes.clone().unwrap_or_default() {
+            let parts = mount.split(':').collect::<Vec<_>>();
+            if parts.len() < 2 || parts[0].is_empty() || parts[1].is_empty() {
+                issues.push(format!(
+                    "service '{}' has invalid volume mount '{}'",
+                    service_name, mount
+                ));
+            }
+        }
+    }
+    issues
+}
+
+fn validate_network_drivers(boltfile: &BoltFile) -> Vec<String> {
+    let mut issues = Vec::new();
+    for (name, network) in boltfile.networks.as_ref().into_iter().flatten() {
+        if !matches!(
+            network.driver.as_str(),
+            "bolt" | "gquic" | "bridge" | "host" | "none"
+        ) {
+            issues.push(format!(
+                "network '{}' uses unsupported driver '{}'",
+                name, network.driver
+            ));
+        }
+    }
+    issues
+}
+
+fn validate_gpu_requests(boltfile: &BoltFile) -> Vec<String> {
+    let mut issues = Vec::new();
+    for (service_name, service) in &boltfile.services {
+        let Some(gaming) = service.gaming.as_ref() else {
+            continue;
+        };
+        let Some(gpu) = gaming.gpu.as_ref() else {
+            if gaming.gpu_passthrough {
+                issues.push(format!(
+                    "service '{}' enables gpu_passthrough without [gaming.gpu] settings",
+                    service_name
+                ));
+            }
+            continue;
+        };
+
+        if let Some(runtime) = gpu.runtime.as_deref()
+            && !matches!(runtime, "nvbind" | "nvidia" | "amd" | "auto")
+        {
+            issues.push(format!(
+                "service '{}' requests unsupported GPU runtime '{}'",
+                service_name, runtime
+            ));
+        }
+        if let Some(isolation) = gpu.isolation_level.as_deref()
+            && !matches!(
+                isolation,
+                "shared" | "exclusive" | "virtual" | "time-sliced"
+            )
+        {
+            issues.push(format!(
+                "service '{}' requests unsupported GPU isolation '{}'",
+                service_name, isolation
+            ));
+        }
+        if gpu.nvidia.is_some() && gpu.amd.is_some() {
+            issues.push(format!(
+                "service '{}' requests both NVIDIA and AMD GPU configs",
+                service_name
+            ));
+        }
+        if let Some(nvbind) = gpu.nvbind.as_ref()
+            && nvbind
+                .devices
+                .as_ref()
+                .is_some_and(|devices| devices.is_empty())
+        {
+            issues.push(format!(
+                "service '{}' has an empty nvbind device list",
+                service_name
+            ));
+        }
+    }
+    issues
+}
+
+fn validate_locked_image_digests(config: &BoltConfig) -> Vec<String> {
+    let Ok(lock) = read_lock(config) else {
+        return vec!["Boltfile.lock is missing or unreadable".to_string()];
+    };
+    lock.services
+        .iter()
+        .filter_map(|(service, locked)| {
+            locked
+                .image
+                .as_ref()
+                .filter(|image| is_tag_based_image_reference(image))
+                .and_then(|image| {
+                    locked.image_digest.is_none().then(|| {
+                        format!(
+                            "service '{}' image '{}' is tag-based without a resolved digest",
+                            service, image
+                        )
+                    })
+                })
+        })
+        .collect()
+}
+
+fn gpu_action_detail(service: &Service) -> Option<String> {
+    let gpu = service_gpu_inspection(service);
+    if !gpu.requested {
+        return None;
+    }
+    let mut parts = Vec::new();
+    if let Some(vendor) = gpu.vendor {
+        parts.push(format!("gpu={vendor}"));
+    } else {
+        parts.push("gpu=requested".to_string());
+    }
+    if let Some(runtime) = gpu.runtime {
+        parts.push(format!("runtime={runtime}"));
+    }
+    if !gpu.devices.is_empty() {
+        parts.push(format!("devices={}", gpu.devices.join(",")));
+    }
+    if let Some(profile) = gpu.profile {
+        parts.push(format!("profile={profile}"));
+    }
+    Some(parts.join(" "))
+}
+
+fn service_gpu_inspection(service: &Service) -> ServiceGpuInspection {
+    let mut inspection = ServiceGpuInspection::default();
+    let Some(gaming) = service.gaming.as_ref() else {
+        return inspection;
+    };
+
+    inspection.requested = gaming.gpu_passthrough || gaming.gpu.is_some();
+    inspection.profile = gaming.performance_profile.clone();
+    if gaming.gpu_passthrough && gaming.gpu.is_none() {
+        inspection
+            .notes
+            .push("gpu_passthrough enabled without detailed GPU config".to_string());
+    }
+
+    let Some(gpu) = gaming.gpu.as_ref() else {
+        return inspection;
+    };
+    inspection.runtime = gpu.runtime.clone();
+    inspection.vendor = if gpu.nvidia.is_some() {
+        Some("nvidia".to_string())
+    } else if gpu.amd.is_some() {
+        Some("amd".to_string())
+    } else if gpu.nvbind.is_some() {
+        Some("nvbind".to_string())
+    } else {
+        None
+    };
+    if let Some(nvbind) = gpu.nvbind.as_ref()
+        && let Some(devices) = nvbind.devices.as_ref()
+    {
+        inspection.devices.extend(devices.clone());
+    }
+    if let Some(nvidia) = gpu.nvidia.as_ref()
+        && let Some(device) = nvidia.device
+    {
+        inspection.devices.push(format!("nvidia:{device}"));
+    }
+    if let Some(amd) = gpu.amd.as_ref()
+        && let Some(device) = amd.device
+    {
+        inspection.devices.push(format!("amd:{device}"));
+    }
+    if inspection.devices.is_empty() && inspection.requested {
+        inspection.devices.push("all".to_string());
+    }
+    inspection
+}
+
+fn validation_message(issues: &[String]) -> String {
+    if issues.is_empty() {
+        "ok".to_string()
+    } else {
+        issues.join("; ")
+    }
+}
+
+fn service_discovery_registry(
+    boltfile: &BoltFile,
+    containers: &[ContainerInfo],
+) -> ServiceDiscoveryRegistry {
     let services = boltfile
         .services
         .iter()
         .map(|(name, service)| {
+            let container_name = service
+                .container_name
+                .clone()
+                .unwrap_or_else(|| service_container_name(&boltfile.project, name));
+            let container = containers.iter().find(|container| {
+                container.name == container_name
+                    || container.names.iter().any(|alias| alias == &container_name)
+            });
             let entry =
                 ServiceDiscoveryEntry {
                     service: name.clone(),
-                    container_name: service
-                        .container_name
-                        .clone()
-                        .unwrap_or_else(|| service_container_name(&boltfile.project, name)),
+                    container_name,
                     dns_name: format!("{name}.{}.bolt", boltfile.project),
                     networks: service.networks.clone().unwrap_or_default(),
                     ports: service.ports.clone().unwrap_or_default(),
@@ -957,8 +1335,13 @@ fn service_discovery_registry(boltfile: &BoltFile) -> ServiceDiscoveryRegistry {
                     } else {
                         "tcp".to_string()
                     },
-                    healthy: true,
-                    address: localhost_ip(),
+                    healthy: container
+                        .map(|container| container.status.contains("running"))
+                        .unwrap_or(false),
+                    address: service_discovery_address(service, container),
+                    address_source: service_discovery_address_source(service, container),
+                    container_id: container.map(|container| container.id.clone()),
+                    status: container.map(|container| container.status.clone()),
                 };
             (name.clone(), entry)
         })
@@ -978,6 +1361,29 @@ fn localhost_ip() -> Ipv4Addr {
     Ipv4Addr::new(127, 0, 0, 1)
 }
 
+fn service_discovery_address(_service: &Service, _container: Option<&ContainerInfo>) -> Ipv4Addr {
+    localhost_ip()
+}
+
+fn service_discovery_address_source(
+    service: &Service,
+    container: Option<&ContainerInfo>,
+) -> String {
+    if service.network_mode.as_deref() == Some("host") {
+        "host-network".to_string()
+    } else if service
+        .ports
+        .as_ref()
+        .is_some_and(|ports| !ports.is_empty())
+    {
+        "published-port-loopback".to_string()
+    } else if container.is_some() {
+        "container-state-no-address".to_string()
+    } else {
+        "configured-fallback".to_string()
+    }
+}
+
 async fn inspect_service(
     config: &BoltConfig,
     runtime: &BoltRuntime,
@@ -993,8 +1399,6 @@ async fn inspect_service(
         .container_name
         .clone()
         .unwrap_or_else(|| service_container_name(&boltfile.project, name));
-    let discovery =
-        read_service_discovery(config).and_then(|registry| registry.services.get(name).cloned());
     let container = runtime
         .list_containers(true)
         .await
@@ -1004,9 +1408,19 @@ async fn inspect_service(
             container.name == container_name
                 || container.names.iter().any(|alias| alias == &container_name)
         });
+    let fallback_containers = container.iter().cloned().collect::<Vec<_>>();
+    let discovery = read_service_discovery(config)
+        .and_then(|registry| registry.services.get(name).cloned())
+        .or_else(|| {
+            service_discovery_registry(&boltfile, &fallback_containers)
+                .services
+                .get(name)
+                .cloned()
+        });
     Ok(ServiceInspection {
         name: name.to_string(),
         container_name,
+        gpu: service_gpu_inspection(&desired),
         desired,
         discovery,
         container,
@@ -1097,6 +1511,9 @@ pub fn print_plan(plan: &ProjectPlan) {
             "  {:?} {:?}.{} - {}",
             action.action, action.resource_type, action.name, action.reason
         );
+        if let Some(detail) = &action.detail {
+            println!("    {}", detail);
+        }
     }
 }
 
@@ -1365,11 +1782,104 @@ mod tests {
             volumes: None,
             snapshots: None,
         };
-        let registry = service_discovery_registry(&boltfile);
+        let registry = service_discovery_registry(&boltfile, &[]);
         assert_eq!(
             registry.services.get("web").unwrap().dns_name,
             "web.demo.bolt"
         );
+        assert!(!registry.services.get("web").unwrap().healthy);
+        assert_eq!(
+            registry.services.get("web").unwrap().address_source,
+            "published-port-loopback"
+        );
+    }
+
+    #[test]
+    fn validation_helpers_report_project_config_issues() {
+        let mut services = std::collections::HashMap::new();
+        services.insert(
+            "web".to_string(),
+            Service {
+                image: Some("nginx:latest".to_string()),
+                ports: Some(vec!["8080:80".to_string()]),
+                volumes: Some(vec!["missing:/data".to_string(), "badmount".to_string()]),
+                networks: Some(vec!["missing-net".to_string()]),
+                ..Service::default()
+            },
+        );
+        services.insert(
+            "api".to_string(),
+            Service {
+                image: Some("api:latest".to_string()),
+                ports: Some(vec!["8080:8080".to_string()]),
+                ..Service::default()
+            },
+        );
+        let mut networks = HashMap::new();
+        networks.insert(
+            "bad".to_string(),
+            Network {
+                driver: "weird".to_string(),
+                driver_opts: None,
+                attachable: None,
+                enable_ipv6: None,
+                internal: None,
+                labels: None,
+                ipam: None,
+                external: None,
+                name: None,
+            },
+        );
+        let boltfile = BoltFile {
+            project: "demo".to_string(),
+            services,
+            networks: Some(networks),
+            volumes: None,
+            snapshots: None,
+        };
+
+        assert!(!validate_service_references(&boltfile).is_empty());
+        assert!(!validate_duplicate_ports(&boltfile).is_empty());
+        assert!(!validate_volume_mounts(&boltfile).is_empty());
+        assert!(!validate_network_drivers(&boltfile).is_empty());
+    }
+
+    #[test]
+    fn digest_pinned_images_are_locked_without_registry_resolution() {
+        let digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let reference = format!("alpine@sha256:{digest}");
+        assert_eq!(
+            digest_from_image_reference(&reference),
+            Some(reference[7..].as_ref())
+        );
+        assert!(!is_tag_based_image_reference(&reference));
+        assert!(is_tag_based_image_reference("alpine:latest"));
+    }
+
+    #[test]
+    fn gpu_inspection_summarizes_requested_devices() {
+        let service = Service {
+            gaming: Some(crate::config::GamingConfig {
+                enabled: true,
+                gpu_passthrough: true,
+                performance_profile: Some("gaming".to_string()),
+                gpu: Some(crate::config::GpuConfig {
+                    runtime: Some("nvbind".to_string()),
+                    nvbind: Some(crate::config::NvbindConfig {
+                        devices: Some(vec!["gpu:0".to_string()]),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            ..Service::default()
+        };
+        let gpu = service_gpu_inspection(&service);
+        assert!(gpu.requested);
+        assert_eq!(gpu.runtime.as_deref(), Some("nvbind"));
+        assert_eq!(gpu.devices, vec!["gpu:0"]);
+        assert!(gpu_action_detail(&service).unwrap().contains("gpu=nvbind"));
     }
 
     #[test]
@@ -1406,12 +1916,14 @@ mod tests {
                     resource_type: ResourceType::Service,
                     name: "db".to_string(),
                     reason: String::new(),
+                    detail: None,
                 },
                 ProjectAction {
                     action: ActionKind::Update,
                     resource_type: ResourceType::Service,
                     name: "web".to_string(),
                     reason: String::new(),
+                    detail: None,
                 },
             ],
             summary: PlanSummary::default(),

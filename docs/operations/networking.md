@@ -93,17 +93,37 @@ ports = ["8080:80", "8443:443"]
 
 ## DNS Resolution
 
-Services can reach each other by name within the same network:
+`bolt apply` writes a local service-discovery registry after Surge has attempted
+to converge the stack. `bolt dns hosts` renders that registry as hosts-style
+entries, and `bolt dns resolve <service|name.project.bolt>` shows the structured
+entry.
 
-```toml
-[services.api]
-environment = { DATABASE_URL = "postgres://db:5432/app" }
-
-[services.db]
-image = "postgres:16"
+```bash
+bolt dns hosts
+bolt dns resolve web.my-app.bolt
 ```
 
-The `api` service can connect to `db` by hostname.
+Entries include:
+
+- `dns_name`: `<service>.<project>.bolt`
+- `protocol`: `tcp` or `quic` based on the configured networks
+- `healthy`: derived from live runtime status when a container exists
+- `address_source`: `host-network`, `published-port-loopback`,
+  `container-state-no-address`, or `configured-fallback`
+
+```json
+{
+  "service": "web",
+  "dns_name": "web.my-app.bolt",
+  "address": "127.0.0.1",
+  "address_source": "published-port-loopback",
+  "healthy": true
+}
+```
+
+Private bridge container IPs are not exposed through public `ContainerInfo` yet,
+so unpublished bridge services are marked as `container-state-no-address` until
+the runtime exports attachment IPs.
 
 ## QUIC Protocol
 
